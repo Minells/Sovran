@@ -1,7 +1,7 @@
 {
   "name": "sovran",
-  "displayName": "SOVRAN — Own Your Intelligence",
-  "description": "An agentic AI coding assistant for the models you run: local, private, or enterprise OpenAI-compatible endpoints. No backend, no telemetry.",
+  "displayName": "Sovran",
+  "description": "Own your intelligence. An agentic AI coding assistant for the models you run: local, self-hosted or behind your company gateway. No backend, no telemetry.",
   "version": "0.1.0",
   "publisher": "minells",
   "license": "MIT",
@@ -38,9 +38,9 @@
     "coding assistant",
     "enterprise"
   ],
-  "icon": "media/icon.png",
+  "icon": "media/brand/icon.png",
   "galleryBanner": {
-    "color": "#14161A",
+    "color": "#0F1012",
     "theme": "dark"
   },
   "main": "./dist/extension.js",
@@ -65,10 +65,19 @@
       "activitybar": [
         {
           "id": "sovran",
-          "title": "SOVRAN",
-          "icon": "media/activity-bar.svg"
+          "title": "Sovran",
+          "icon": "media/brand/sovran-activitybar.svg"
         }
       ]
+    },
+    "icons": {
+      "sovran-logo": {
+        "description": "Sovran logo",
+        "default": {
+          "fontPath": "media/brand/sovran-icons.woff",
+          "fontCharacter": "\\E900"
+        }
+      }
     },
     "views": {
       "sovran": [
@@ -76,7 +85,7 @@
           "type": "webview",
           "id": "sovran.chat",
           "name": "Agent",
-          "icon": "media/activity-bar.svg"
+          "icon": "media/brand/sovran-activitybar.svg"
         }
       ]
     },
@@ -84,65 +93,65 @@
       {
         "command": "sovran.newSession",
         "title": "New Chat",
-        "category": "SOVRAN",
+        "category": "Sovran",
         "icon": "$(add)"
       },
       {
         "command": "sovran.showHistory",
         "title": "Chat History",
-        "category": "SOVRAN",
+        "category": "Sovran",
         "icon": "$(history)"
       },
       {
         "command": "sovran.manageProviders",
         "title": "Manage Model Providers",
-        "category": "SOVRAN",
+        "category": "Sovran",
         "icon": "$(server-environment)"
       },
       {
         "command": "sovran.selectModel",
         "title": "Select Model…",
-        "category": "SOVRAN"
+        "category": "Sovran"
       },
       {
         "command": "sovran.setApiKey",
         "title": "Set Provider API Key…",
-        "category": "SOVRAN"
+        "category": "Sovran"
       },
       {
         "command": "sovran.toggleMode",
         "title": "Toggle Plan / Act Mode",
-        "category": "SOVRAN"
+        "category": "Sovran"
       },
       {
         "command": "sovran.focus",
         "title": "Focus Agent",
-        "category": "SOVRAN"
+        "category": "Sovran"
       },
       {
         "command": "sovran.askAboutSelection",
-        "title": "Ask SOVRAN About Selection",
-        "category": "SOVRAN"
+        "title": "Ask Sovran About Selection",
+        "category": "Sovran"
       },
       {
         "command": "sovran.attachFiles",
         "title": "Add Files to Context…",
-        "category": "SOVRAN"
+        "category": "Sovran"
       },
       {
         "command": "sovran.cancelRun",
         "title": "Stop Agent",
-        "category": "SOVRAN"
+        "category": "Sovran"
       },
       {
         "command": "sovran.showLogs",
         "title": "Show Logs",
-        "category": "SOVRAN"
+        "category": "Sovran"
       },
       {
         "command": "sovran.compact",
         "title": "Compact Conversation",
-        "category": "SOVRAN"
+        "category": "Sovran"
       }
     ],
     "menus": {
@@ -185,7 +194,7 @@
       }
     ],
     "configuration": {
-      "title": "SOVRAN",
+      "title": "Sovran",
       "properties": {
         "sovran.providers": {
           "type": "array",
@@ -401,6 +410,7 @@
     "build": "npm run build:host && npm run build:webview",
     "build:host": "node scripts/build-host.mjs --production",
     "build:webview": "vite build --config webview/vite.config.ts",
+    "build:icons": "fantasticon --config .fantasticonrc.cjs",
     "watch:host": "node scripts/build-host.mjs --watch",
     "watch:webview": "vite build --config webview/vite.config.ts --watch --mode development",
     "dev:webview": "vite --config webview/vite.config.ts",
@@ -445,6 +455,7 @@
     "esbuild": "^0.28.2",
     "eslint": "^10.14.0",
     "eslint-plugin-react-hooks": "^7.1.1",
+    "fantasticon": "^4.1.0",
     "globals": "^17.14.0",
     "jsdom": "^30.1.3",
     "prettier": "^3.9.10",

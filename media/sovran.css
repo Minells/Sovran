@@ -1,0 +1,35 @@
+/*
+ * Sovran brand tokens — the single source of truth for brand colour in the webview.
+ * Loaded by the extension host through webview.asWebviewUri before the UI stylesheet.
+ *
+ * Usage rule: surfaces, text and borders always come from the VS Code theme (--vscode-*).
+ * The accent is rare: primary action, active state, and the dot of the logo. No gradients, glows or coloured shadows.
+ */
+:root {
+  --sovran-ink: #0f1012;
+  --sovran-paper: #f4f2ee;
+  --sovran-accent: #ff5a36;
+  /* Text placed on the accent always uses ink for contrast (≈ 6.4:1). */
+  --sovran-on-accent: var(--sovran-ink);
+  --sovran-accent-hover: color-mix(in srgb, var(--sovran-accent) 86%, var(--sovran-ink));
+  --sovran-muted-on-dark: #8a8f98;
+  --sovran-muted-on-light: #55585e;
+  --sovran-muted: var(--sovran-muted-on-dark);
+}
+
+body.vscode-light,
+body.vscode-high-contrast-light {
+  --sovran-muted: var(--sovran-muted-on-light);
+}
+
+/* Full lockup (symbol + wordmark + motto). Light or dark artwork follows the active theme kind. */
+.sovran-logo {
+  display: block;
+  aspect-ratio: 570 / 132;
+  background: url('brand/sovran-logo-on-dark.svg') left center / contain no-repeat;
+}
+
+body.vscode-light .sovran-logo,
+body.vscode-high-contrast-light .sovran-logo {
+  background-image: url('brand/sovran-logo-on-light.svg');
+}

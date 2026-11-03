@@ -5,7 +5,7 @@ export interface LearnedCapabilities {
   updatedAt: number;
 }
 
-/** Persists what SOVRAN learned about a model at runtime (e.g. "rejects native tools"). */
+/** Persists what Sovran learned about a model at runtime (e.g. "rejects native tools"). */
 export interface CapabilityStore {
   get(key: string): LearnedCapabilities | undefined;
   set(key: string, value: LearnedCapabilities): void;

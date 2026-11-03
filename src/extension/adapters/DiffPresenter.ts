@@ -28,7 +28,7 @@ export class DiffPresenter implements vscode.TextDocumentContentProvider, vscode
     if (!this.contents.has(id)) return;
     const left = isNew ? this.uri(relPath, `${id}:empty`) : vscode.Uri.file(absolutePath);
     const right = this.uri(relPath, id);
-    const title = `${path.basename(relPath)} ${isNew ? '(new file)' : ''} ↔ SOVRAN proposal`.replace(/\s+/g, ' ');
+    const title = `${path.basename(relPath)} ${isNew ? '(new file)' : ''} ↔ Sovran proposal`.replace(/\s+/g, ' ');
     await vscode.commands.executeCommand('vscode.diff', left, right, title, { preview: true, preserveFocus: true });
   }
 

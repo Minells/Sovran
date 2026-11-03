@@ -1,13 +1,19 @@
 import type { ReactNode } from 'react';
 
-/** The SOVRAN mark: a squared "S" drawn on a 3-unit grid, like a segment display on an instrument. */
+/** The Sovran symbol "[•]": brackets follow the theme's text colour; the dot is the brand accent. */
 export function Mark({ size = 16, title }: { size?: number; title?: string }) {
   return (
-    <svg className="sv-mark" width={size} height={size} viewBox="0 0 24 24" role={title ? 'img' : undefined} aria-hidden={title ? undefined : true}>
+    <svg className="sv-mark" width={size} height={size} viewBox="0 0 48 48" role={title ? 'img' : undefined} aria-hidden={title ? undefined : true}>
       {title ? <title>{title}</title> : null}
-      <path fill="currentColor" d="M5 3h14v5h-3V6H8v4h11v11H5v-5h3v2h8v-5H5z" />
+      <path fill="currentColor" d="M6 6H18V12H12V36H18V42H6Z M42 6H30V12H36V36H30V42H42Z" />
+      <circle className="sv-mark__dot" cx="24" cy="24" r="6" />
     </svg>
   );
+}
+
+/** Full lockup (symbol, wordmark, motto). Artwork comes from media/brand via media/sovran.css and follows the theme. */
+export function Logo({ className }: { className?: string }) {
+  return <span className={`sovran-logo${className ? ` ${className}` : ''}`} role="img" aria-label="Sovran. Own your intelligence." />;
 }
 
 export function Icon({ name, spin, label, className }: { name: string; spin?: boolean; label?: string; className?: string }) {

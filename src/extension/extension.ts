@@ -88,7 +88,7 @@ export async function activate(context: vscode.ExtensionContext) {
     command('sovran.compact', () => controller.handle({ type: 'compact' })),
     command('sovran.showLogs', () => logger.show()),
   );
-  logger.info(`SOVRAN activated (VS Code ${vscode.version}).`);
+  logger.info(`Sovran activated (VS Code ${vscode.version}).`);
 }
 
 export function deactivate() {

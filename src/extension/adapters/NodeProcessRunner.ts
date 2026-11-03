@@ -32,7 +32,7 @@ export class OutputBuffer {
   }
 }
 
-/** Mirrors agent command output into a read-only "SOVRAN" terminal so users see it natively. */
+/** Mirrors agent command output into a read-only "Sovran" terminal so users see it natively. */
 export class TerminalMirror implements vscode.Disposable {
   private terminal: vscode.Terminal | undefined;
   private readonly writer = new vscode.EventEmitter<string>();
@@ -52,7 +52,7 @@ export class TerminalMirror implements vscode.Disposable {
         this.terminal = undefined;
       },
     };
-    this.terminal = vscode.window.createTerminal({ name: 'SOVRAN', pty, iconPath: new vscode.ThemeIcon('terminal'), isTransient: true });
+    this.terminal = vscode.window.createTerminal({ name: 'Sovran', pty, iconPath: new vscode.ThemeIcon('terminal'), isTransient: true });
     return this.terminal;
   }
 
