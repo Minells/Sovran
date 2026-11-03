@@ -1,8 +1,8 @@
 /*
- * SOVRAN design system.
- * Layout concept: a single-column instrument panel. The transcript reads like a flight log;
- * the composer is docked at the bottom; mode colour encodes how much authority the agent has.
- * Every colour comes from the active VS Code theme, so light, dark and high-contrast themes are native.
+ * Sovran UI.
+ * Minimal and native: every surface, text and border colour comes from the active VS Code theme.
+ * Brand tokens (--sovran-*) are defined in media/sovran.css. The accent is reserved for the primary action and
+ * for "active" states, always as the dot motif from the logo. No gradients, glows or tinted shadows.
  */
 :root {
   --sv-font: var(--vscode-font-family, system-ui, sans-serif);
@@ -31,20 +31,17 @@
   --sv-code-bg: var(--vscode-textCodeBlock-background, var(--sv-surface));
   --sv-link: var(--vscode-textLink-foreground);
 
-  /* Semantic: authority level, not decoration. */
-  --sv-plan: var(--vscode-charts-blue, #3794ff);
-  --sv-act: var(--vscode-editorWarning-foreground, #cca700);
+  /* Brand accent, with fallbacks for tests and the dev harness. */
+  --sv-accent: var(--sovran-accent, #ff5a36);
+  --sv-on-accent: var(--sovran-on-accent, #0f1012);
+  --sv-accent-hover: var(--sovran-accent-hover, #e0502f);
+  --sv-warn: var(--vscode-editorWarning-foreground, #cca700);
   --sv-ok: var(--vscode-testing-iconPassed, #73c991);
   --sv-err: var(--vscode-errorForeground, #f48771);
   --sv-added: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
   --sv-removed: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
-  --sv-mode: var(--sv-act);
 
   --sv-ease: cubic-bezier(0.2, 0, 0, 1);
-}
-
-[data-mode='plan'] {
-  --sv-mode: var(--sv-plan);
 }
 
 * {
@@ -150,10 +147,10 @@ a {
 }
 
 .sv-wordmark {
-  font-size: var(--sv-text-xs);
-  font-weight: 600;
-  letter-spacing: 0.24em;
-  text-transform: uppercase;
+  font-size: var(--sv-text-sm);
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  text-transform: lowercase;
 }
 
 .sv-mark {
@@ -191,12 +188,13 @@ a {
 }
 
 .sv-btn--primary {
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--sv-accent);
+  color: var(--sv-on-accent);
+  font-weight: 600;
 }
 
 .sv-btn--primary:hover {
-  background: var(--vscode-button-hoverBackground);
+  background: var(--sv-accent-hover);
 }
 
 .sv-btn--ghost {
@@ -285,7 +283,6 @@ a {
 
 .sv-turn__label .sv-wordmark {
   color: var(--sv-fg);
-  letter-spacing: 0.18em;
 }
 
 .sv-reasoning {
@@ -618,8 +615,9 @@ a {
   transition: transform 120ms var(--sv-ease);
 }
 
+/* Done is the quiet default; only failures and "needs you" get colour. */
 .sv-tool[data-status='success'] .sv-tool__icon {
-  color: var(--sv-ok);
+  color: var(--sv-muted);
 }
 
 .sv-tool[data-status='error'] .sv-tool__icon {
@@ -633,12 +631,11 @@ a {
 }
 
 .sv-tool[data-status='running'] .sv-tool__row {
-  background: linear-gradient(90deg, transparent 0%, var(--sv-surface) 50%, transparent 100%) 0 0 / 200% 100%;
-  animation: sv-shimmer 1.4s linear infinite;
+  background: var(--sv-surface);
 }
 
 .sv-tool[data-status='awaiting'] .sv-tool__icon {
-  color: var(--sv-mode);
+  color: var(--sv-accent);
 }
 
 .sv-tool__detail {
@@ -708,9 +705,9 @@ a {
 .sv-approval {
   margin: var(--sv-s1) 0 var(--sv-s2);
   padding: var(--sv-s3);
-  border: 1px solid color-mix(in srgb, var(--sv-mode) 60%, transparent);
+  border: 1px solid var(--sv-border);
   border-radius: var(--sv-radius-lg);
-  background: color-mix(in srgb, var(--sv-mode) 7%, var(--sv-bg));
+  background: var(--sv-surface);
   display: flex;
   flex-direction: column;
   gap: var(--sv-s2);
@@ -725,8 +722,9 @@ a {
 }
 
 .sv-approval__title .codicon {
-  color: var(--sv-mode);
+  color: var(--sv-muted);
 }
+
 
 .sv-approval__command {
   margin: 0;
@@ -747,7 +745,7 @@ a {
 .sv-approval__warnings {
   margin: 0;
   padding-left: 18px;
-  color: var(--sv-act);
+  color: var(--sv-warn);
   font-size: var(--sv-text-sm);
 }
 
@@ -803,15 +801,15 @@ a {
 }
 
 .sv-run[data-phase='awaiting_approval'] .sv-run__label strong {
-  color: var(--sv-mode);
+  font-weight: 600;
 }
 
 .sv-pulse {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--sv-mode);
-  animation: sv-pulse 1.2s ease-in-out infinite;
+  background: var(--sv-accent);
+  animation: sv-pulse 1.6s ease-in-out infinite;
 }
 
 /* ---------------------------------------------------------------- composer */
@@ -821,14 +819,14 @@ a {
 }
 
 .sv-composer__box {
-  border: 1px solid color-mix(in srgb, var(--sv-mode) 40%, var(--vscode-input-border, var(--sv-border)));
+  border: 1px solid var(--vscode-input-border, var(--sv-border));
   border-radius: var(--sv-radius-lg);
   background: var(--vscode-input-background);
   transition: border-color 120ms var(--sv-ease);
 }
 
 .sv-composer__box:focus-within {
-  border-color: var(--sv-mode);
+  border-color: var(--sv-focus);
 }
 
 .sv-chips {
@@ -924,14 +922,24 @@ a {
   cursor: pointer;
 }
 
-.sv-segment button[aria-checked='true'][data-value='plan'] {
-  background: color-mix(in srgb, var(--sv-plan) 20%, transparent);
-  color: var(--sv-plan);
+.sv-segment button[aria-checked='true'] {
+  background: var(--sv-bg);
+  color: var(--sv-fg);
+  box-shadow: 0 0 0 1px var(--sv-border);
 }
 
-.sv-segment button[aria-checked='true'][data-value='act'] {
-  background: color-mix(in srgb, var(--sv-act) 20%, transparent);
-  color: var(--sv-act);
+/* The logo's dot marks the active mode. */
+.sv-segment button[aria-checked='true']::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  margin-left: 2px;
+  border-radius: 50%;
+  background: var(--sv-accent);
+}
+
+.sv-segment button:not([aria-checked='true']):hover {
+  color: var(--sv-fg);
 }
 
 .sv-model {
@@ -968,17 +976,19 @@ a {
   height: 26px;
   border: 0;
   border-radius: var(--sv-radius);
-  background: var(--vscode-button-background);
-  color: var(--vscode-button-foreground);
+  background: var(--sv-accent);
+  color: var(--sv-on-accent);
   cursor: pointer;
+  transition: background-color 120ms var(--sv-ease), color 120ms var(--sv-ease);
 }
 
 .sv-send:hover {
-  background: var(--vscode-button-hoverBackground);
+  background: var(--sv-accent-hover);
 }
 
 .sv-send:disabled {
-  opacity: 0.4;
+  background: var(--sv-surface-strong);
+  color: var(--sv-muted);
   cursor: default;
 }
 
@@ -1028,8 +1038,7 @@ kbd {
 }
 
 .sv-brand .sv-wordmark {
-  font-size: var(--sv-text-md);
-  letter-spacing: 0.32em;
+  font-size: var(--sv-text-lg);
 }
 
 .sv-tagline {
@@ -1049,18 +1058,18 @@ kbd {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--sv-ok);
+  background: var(--sv-accent);
   flex: none;
 }
 
 .sv-dot--warn {
-  background: var(--sv-act);
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--sv-warn);
 }
 
 .sv-section-label {
+  font-family: var(--sv-mono);
   font-size: var(--sv-text-xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
   color: var(--sv-muted);
   margin: 0;
 }
@@ -1292,7 +1301,7 @@ kbd {
 }
 
 .sv-badge--warn {
-  color: var(--sv-act);
+  color: var(--sv-warn);
 }
 
 .sv-test {
@@ -1424,7 +1433,7 @@ kbd {
 }
 
 .sv-notice[data-level='warning'] .codicon:first-child {
-  color: var(--sv-act);
+  color: var(--sv-warn);
 }
 
 .sv-notice[data-level='error'] .codicon:first-child {
@@ -1432,7 +1441,7 @@ kbd {
 }
 
 .sv-notice[data-level='info'] .codicon:first-child {
-  color: var(--sv-plan);
+  color: var(--sv-muted);
 }
 
 .sv-banner {
@@ -1446,7 +1455,7 @@ kbd {
 }
 
 .sv-banner .codicon {
-  color: var(--sv-plan);
+  color: var(--sv-muted);
   margin-top: 2px;
 }
 
@@ -1455,22 +1464,13 @@ kbd {
 @keyframes sv-enter {
   from {
     opacity: 0;
-    transform: translateY(3px);
+    transform: translateY(2px);
   }
 }
 
 @keyframes sv-caret {
   to {
     visibility: hidden;
-  }
-}
-
-@keyframes sv-shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -100% 0;
   }
 }
 
@@ -1611,7 +1611,7 @@ body.vscode-high-contrast .sv-code {
 }
 
 .sv-meter[data-level='mid'] .sv-meter__bar span {
-  background: var(--sv-act);
+  background: var(--sv-warn);
 }
 
 .sv-meter[data-level='high'] {
@@ -1677,4 +1677,111 @@ body.vscode-high-contrast .sv-code {
   padding: var(--sv-s1) var(--sv-s2);
   color: var(--sv-muted);
   font-size: var(--sv-text-sm);
+}
+
+/* ---------------------------------------------------------------- brand refresh */
+
+.sv-mark__dot {
+  fill: var(--sv-accent);
+}
+
+.sv-hero-logo {
+  width: min(220px, 70%);
+}
+
+.sv-brand {
+  padding-bottom: var(--sv-s1);
+}
+
+/* Readable line length when the view is wide (secondary sidebar, editor area). */
+.sv-transcript > * {
+  width: 100%;
+  max-width: 780px;
+  margin-inline: auto;
+}
+
+.sv-transcript-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sv-jump {
+  position: absolute;
+  left: 50%;
+  bottom: var(--sv-s3);
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 var(--sv-s3);
+  border: 1px solid var(--sv-border);
+  border-radius: 12px;
+  background: var(--vscode-editorWidget-background, var(--sv-bg));
+  color: var(--sv-fg);
+  font-size: var(--sv-text-xs);
+  cursor: pointer;
+  animation: sv-enter 120ms var(--sv-ease);
+}
+
+.sv-jump:hover {
+  background: var(--sv-hover);
+}
+
+.sv-jump[data-attention='true']::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sv-accent);
+}
+
+.sv-explore .sv-tool__icon {
+  color: var(--sv-muted);
+}
+
+.sv-explore__summary {
+  color: var(--sv-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-composer__hint {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sv-s3);
+  padding: 6px 2px 0;
+  font-family: var(--sv-mono);
+  font-size: 10.5px;
+  color: var(--sv-muted);
+  animation: sv-fade 160ms var(--sv-ease);
+}
+
+.sv-history-item[aria-current='true'] .sv-history-item__title::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--sv-accent);
+  vertical-align: middle;
+}
+
+.sv-history-item[aria-current='true'] {
+  background: transparent;
+}
+
+.sv-starter span {
+  overflow-wrap: anywhere;
+}
+
+@keyframes sv-fade {
+  from {
+    opacity: 0;
+  }
 }

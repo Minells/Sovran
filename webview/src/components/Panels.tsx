@@ -3,18 +3,14 @@ import type { ProviderInput, ProviderView, SessionSummary, ToolMode } from '../.
 import { dayGroup, relativeTime } from '../lib/format';
 import { useStore } from '../state/store';
 import { post } from '../vscode';
-import { Button, Icon, IconButton, Mark } from './primitives';
+import { Button, Icon, IconButton, Logo } from './primitives';
 
 // ------------------------------------------------------------------------------------- brand
 
 function Brand() {
   return (
     <div className="sv-brand">
-      <Mark size={28} />
-      <div className="sv-brand__text">
-        <span className="sv-wordmark">Sovran</span>
-        <span className="sv-tagline">Own your intelligence.</span>
-      </div>
+      <Logo className="sv-hero-logo" />
     </div>
   );
 }
@@ -62,7 +58,7 @@ export function EmptyState() {
       {!app.workspace.hasFolder ? (
         <p className="sv-fineprint">
           <Icon name="folder" />
-          Open a folder so SOVRAN can read and edit your project.
+          Open a folder so Sovran can read and edit your project.
         </p>
       ) : null}
     </div>
@@ -94,7 +90,7 @@ export function Onboarding() {
       <div>
         <h2 style={{ margin: '0 0 4px', fontSize: 'var(--sv-text-md)' }}>Connect a model you control</h2>
         <p className="sv-tagline" style={{ margin: 0 }}>
-          SOVRAN talks directly to OpenAI-compatible endpoints on your machine or your network. There is no SOVRAN server in between.
+          Sovran talks directly to OpenAI-compatible endpoints on your machine or your network. There is no Sovran server in between.
         </p>
       </div>
       <div className="sv-presets" role="list">
@@ -181,7 +177,7 @@ export function ProviderForm({ initial, onDone }: { initial: Partial<ProviderInp
       <div className="sv-field">
         <label htmlFor="sv-p-url">Base URL</label>
         <input id="sv-p-url" value={baseUrl} placeholder="https://llm.internal.example/v1" onChange={(e) => setBaseUrl(e.target.value)} spellCheck={false} />
-        {touched && urlError ? <span className="sv-field__error">{urlError}</span> : <span className="sv-field__help">Usually ends in /v1. SOVRAN calls /chat/completions and /models.</span>}
+        {touched && urlError ? <span className="sv-field__error">{urlError}</span> : <span className="sv-field__help">Usually ends in /v1. Sovran calls /chat/completions and /models.</span>}
       </div>
       <div className="sv-field">
         <fieldset>
@@ -312,7 +308,7 @@ function ProviderCard({ p, onEdit }: { p: ProviderView; onEdit: () => void }) {
         <span className="sv-badge">
           {p.models.length} model{p.models.length === 1 ? '' : 's'}
         </span>
-        {learnedPrompted ? <span className="sv-badge" title="These models rejected native tool calling; SOVRAN uses prompted tools">prompted tools ×{learnedPrompted}</span> : null}
+        {learnedPrompted ? <span className="sv-badge" title="These models rejected native tool calling; Sovran uses prompted tools">prompted tools ×{learnedPrompted}</span> : null}
       </div>
       {test ? (
         <div className={`sv-test ${test.ok ? 'sv-test--ok' : 'sv-test--err'}`} role="status">

@@ -49,7 +49,7 @@ export interface HostLogger extends Logger, vscode.Disposable {
 }
 
 export function createLogger(): HostLogger {
-  const channel = vscode.window.createOutputChannel('SOVRAN', { log: true });
+  const channel = vscode.window.createOutputChannel('Sovran', { log: true });
   const secrets = new Set<string>();
   const clean = (m: string) => redact(m, [...secrets]);
   return {
@@ -68,16 +68,24 @@ export function createLogger(): HostLogger {
 export class SovranStatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem('sovran.status', vscode.StatusBarAlignment.Right, 100);
   constructor() {
-    this.item.name = 'SOVRAN';
+    this.item.name = 'Sovran';
     this.item.command = 'sovran.selectModel';
-    this.update({ model: null, mode: 'act', running: false });
+    this.update({ model: null, location: null, endpoint: null, mode: 'act', running: false });
     this.item.show();
   }
-  update(s: { model: string | null; mode: 'plan' | 'act'; running: boolean }) {
-    const icon = s.running ? '$(loading~spin)' : s.mode === 'plan' ? '$(eye)' : '$(edit)';
-    this.item.text = `${icon} ${s.model ?? 'No model'}`;
+  /** Text format: `$(sovran-logo) sovran · <model> · <where requests go>`. */
+  update(s: { model: string | null; location: string | null; endpoint: string | null; mode: 'plan' | 'act'; running: boolean }) {
+    const icon = s.running ? '$(loading~spin)' : '$(sovran-logo)';
+    this.item.text = [`${icon} sovran`, s.model ?? 'no model', ...(s.model && s.location ? [s.location] : [])].join(' · ');
     const tip = new vscode.MarkdownString(
-      `**SOVRAN** · ${s.mode === 'plan' ? 'Plan (read-only)' : 'Act'}\n\nModel: ${s.model ?? 'none selected'}\n\nClick to change model.`,
+      [
+        `**Sovran** · ${s.mode === 'plan' ? 'Plan mode (read-only)' : 'Act mode'}`,
+        `Model: ${s.model ?? 'none selected'}`,
+        s.endpoint ? `Endpoint: \`${s.endpoint}\`` : '',
+        'Click to change model.',
+      ]
+        .filter(Boolean)
+        .join('\n\n'),
     );
     this.item.tooltip = tip;
     this.item.backgroundColor = s.model ? undefined : new vscode.ThemeColor('statusBarItem.warningBackground');

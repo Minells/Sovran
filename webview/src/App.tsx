@@ -51,18 +51,18 @@ function ChatView() {
   return (
     <>
       <header className="sv-header">
-        <Mark size={14} />
+        <Mark size={16} />
         <SessionTitle />
       </header>
       {!app.workspace.trusted ? (
         <div className="sv-banner" role="note">
           <i className="codicon codicon-shield" aria-hidden="true" />
-          <span>Restricted Mode: SOVRAN can read and plan, but cannot edit files or run commands until you trust this workspace.</span>
+          <span>Restricted Mode: Sovran can read and plan, but cannot edit files or run commands until you trust this workspace.</span>
         </div>
       ) : null}
       <main className="sv-main">
         {messages.length ? (
-          <Transcript messages={messages} run={app.run} />
+          <Transcript key={app.session?.id} messages={messages} run={app.run} />
         ) : (
           <div className="sv-transcript">
             <EmptyState />
@@ -79,7 +79,7 @@ function ChatView() {
 function LiveAnnouncer() {
   const { app } = useStore();
   const phase = app.run?.activity.phase;
-  const text = !app.run ? '' : phase === 'awaiting_approval' ? 'SOVRAN is waiting for your approval.' : phase === 'running' ? `SOVRAN is ${app.run.activity.label}.` : 'SOVRAN is working.';
+  const text = !app.run ? '' : phase === 'awaiting_approval' ? 'Sovran is waiting for your approval.' : phase === 'running' ? `Sovran is ${app.run.activity.label}.` : 'Sovran is working.';
   return (
     <div className="sv-sr-only" aria-live="polite">
       {text}

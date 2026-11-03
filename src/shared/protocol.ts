@@ -16,7 +16,7 @@ export interface ModelView {
   name?: string;
   contextWindow?: number;
   toolMode: ToolMode;
-  /** What SOVRAN learned at runtime (e.g. downgraded to prompted tools). */
+  /** What Sovran learned at runtime (e.g. downgraded to prompted tools). */
   learnedToolMode?: 'native' | 'prompted';
 }
 

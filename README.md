@@ -1,16 +1,14 @@
 <p align="center">
-  <img src="media/icon.png" width="96" height="96" alt="SOVRAN">
+  <img src="media/brand/sovran-banner-dark.png" alt="Sovran — Own your intelligence.">
 </p>
 
-<h1 align="center">SOVRAN</h1>
-<p align="center"><strong>Own Your Intelligence.</strong><br>
-An agentic AI coding assistant for VS Code that runs on the models <em>you</em> control:<br>
+<p align="center">An agentic AI coding assistant for VS Code that runs on the models <em>you</em> control:<br>
 local, self-hosted, or behind your company's AI gateway.</p>
 
 <p align="center">
-  <img src="media/screenshots/conversation-dark.png" width="380" alt="SOVRAN proposing an edit and waiting for approval">
+  <img src="media/screenshots/conversation-dark.png" width="380" alt="Sovran proposing an edit and waiting for approval">
   &nbsp;
-  <img src="media/screenshots/conversation-light.png" width="380" alt="SOVRAN in a light theme">
+  <img src="media/screenshots/conversation-light.png" width="380" alt="Sovran in a light theme">
 </p>
 
 > **Status: preview (0.1).** The core engine, tools, UI and security controls are implemented and covered by automated
@@ -18,18 +16,18 @@ local, self-hosted, or behind your company's AI gateway.</p>
 
 ---
 
-## Why SOVRAN
+## Why Sovran
 
-Most AI coding tools assume a specific vendor, a cloud account or a separate editor. SOVRAN assumes none of that.
+Most AI coding tools assume a specific vendor, a cloud account or a separate editor. Sovran assumes none of that.
 
-- **Your models.** SOVRAN works with any OpenAI-compatible Chat Completions endpoint, including Ollama, LM Studio, vLLM, LiteLLM, llama.cpp, LocalAI and internal gateways.
-- **Your infrastructure.** The extension talks directly to your endpoint. There is no SOVRAN server, no account and no telemetry.
+- **Your models.** Sovran works with any OpenAI-compatible Chat Completions endpoint, including Ollama, LM Studio, vLLM, LiteLLM, llama.cpp, LocalAI and internal gateways.
+- **Your infrastructure.** The extension talks directly to your endpoint. There is no Sovran server, no account and no telemetry.
 - **Your code.** Nothing leaves your machine except the requests you send to endpoints you configured.
 - **Your control.** Every file change is previewed in VS Code's diff editor, and every command needs your approval. Plan mode is read-only by construction, not by prompt.
 
 ## Features
 
-**A real agent, not a chat box.** SOVRAN runs a full agent loop:
+**A real agent, not a chat box.** Sovran runs a full agent loop:
 
 1. It reads and searches the workspace.
 2. It proposes edits and runs commands.
@@ -61,15 +59,15 @@ It works through ten built-in tools:
 
 The current mode is always visible: blue means read-only, amber means the agent can change things.
 
-**Built for imperfect servers.** "OpenAI-compatible" covers a wide range of behavior, so SOVRAN detects what each model supports:
+**Built for imperfect servers.** "OpenAI-compatible" covers a wide range of behavior, so Sovran detects what each model supports:
 
-- **Rejected tool definitions:** when a server rejects native tool calling, SOVRAN switches that model to a prompted tool protocol automatically and remembers it.
+- **Rejected tool definitions:** when a server rejects native tool calling, Sovran switches that model to a prompted tool protocol automatically and remembers it.
 - **Unusual response formats:** it handles servers that ignore streaming and models that emit `<tool_call>` or `<think>` tags as text.
 - **Reasoning output:** reasoning streams (`reasoning_content`) are shown separately and never sent back to the model.
 
 Errors tell you what went wrong and how to fix it.
 
-**Native to VS Code.** Proposed edits open in the native diff editor and are applied as undoable edits (Ctrl+Z works). Commands are mirrored in a SOVRAN terminal. Other native touches:
+**Native to VS Code.** Proposed edits open in the native diff editor and are applied as undoable edits (Ctrl+Z works). Commands are mirrored in a Sovran terminal. Other native touches:
 
 - The model picker is a Quick Pick, and the status bar shows the model and mode.
 - The UI follows your theme, including high contrast.
@@ -79,11 +77,11 @@ Errors tell you what went wrong and how to fix it.
 
 **Conversations that persist.** Chats are saved per workspace and restored after restart, and you can search, rename or delete them.
 
-**Mistakes are cheap to undo.** Every response that changed files ends with a footer: *2 files changed · Undo changes*. Undo puts every file back the way it was before that response and deletes files the agent created. If you edited a file afterwards, SOVRAN asks before overwriting it.
+**Mistakes are cheap to undo.** Every response that changed files ends with a footer: *2 files changed · Undo changes*. Undo puts every file back the way it was before that response and deletes files the agent created. If you edited a file afterwards, Sovran asks before overwriting it.
 - **Retry** generates a response again.
 - **Edit** (pencil on any message) rewrites a message and continues from there, and can undo the file changes of the discarded responses too.
 
-**You can see the context window.** A meter in the composer shows how full the model's context is. When it fills up, SOVRAN **summarizes older messages** instead of silently forgetting them. The full transcript stays visible to you. You can also summarize on demand with `/compact` or by clicking the meter.
+**You can see the context window.** A meter in the composer shows how full the model's context is. When it fills up, Sovran **summarizes older messages** instead of silently forgetting them. The full transcript stays visible to you. You can also summarize on demand with `/compact` or by clicking the meter.
 
 **`@` files and `/` commands.**
 - **`@`:** type `@` to fuzzy-find a workspace file and attach it.
@@ -96,7 +94,7 @@ Errors tell you what went wrong and how to fix it.
 
 ## Installation
 
-From the VS Code Marketplace (once published): search for **SOVRAN** in the Extensions view.
+From the VS Code Marketplace (once published): search for **Sovran** in the Extensions view.
 
 From a VSIX file:
 
@@ -108,7 +106,7 @@ Requires VS Code 1.95 or later.
 
 ## Quick start
 
-1. Click the **SOVRAN** icon in the Activity Bar.
+1. Click the **Sovran** icon in the Activity Bar.
 2. Pick a preset (Ollama, LM Studio, vLLM, LiteLLM) or **Enterprise gateway**, and adjust the URL.
 3. If the endpoint needs a key, VS Code asks for it in a secure input. Keys are stored in VS Code Secret Storage, never in settings.
 4. Click **Test connection**, add a discovered model, and start a chat.
@@ -151,7 +149,7 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
 
 | Field | Meaning |
 |---|---|
-| `contextWindow` | Tokens the model accepts. SOVRAN never guesses; the default is 32 768 |
+| `contextWindow` | Tokens the model accepts. Sovran never guesses; the default is 32 768 |
 | `maxOutputTokens` | Reserved for the reply (default 4 096) |
 | `toolMode` | `auto` (detect, the default), `native`, `prompted` or `none` |
 | `temperature` | Sent only when set |
@@ -168,7 +166,7 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
 | `sovran.approvals.allowedCommands` | `[]` | Commands that run without asking, for example `npm test`. Never applies to commands that contain shell operators |
 | `sovran.security.protectedPaths` | `.env`, keys, `.git/` and others | Always ask before reading or changing these. Their contents are excluded from search |
 | `sovran.terminal.timeoutSeconds` | `120` | Command timeout |
-| `sovran.terminal.mirrorToTerminal` | `true` | Show command output in a SOVRAN terminal |
+| `sovran.terminal.mirrorToTerminal` | `true` | Show command output in a Sovran terminal |
 | `sovran.context.includeActiveEditor` | `true` | Attach the active file or selection by default |
 | `sovran.context.maxToolResultChars` | `20000` | Size cap for each tool result sent to the model |
 | `sovran.context.autoCompact` | `true` | Summarize older messages when the context window is full |
@@ -178,12 +176,12 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
 
 ## Security
 
-SOVRAN executes actions on your behalf, so its safety controls are enforced in code rather than in the prompt:
+Sovran executes actions on your behalf, so its safety controls are enforced in code rather than in the prompt:
 
 - **Credentials:** API keys stay in Secret Storage and in the extension host. They are never sent to the UI and are redacted from logs and errors.
 - **Approvals:** every file write is reviewed in a diff and checked for changes made while it waited. Every command is previewed, and the preview warns about risky patterns and invisible characters.
 - **Workspace boundary:** paths are confined to the workspace, including through symlinks. Commands run inside the workspace with a timeout and can be cancelled.
-- **Untrusted repositories:** a cloned repository cannot change your providers, approval policy or allow-list, because those settings are read from user scope only. In Restricted Mode, SOVRAN stays in Plan mode.
+- **Untrusted repositories:** a cloned repository cannot change your providers, approval policy or allow-list, because those settings are read from user scope only. In Restricted Mode, Sovran stays in Plan mode.
 
 Read [SECURITY.md](SECURITY.md) for the threat model and known limitations. Choose endpoints you trust: everything the agent reads is sent to the model you configured.
 
@@ -211,4 +209,4 @@ Documentation: [Architecture](docs/ARCHITECTURE.md) · [Product requirements](do
 
 ## License
 
-SOVRAN is released under the [MIT License](LICENSE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Sovran is released under the [MIT License](LICENSE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

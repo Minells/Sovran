@@ -127,7 +127,7 @@ export class AgentRunner {
           o.emit({
             type: 'notice',
             level: 'info',
-            message: `${o.model.name ?? o.model.id} rejected native tool calling. SOVRAN switched this model to prompted tools and retried.`,
+            message: `${o.model.name ?? o.model.id} rejected native tool calling. Sovran switched this model to prompted tools and retried.`,
           });
           iteration--;
           continue;

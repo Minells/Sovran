@@ -64,7 +64,7 @@ export function errorFromResponse(status: number, body: string, ctx: ErrorContex
   const message = redact(extractErrorMessage(body), ctx.secrets);
   const detail = `HTTP ${status}: ${message}`;
   if (status === 401 || status === 403) {
-    return new ProviderError('auth', detail, 'Check the API key (SOVRAN: Set Provider API Key…) and the auth type.', status);
+    return new ProviderError('auth', detail, 'Check the API key (Sovran: Set Provider API Key…) and the auth type.', status);
   }
   if (status === 404) {
     const hint = /\/models$/.test(ctx.url)
@@ -124,7 +124,7 @@ export function errorFromException(e: unknown, ctx: ErrorContext & { timedOut?: 
     return new ProviderError(
       'tls',
       `TLS certificate error (${code}) connecting to ${origin(ctx.url)}.`,
-      'If your organization uses an internal CA, add it to the operating system trust store. SOVRAN never disables certificate checks.',
+      'If your organization uses an internal CA, add it to the operating system trust store. Sovran never disables certificate checks.',
     );
   }
   switch (code) {

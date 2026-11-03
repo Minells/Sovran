@@ -109,6 +109,7 @@ export function Composer() {
   const [caret, setCaret] = useState(0);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
   const requestSeq = useRef(0);
   const [requestId, setRequestId] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -219,8 +220,9 @@ export function Composer() {
   const placeholder = !app.selected
     ? 'Add a model provider to start'
     : app.mode === 'plan'
-      ? 'Ask or plan · @ files · / commands'
-      : 'Give SOVRAN a task · @ files · / commands';
+      ? 'Ask, explore or plan (read-only)'
+      : 'Ask Sovran, or give it a task';
+  const altKey = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌥' : 'Alt+';
   const listId = 'sv-suggest';
 
   return (
@@ -280,7 +282,7 @@ export function Composer() {
           rows={2}
           value={text}
           placeholder={placeholder}
-          aria-label="Message SOVRAN"
+          aria-label="Message Sovran"
           role="combobox"
           aria-autocomplete="list"
           aria-expanded={open && items.length > 0}
@@ -292,6 +294,8 @@ export function Composer() {
             setActive(0);
           }}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           onKeyDown={onKeyDown}
         />
         <div className="sv-composer__bar">
@@ -322,6 +326,30 @@ export function Composer() {
           )}
         </div>
       </div>
+      {focused && !open ? (
+        <div className="sv-composer__hint" aria-hidden="true">
+          <span>
+            <kbd>↵</kbd> send
+          </span>
+          <span>
+            <kbd>⇧↵</kbd> new line
+          </span>
+          <span>
+            <kbd>@</kbd> files
+          </span>
+          <span>
+            <kbd>/</kbd> commands
+          </span>
+          <span>
+            <kbd>{altKey}M</kbd> mode
+          </span>
+          {running ? (
+            <span>
+              <kbd>Esc</kbd> stop
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

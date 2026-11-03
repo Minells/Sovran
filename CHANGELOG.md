@@ -5,7 +5,15 @@ pre-releases and even minor versions are stable releases.
 
 ## Unreleased
 
+### Changed
+- **New Sovran brand**: `[•]` symbol, lowercase wordmark and the motto "Own your intelligence.". New Marketplace icon and banner, and an Activity Bar icon in `currentColor`.
+- **Minimal restyle**: surfaces, text and borders follow the VS Code theme. A single accent (`#FF5A36`) marks the primary action and active states as the logo's dot. Gradients and the separate Plan/Act colors are removed.
+- **Status bar**: shows `sovran · <model> · <local | host>` with the logo glyph, so it is clear where requests go.
+
 ### Added
+- **Exploration rows** group consecutive file reads and searches (*Explored · 3 files read, 1 search*).
+- **"Latest" / "Approval needed" pill** appears when you scroll away from the end of a running conversation.
+- **Keyboard hints** appear under the composer while it is focused.
 - **Undo changes.** Each response that edits files records a checkpoint, and one click restores the pre-response state. The prompt protects files you changed afterwards, and the restore is itself undoable.
 - **Retry, edit and resend.** Rewind the conversation, optionally undoing file changes from the discarded responses.
 - **Conversation compaction.** Older turns are summarized when the context is full (`sovran.context.autoCompact`), or on demand with `/compact` or the context meter.

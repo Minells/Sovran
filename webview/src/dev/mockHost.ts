@@ -3,6 +3,7 @@
  * Simulates the extension host and a VS Code theme so the UI can be built, reviewed and
  * screenshotted in a browser:  npm run dev:webview → http://localhost:5173/?scenario=conversation&theme=dark
  */
+import '../../../media/sovran.css';
 import type { AppState, HostMessage, SessionMessage } from '../../../src/shared/protocol';
 import { onPost } from '../vscode';
 

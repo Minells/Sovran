@@ -55,19 +55,19 @@ describe('App', () => {
   it('handshakes with the host and renders the empty state with starters', () => {
     mount(baseState());
     expect(sent[0]).toEqual({ type: 'ready' });
-    expect(screen.getByText('Own your intelligence.')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: /Own your intelligence/ })).toBeInTheDocument();
     expect(screen.getByText('Act mode · you approve every change')).toBeInTheDocument();
   });
 
   it('shows onboarding without a composer when no provider exists', () => {
     mount(baseState({ providers: [], selected: null }));
     expect(screen.getByText('Connect a model you control')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Message SOVRAN')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Message Sovran')).not.toBeInTheDocument();
   });
 
   it('sends on Enter, keeps Shift+Enter as newline, and clears the draft', async () => {
     mount(baseState());
-    const box = screen.getByLabelText('Message SOVRAN');
+    const box = screen.getByLabelText('Message Sovran');
     await userEvent.type(box, 'first line{Shift>}{Enter}{/Shift}second');
     expect(box).toHaveValue('first line\nsecond');
     await userEvent.type(box, '{Enter}');
@@ -128,7 +128,7 @@ describe('App', () => {
     mount(baseState());
     await userEvent.click(screen.getByRole('radio', { name: /Plan/ }));
     expect(sent).toContainEqual({ type: 'setMode', mode: 'plan' });
-    fireEvent.keyDown(screen.getByLabelText('Message SOVRAN'), { key: 'm', altKey: true });
+    fireEvent.keyDown(screen.getByLabelText('Message Sovran'), { key: 'm', altKey: true });
     expect(sent.filter((m) => m.type === 'setMode')).toHaveLength(2);
     host({ type: 'patch', patch: { workspace: { name: 'w', trusted: false, hasFolder: true }, mode: 'plan' } });
     expect(screen.getByRole('radio', { name: /Act/ })).toBeDisabled();
@@ -138,7 +138,7 @@ describe('App', () => {
   it('shows a stop button while running and cancels with Escape', () => {
     mount(baseState({ run: { sessionId: 's', iteration: 2, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'thinking', label: 'Thinking' } } }));
     expect(screen.getByLabelText('Stop the agent')).toBeInTheDocument();
-    fireEvent.keyDown(screen.getByLabelText('Message SOVRAN'), { key: 'Escape' });
+    fireEvent.keyDown(screen.getByLabelText('Message Sovran'), { key: 'Escape' });
     expect(sent).toContainEqual({ type: 'cancel' });
   });
 
@@ -209,7 +209,7 @@ describe('v0.2 recovery & productivity', () => {
 
   it('completes slash commands from the popup with the keyboard', async () => {
     mount(baseState());
-    const box = screen.getByLabelText('Message SOVRAN');
+    const box = screen.getByLabelText('Message Sovran');
     await userEvent.type(box, '/re');
     const list = screen.getByRole('listbox', { name: 'Commands' });
     expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('/review')]);
@@ -220,7 +220,7 @@ describe('v0.2 recovery & productivity', () => {
 
   it('suggests files for @-mentions and attaches the chosen one', async () => {
     mount(baseState());
-    const box = screen.getByLabelText('Message SOVRAN');
+    const box = screen.getByLabelText('Message Sovran');
     await userEvent.type(box, 'look at @sess');
     await waitFor(() => expect(sent.some((m) => m.type === 'suggestFiles')).toBe(true));
     const req = [...sent].reverse().find((m) => m.type === 'suggestFiles') as Extract<WebviewMessage, { type: 'suggestFiles' }>;
@@ -241,6 +241,42 @@ describe('v0.2 recovery & productivity', () => {
       }),
     );
     expect(screen.getByTitle(/Plan model · Local · thinker/)).toBeInTheDocument();
+  });
+});
+
+describe('brand refresh UX', () => {
+  it('folds consecutive successful reads into one exploration row', async () => {
+    const read = (id: string, name: string, args: string) => [
+      { role: 'assistant', id: `a${id}`, content: '', createdAt: 0, toolCalls: [{ id: `c${id}`, name, arguments: args }] },
+      { role: 'tool', id: `t${id}`, toolCallId: `c${id}`, toolName: name, content: 'ok', status: 'success', createdAt: 0 },
+    ];
+    mount(
+      baseState({
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            { role: 'user', id: 'u', content: 'go', createdAt: 0 },
+            ...read('1', 'read_file', '{"path":"src/a.ts"}'),
+            ...read('2', 'read_file', '{"path":"src/b.ts"}'),
+            ...read('3', 'search_files', '{"query":"TTL"}'),
+            { role: 'assistant', id: 'a4', content: 'Found it.', createdAt: 0 },
+          ] as never,
+        },
+      }),
+    );
+    const row = screen.getByRole('button', { name: /Explored/ });
+    expect(row).toHaveTextContent('2 files read, 1 search');
+    expect(screen.queryByText('src/a.ts')).not.toBeInTheDocument();
+    await userEvent.click(row);
+    expect(screen.getByText('src/a.ts')).toBeInTheDocument();
+  });
+
+  it('shows keyboard hints only while the composer is focused', async () => {
+    mount(baseState());
+    expect(screen.queryByText('commands')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText('Message Sovran'));
+    expect(screen.getByText('commands')).toBeInTheDocument();
   });
 });
 

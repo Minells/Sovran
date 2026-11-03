@@ -30,7 +30,7 @@ async function test(name, fn) {
 exports.run = async function run() {
   const ext = vscode.extensions.all.find((e) => e.packageJSON.name === 'sovran');
   await test('extension is present and activates', async () => {
-    assert.ok(ext, 'SOVRAN extension not found');
+    assert.ok(ext, 'Sovran extension not found');
     await ext.activate();
     assert.ok(ext.isActive);
   });

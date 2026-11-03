@@ -2,8 +2,8 @@
 !dist/extension.js
 !dist/extension.js.LEGAL.txt
 !dist/webview/**
-!media/icon.png
-!media/activity-bar.svg
+!media/brand/**
+!media/sovran.css
 !package.json
 !README.md
 !CHANGELOG.md

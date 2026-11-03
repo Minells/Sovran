@@ -79,6 +79,17 @@ interface ActiveRun {
   view: RunView;
 }
 
+/** Where requests go, shown in the status bar: "local" for loopback endpoints, otherwise the host name. */
+export function endpointLocation(baseUrl: string | undefined): string | null {
+  if (!baseUrl) return null;
+  try {
+    const host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, '');
+    return host === 'localhost' || host === '::1' || host === '0.0.0.0' || host.startsWith('127.') ? 'local' : host;
+  } catch {
+    return null;
+  }
+}
+
 const newSession = (mode: AgentMode): Session => {
   const now = Date.now();
   return { id: randomUUID(), title: DEFAULT_TITLE, createdAt: now, updatedAt: now, mode, messages: [] };
@@ -359,7 +370,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private updateStatusBar() {
     const effective = this.effectiveModel();
     const model = effective ? this.modelLabel(effective) : null;
-    this.deps.statusBar.update({ model, mode: this.mode, running: !!this.run });
+    const baseUrl = effective ? this.providers.find((p) => p.id === effective.providerId)?.baseUrl : undefined;
+    this.deps.statusBar.update({ model, location: endpointLocation(baseUrl), endpoint: baseUrl ?? null, mode: this.mode, running: !!this.run });
   }
 
   private modelLabel(sel: SelectedModel): string {
@@ -436,7 +448,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       canPickMany: true,
       matchOnDescription: true,
       placeHolder: 'Add files to the next message',
-      title: 'SOVRAN: Add Files to Context',
+      title: 'Sovran: Add Files to Context',
     });
     if (!picked?.length) return;
     for (const p of picked) {
@@ -624,7 +636,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     items.push({ label: '$(refresh) Discover models from servers…', action: 'discover' });
     items.push({ label: '$(server-environment) Manage providers…', action: 'manage' });
     const pick = await vscode.window.showQuickPick(items, {
-      title: this.mode === 'plan' ? 'SOVRAN: Select Model for Plan Mode' : 'SOVRAN: Select Model',
+      title: this.mode === 'plan' ? 'Sovran: Select Model for Plan Mode' : 'Sovran: Select Model',
       placeHolder: this.mode === 'plan' ? 'Plan mode can use a different (e.g. larger) model than Act mode' : 'Choose the model for this chat',
     });
     if (!pick) return;
@@ -644,7 +656,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   private async discoverAndPick() {
     const found = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'SOVRAN: Discovering models…', cancellable: true },
+      { location: vscode.ProgressLocation.Notification, title: 'Sovran: Discovering models…', cancellable: true },
       async (_p, token) => {
         const ac = new AbortController();
         token.onCancellationRequested(() => ac.abort());
@@ -672,7 +684,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         items.push({ label: m, description: known ? 'configured' : 'add', providerId: r.provider.id, modelId: m });
       }
     }
-    const pick = await vscode.window.showQuickPick(items, { title: 'SOVRAN: Discovered Models', placeHolder: 'Pick a model to add and select' });
+    const pick = await vscode.window.showQuickPick(items, { title: 'Sovran: Discovered Models', placeHolder: 'Pick a model to add and select' });
     if (!pick?.providerId || !pick.modelId) return;
     const provider = this.providers.find((p) => p.id === pick.providerId);
     if (!provider) return;
@@ -761,7 +773,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (!id) {
       const pick = await vscode.window.showQuickPick(
         this.providers.map((p) => ({ label: p.name, description: p.baseUrl, id: p.id })),
-        { title: 'SOVRAN: Set Provider API Key' },
+        { title: 'Sovran: Set Provider API Key' },
       );
       id = pick?.id;
     }
@@ -816,7 +828,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   private async sendPrompt(text: string) {
     if (this.run) {
-      this.notice('warning', 'SOVRAN is still working. Stop the current run before sending another message.');
+      this.notice('warning', 'Sovran is still working. Stop the current run before sending another message.');
       return;
     }
     const slash = parseSlash(text);
@@ -963,7 +975,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (modified.length) {
       const names = modified.slice(0, 6).map((p) => this.rel(p.snapshot.absolutePath)).join('\n');
       const choice = await vscode.window.showWarningMessage(
-        `${modified.length} file${modified.length === 1 ? ' was' : 's were'} changed after SOVRAN edited ${modified.length === 1 ? 'it' : 'them'}.`,
+        `${modified.length} file${modified.length === 1 ? ' was' : 's were'} changed after Sovran edited ${modified.length === 1 ? 'it' : 'them'}.`,
         { modal: true, detail: `${names}\n\nRestoring discards those later changes.` },
         'Restore all',
         'Skip changed files',
@@ -1005,7 +1017,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       skipped += result.skipped.length;
       u.checkpoint.restoredAt = Date.now();
     }
-    if (skipped) this.notice('warning', `Kept ${skipped} file${skipped === 1 ? '' : 's'} you changed after SOVRAN edited ${skipped === 1 ? 'it' : 'them'}.`);
+    if (skipped) this.notice('warning', `Kept ${skipped} file${skipped === 1 ? '' : 's'} you changed after Sovran edited ${skipped === 1 ? 'it' : 'them'}.`);
   }
 
   /** Drops the compaction boundary when the message it points to no longer exists. */
@@ -1239,7 +1251,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       }
       this.patch({ approvals: this.visibleApprovals() });
       if (!this.post) {
-        void vscode.window.showInformationMessage(`SOVRAN needs your approval: ${request.title}`, 'Review').then((c) => {
+        void vscode.window.showInformationMessage(`Sovran needs your approval: ${request.title}`, 'Review').then((c) => {
           if (c) void this.deps.reveal();
         });
       }
