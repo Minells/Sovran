@@ -13,7 +13,7 @@ export default defineConfig({
         },
       },
       {
-        plugins: [react()],
+        // Inline projects extend this file since Vitest 5, so the React plugin above already applies here.
         test: {
           name: 'webview',
           environment: 'jsdom',

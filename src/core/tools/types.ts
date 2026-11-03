@@ -22,6 +22,8 @@ export interface PreparedAction {
   /** Workspace-relative paths the action touches (for the permission policy). */
   paths: string[];
   command?: string;
+  /** Context-dependent reasons the action must be confirmed even when the approval mode would allow it. */
+  risks?: string[];
   approval?: ApprovalDetail;
   /** Tool-private state carried from prepare() to execute(). */
   state?: unknown;

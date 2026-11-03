@@ -76,6 +76,27 @@ Manual checks for v0.2 (first F5 session):
 | Windows process-tree kill (`taskkill /T`) | Linux environment | CI matrix and manual test |
 | Webview inside VS Code with real theme variables | Visual QA used the harness, which emulates the Dark and Light Modern variables | Manual QA in Dark+, Light+ and High Contrast |
 
+## Review, approvals and settings (branch `feat/review-settings-auto-mode`)
+
+Quality and security review: [reviews/2026-11-03-review-qualita-sicurezza.md](reviews/2026-11-03-review-qualita-sicurezza.md).
+
+| Feature | Status | Evidence |
+|---|---|---|
+| Approval modes Ask · Auto-edit · Auto | ✅ Implemented | Policy matrix, guardrails (positive and negative cases), live mode switch during a run and the *auto* label unit-tested. Picker, Alt+A and cards UI-tested |
+| Always allow on command approvals | ✅ Implemented | Prefix suggestion and validation unit-tested; host re-check is on the manual checklist |
+| Settings view (gear in the view title) | ✅ Implemented | UI tests for models, approvals, lists, numbers, toggles and workspace overrides; visual QA in dark and light |
+| Guided setup | ✅ Implemented | UI tests for the success and failure paths; visual QA through the dev harness |
+| Security fixes S1–S11 from the review | ✅ Implemented (S7 open) | Regression tests, including a real-server redirect test |
+
+Manual checks for this branch (first F5 session):
+- [ ] Turning on Auto shows the native confirmation once per window; the status bar shows `auto` with a warning background.
+- [ ] In Auto, `npm run build` runs without a card and shows the *auto* badge; `git push` and `cat .env` still ask, with the reason.
+- [ ] **Always allow…** on `npm test -- --watch=false` adds `npm test` to the allowed commands, and the next `npm test` in the same run does not ask.
+- [ ] Every control in Settings writes the user setting and is reflected after a window reload; `sessions.persist` offers the reload.
+- [ ] Guided setup with a bearer-key provider: the key prompt appears, the test runs, the discovered models are offered.
+- [ ] Opening `~/.aws/credentials` shows a locked chip, and sending a message does not attach it.
+- [ ] A provider that answers with a redirect shows the redirect error and its hint.
+
 ## Manual QA checklist (first F5 session)
 
 - [ ] Onboarding: add Ollama from the preset, test the connection, add a discovered model, chat.
@@ -89,7 +110,7 @@ Manual checks for v0.2 (first F5 session):
 
 ## Known gaps (tracked in ROADMAP)
 
-- Checkpoints and rollback of a whole run, MCP tools, ripgrep-backed search, `@file` mentions.
-- No "retry" action on failed responses, and no token usage display.
+- MCP tools.
 - No conversation export. When it is added, it must reuse `redact()` (SECURITY T1).
-- The extension bundle is about 557 KB and the webview JS about 488 KB (175 KB gzip). Both are within NFR-2, but highlight.js languages could be lazy-loaded.
+- The webview JS is about 535 KB (185 KB gzip). highlight.js languages could be lazy-loaded.
+- Auto-mode guardrails are heuristics, not a sandbox (see SECURITY.md). Sandboxed command execution is the next step.

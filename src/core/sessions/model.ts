@@ -74,6 +74,8 @@ export interface ToolMessage {
   summary?: string;
   display?: ToolDisplay;
   durationMs?: number;
+  /** Set when a file change or command ran without asking the user, with the policy's reason (Auto mode, allow-list…). */
+  autoApproved?: string;
   createdAt: number;
 }
 

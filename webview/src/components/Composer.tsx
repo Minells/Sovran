@@ -1,9 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
-import type { RunView } from '../../../src/shared/protocol';
+import type { EditorContextView, RunView } from '../../../src/shared/protocol';
+import { APPROVAL_OPTIONS, approvalOption, nextApprovalMode } from '../lib/approvals';
 import { elapsed, toolInfo } from '../lib/format';
 import { useStore } from '../state/store';
 import { getUiState, post, setUiState } from '../vscode';
-import { Icon } from './primitives';
+import { Icon, MenuButton } from './primitives';
 
 export function ModeToggle() {
   const { app } = useStore();
@@ -32,6 +33,59 @@ export function ModeToggle() {
         );
       })}
     </div>
+  );
+}
+
+/** How much Act mode may do without asking. Hidden in Plan mode, which is always read-only. */
+export function ApprovalPicker() {
+  const { app } = useStore();
+  if (app.mode !== 'act' || !app.workspace.trusted) return null;
+  const current = approvalOption(app.approvalMode);
+  return (
+    <MenuButton
+      value={app.approvalMode}
+      options={APPROVAL_OPTIONS}
+      onSelect={(mode) => post({ type: 'setApprovalMode', mode })}
+      label={`Approvals: ${current.label}. Change how much Sovran may do without asking`}
+      title={`${current.label}: ${current.description} (${altLabel()}A)`}
+      icon={current.icon}
+      tone={current.tone}
+      heading="Approvals in Act mode"
+      footer={{ label: 'Approval settings…', icon: 'settings-gear', onSelect: () => post({ type: 'setView', view: 'settings' }) }}
+      className="sv-approval-picker"
+      // The default (Ask) stays quiet; the modes that let Sovran act unattended are always spelled out.
+      iconOnly={app.approvalMode === 'ask'}
+    />
+  );
+}
+
+const altLabel = () => (typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌥' : 'Alt+');
+
+/** The active-file chip. Files Sovran never attaches automatically say so instead of pretending to be included. */
+function EditorChip({ editor, included }: { editor: EditorContextView; included: boolean }) {
+  if (editor.blocked) {
+    const why =
+      editor.blocked === 'outside'
+        ? `${editor.path} is outside the workspace, so it is not shared with the model.`
+        : `${editor.path} is a protected file, so it is not shared automatically.`;
+    return (
+      <span className="sv-chip sv-chip--static sv-chip--blocked" title={why} aria-label={why}>
+        <Icon name="lock" />
+        <span>{editor.label}</span>
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      className="sv-chip"
+      aria-pressed={included}
+      title={included ? `Including ${editor.path}. Click to exclude.` : `Click to include ${editor.path}`}
+      onClick={() => post({ type: 'setIncludeEditor', value: !included })}
+    >
+      <Icon name={editor.startLine ? 'selection' : included ? 'eye' : 'eye-closed'} />
+      <span>{editor.label}</span>
+    </button>
   );
 }
 
@@ -213,6 +267,9 @@ export function Composer() {
     } else if (e.altKey && (e.key === 'm' || e.key === 'M' || e.code === 'KeyM')) {
       e.preventDefault();
       post({ type: 'setMode', mode: app.mode === 'plan' ? 'act' : 'plan' });
+    } else if (e.altKey && (e.key === 'a' || e.key === 'A' || e.code === 'KeyA') && app.mode === 'act' && app.workspace.trusted) {
+      e.preventDefault();
+      post({ type: 'setApprovalMode', mode: nextApprovalMode(app.approvalMode) });
     }
   };
 
@@ -221,8 +278,10 @@ export function Composer() {
     ? 'Add a model provider to start'
     : app.mode === 'plan'
       ? 'Ask, explore or plan (read-only)'
-      : 'Ask Sovran, or give it a task';
-  const altKey = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌥' : 'Alt+';
+      : app.approvalMode === 'auto'
+        ? 'Give Sovran a task. Auto mode: it acts without asking'
+        : 'Ask Sovran, or give it a task';
+  const altKey = altLabel();
   const listId = 'sv-suggest';
 
   return (
@@ -256,18 +315,7 @@ export function Composer() {
       <div className="sv-composer__box">
         {editor || app.context.attachments.length ? (
           <div className="sv-chips" aria-label="Context for the next message">
-            {editor ? (
-              <button
-                type="button"
-                className="sv-chip"
-                aria-pressed={app.context.includeEditor}
-                title={app.context.includeEditor ? `Including ${editor.path}. Click to exclude.` : `Click to include ${editor.path}`}
-                onClick={() => post({ type: 'setIncludeEditor', value: !app.context.includeEditor })}
-              >
-                <Icon name={editor.startLine ? 'selection' : app.context.includeEditor ? 'eye' : 'eye-closed'} />
-                <span>{editor.label}</span>
-              </button>
-            ) : null}
+            {editor ? <EditorChip editor={editor} included={app.context.includeEditor} /> : null}
             {app.context.attachments.map((a) => (
               <button key={a.id} type="button" className="sv-chip" title={`${a.path} · click to remove`} onClick={() => post({ type: 'removeAttachment', id: a.id })}>
                 <Icon name="file" />
@@ -300,6 +348,7 @@ export function Composer() {
         />
         <div className="sv-composer__bar">
           <ModeToggle />
+          <ApprovalPicker />
           <button type="button" className="sv-icon-btn" title="Add files to context" aria-label="Add files to context" onClick={() => post({ type: 'attachFiles' })}>
             <Icon name="attach" />
           </button>
@@ -343,6 +392,11 @@ export function Composer() {
           <span>
             <kbd>{altKey}M</kbd> mode
           </span>
+          {app.mode === 'act' && app.workspace.trusted ? (
+            <span>
+              <kbd>{altKey}A</kbd> approvals
+            </span>
+          ) : null}
           {running ? (
             <span>
               <kbd>Esc</kbd> stop

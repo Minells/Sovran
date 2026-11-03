@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useReducer, useState } from 'react';
 import type { HostMessage } from '../../src/shared/protocol';
 import { Composer, RunStatus } from './components/Composer';
-import { EmptyState, HistoryView, Notices, ProvidersView } from './components/Panels';
+import { EmptyState, HistoryView, Notices, ProvidersView, useSetupActive } from './components/Panels';
 import { Mark } from './components/primitives';
+import { SettingsView } from './components/Settings';
 import { Transcript } from './components/Transcript';
 import { StoreContext, initialUiState, reducer, useStore } from './state/store';
 import { post } from './vscode';
@@ -47,6 +48,7 @@ function SessionTitle() {
 
 function ChatView() {
   const { app } = useStore();
+  const setup = useSetupActive();
   const messages = app.session?.messages ?? [];
   return (
     <>
@@ -70,7 +72,8 @@ function ChatView() {
         )}
         <Notices />
         {app.run ? <RunStatus run={app.run} /> : null}
-        {app.providers.length > 0 || messages.length > 0 ? <Composer /> : null}
+        {/* Hidden while the guided setup is on screen; an existing conversation always keeps its composer. */}
+        {messages.length > 0 || !setup ? <Composer /> : null}
       </main>
     </>
   );
@@ -90,8 +93,8 @@ function LiveAnnouncer() {
 function Shell() {
   const { app } = useStore();
   return (
-    <div className="sv-app" data-mode={app.mode}>
-      {app.view === 'history' ? <HistoryView /> : app.view === 'providers' ? <ProvidersView /> : <ChatView />}
+    <div className="sv-app" data-mode={app.mode} data-approval={app.mode === 'act' ? app.approvalMode : undefined}>
+      {app.view === 'history' ? <HistoryView /> : app.view === 'providers' ? <ProvidersView /> : app.view === 'settings' ? <SettingsView /> : <ChatView />}
       <LiveAnnouncer />
     </div>
   );

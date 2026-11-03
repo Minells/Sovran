@@ -6,14 +6,15 @@ import { CheckpointRecorder, planRestore, restoreFiles, type Checkpoint, type Fi
 import { expandCommand, mergeCommands, parseSlash, type SlashCommand } from '../core/commands/slashCommands';
 import { planCompaction } from '../core/context/compaction';
 import type { AgentEvent } from '../core/agent/events';
-import type { AgentMode, SessionGrants } from '../core/permissions/policy';
+import { matchesAllowList, suggestAllowPrefix } from '../core/permissions/commands';
+import type { AgentMode, ApprovalMode, SessionGrants } from '../core/permissions/policy';
 import { isProtectedPath } from '../core/permissions/policy';
 import type { ApprovalPort, ApprovalRequest, ApprovalResponse, WorkspacePort } from '../core/ports';
 import { capabilityKey, type CapabilityStore } from '../core/providers/capabilities';
 import { ProviderError, errorFromException } from '../core/providers/errors';
 import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
 import type { ModelConfig, ProviderConfig } from '../core/providers/types';
-import { resolveWorkspacePath } from '../core/security/paths';
+import { PathError, resolveAndVerify, resolveWorkspacePath } from '../core/security/paths';
 import {
   DEFAULT_TITLE,
   deriveTitle,
@@ -37,15 +38,29 @@ import type {
   ProviderView,
   RunView,
   SelectedModel,
+  SettingUpdate,
   View,
   WebviewMessage,
 } from '../shared/protocol';
+import { endpointLocation } from '../shared/endpoints';
 import type { DiffPresenter } from './adapters/DiffPresenter';
 import { mergeSnapshots, type FsCheckpointRepository } from './adapters/FsCheckpointRepository';
 import type { CommandLoader, FileIndex } from './workspaceServices';
 import type { NodeProcessRunner } from './adapters/NodeProcessRunner';
 import type { VscodeWorkspace } from './adapters/VscodeWorkspace';
-import { readDefaultModel, readPlanModel, readProviders, readSettings, writeDefaultModel, writePlanModel, writeProviders, type HostSettings } from './config';
+import {
+  addAllowedCommand,
+  readDefaultModel,
+  readPlanModel,
+  readProviders,
+  readSettings,
+  readSettingsView,
+  writeDefaultModel,
+  writePlanModel,
+  writeProviders,
+  writeSetting,
+  type HostSettings,
+} from './config';
 import type { HostLogger, ProviderSecrets, SovranStatusBar } from './services';
 
 const MAX_ATTACHMENT_CHARS = 50_000;
@@ -79,16 +94,7 @@ interface ActiveRun {
   view: RunView;
 }
 
-/** Where requests go, shown in the status bar: "local" for loopback endpoints, otherwise the host name. */
-export function endpointLocation(baseUrl: string | undefined): string | null {
-  if (!baseUrl) return null;
-  try {
-    const host = new URL(baseUrl).hostname.replace(/^\[|\]$/g, '');
-    return host === 'localhost' || host === '::1' || host === '0.0.0.0' || host.startsWith('127.') ? 'local' : host;
-  } catch {
-    return null;
-  }
-}
+const APPROVAL_LABEL: Record<ApprovalMode, string> = { ask: 'Ask', edits: 'Auto-edit', auto: 'Auto' };
 
 const newSession = (mode: AgentMode): Session => {
   const now = Date.now();
@@ -108,6 +114,10 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private planModel: SelectedModel | null = null;
   private commands: SlashCommand[] = mergeCommands([]);
   private mode: AgentMode = 'act';
+  /** Approval mode for this window. Starts from `sovran.approvals.mode`; the composer and Settings change it. */
+  private approvalMode: ApprovalMode = 'ask';
+  /** Whether the user confirmed the Auto-mode warning in this window. */
+  private autoConfirmed = false;
   private view: View = 'chat';
   private sessions: SessionSummary[] = [];
   private session: Session = newSession('act');
@@ -132,6 +142,9 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   async init() {
     this.includeEditor = this.settings.includeActiveEditor;
+    this.approvalMode = this.settings.agent.policy.approvalMode;
+    // Choosing Auto as the start-up default in settings is itself the informed choice.
+    this.autoConfirmed = this.approvalMode === 'auto';
     await this.reloadProviders();
     const def = readDefaultModel();
     const [pid, ...rest] = def.split('/');
@@ -164,11 +177,13 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         this.selected = this.validSelection(this.selected);
         this.planModel = this.parseModelRef(readPlanModel());
         this.updateStatusBar();
+        this.updateEditorContext();
         this.patch({
           providers: this.providerViews(),
           selected: this.selected,
           planModel: this.planModel,
-          fileEdits: this.settings.agent.policy.fileEdits,
+          settings: readSettingsView(this.settings),
+          context: this.contextView(),
         });
       }),
     );
@@ -202,7 +217,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         case 'cancel':
           return this.cancel();
         case 'approval':
-          return this.resolveApproval(msg.id, { approved: msg.approved, grant: msg.grant, feedback: msg.feedback });
+          return await this.resolveApproval(msg.id, { approved: msg.approved, grant: msg.grant, feedback: msg.feedback }, msg.allowCommand);
         case 'openApprovalDiff': {
           const pending = this.approvals.get(msg.id);
           const d = pending?.request.detail;
@@ -219,10 +234,22 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
           return await this.deleteSession(msg.id);
         case 'setMode':
           return this.setMode(msg.mode);
+        case 'setApprovalMode':
+          return await this.setApprovalMode(msg.mode);
         case 'pickModel':
           return await this.pickModel();
         case 'selectModel':
           return await this.selectModel({ providerId: msg.providerId, modelId: msg.modelId });
+        case 'setModel':
+          return await this.setModel(msg.role, msg.providerId && msg.modelId ? { providerId: msg.providerId, modelId: msg.modelId } : null);
+        case 'addModels':
+          return await this.addModels(msg.providerId, msg.modelIds, msg.select);
+        case 'discoverModels':
+          return await this.discoverAndPick();
+        case 'updateSetting':
+          return await this.updateSetting(msg.setting);
+        case 'showLogs':
+          return this.deps.logger.show();
         case 'attachFiles':
           return await this.attachFiles();
         case 'removeAttachment':
@@ -240,7 +267,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         case 'setView':
           return this.setView(msg.view);
         case 'saveProvider':
-          return await this.saveProvider(msg.provider);
+          return await this.saveProvider(msg.provider, msg.requestId);
         case 'deleteProvider':
           return await this.deleteProvider(msg.id);
         case 'testProvider':
@@ -279,17 +306,18 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       providers: this.providerViews(),
       selected: this.selected,
       mode: this.mode,
+      approvalMode: this.approvalMode,
       sessions: this.sessions,
       session: { id: this.session.id, title: this.session.title, messages: this.session.messages },
       run: this.run && this.run.sessionId === this.session.id ? this.run.view : null,
       approvals: this.visibleApprovals(),
       context: this.contextView(),
       grants: { edits: this.grantsFor(this.session.id).edits },
-      fileEdits: this.settings.agent.policy.fileEdits,
       planModel: this.planModel,
       usage: this.usageView(this.session),
       compaction: this.compactionView(this.session),
       commands: this.commandViews(),
+      settings: readSettingsView(this.settings),
     };
   }
 
@@ -371,7 +399,14 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     const effective = this.effectiveModel();
     const model = effective ? this.modelLabel(effective) : null;
     const baseUrl = effective ? this.providers.find((p) => p.id === effective.providerId)?.baseUrl : undefined;
-    this.deps.statusBar.update({ model, location: endpointLocation(baseUrl), endpoint: baseUrl ?? null, mode: this.mode, running: !!this.run });
+    this.deps.statusBar.update({
+      model,
+      location: endpointLocation(baseUrl),
+      endpoint: baseUrl ?? null,
+      mode: this.mode,
+      approvalMode: this.approvalMode,
+      running: !!this.run,
+    });
   }
 
   private modelLabel(sel: SelectedModel): string {
@@ -386,6 +421,16 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     this.editorTimer = setTimeout(() => this.updateEditorContext(true), 150);
   }
 
+  /**
+   * Why the active file must not be attached automatically. Files outside the workspace (for example
+   * ~/.aws/credentials opened from a terminal) and protected paths are never sent without an explicit action.
+   */
+  private editorBlock(uri: vscode.Uri, rel: string): EditorContextView['blocked'] {
+    if (!vscode.workspace.getWorkspaceFolder(uri)) return 'outside';
+    if (isProtectedPath(rel, this.settings.agent.policy.protectedPaths)) return 'protected';
+    return undefined;
+  }
+
   private updateEditorContext(push = false) {
     const ed = vscode.window.activeTextEditor;
     let next: EditorContextView | null = null;
@@ -393,9 +438,11 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       const rel = vscode.workspace.asRelativePath(ed.document.uri, (vscode.workspace.workspaceFolders?.length ?? 0) > 1);
       const sel = ed.selection;
       const base = path.basename(ed.document.uri.fsPath);
+      const blocked = this.editorBlock(ed.document.uri, rel);
       next = sel.isEmpty
         ? { path: rel, label: base }
         : { path: rel, label: `${base}:${sel.start.line + 1}-${sel.end.line + 1}`, startLine: sel.start.line + 1, endLine: sel.end.line + 1 };
+      if (blocked) next.blocked = blocked;
     }
     if (JSON.stringify(next) === JSON.stringify(this.editor)) return;
     this.editor = next;
@@ -404,11 +451,12 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   private async collectAttachments(): Promise<ContextAttachment[]> {
     const out: ContextAttachment[] = [];
-    const protectedPaths = this.settings.agent.policy.protectedPaths;
     const ed = vscode.window.activeTextEditor;
     if (this.includeEditor && ed && ed.document.uri.scheme === 'file') {
       const rel = vscode.workspace.asRelativePath(ed.document.uri, (vscode.workspace.workspaceFolders?.length ?? 0) > 1);
-      if (!isProtectedPath(rel, protectedPaths)) {
+      // The lexical check drives the chip; the send-time check also follows symbolic links.
+      const allowed = !this.editorBlock(ed.document.uri, rel) && (await resolveAndVerify(ed.document.uri.fsPath, this.deps.workspace).then(() => true, () => false));
+      if (allowed) {
         const sel = ed.selection;
         if (!sel.isEmpty) {
           const text = ed.document.getText(sel);
@@ -429,6 +477,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     for (const a of this.attachments) {
       if (out.some((o) => o.path === a.path && o.kind === 'file')) continue;
       try {
+        // Re-verified at send time: a symbolic link must not smuggle a file from outside the workspace.
+        await resolveAndVerify(a.absolute, this.deps.workspace);
         const text = await this.deps.workspace.readFile(a.absolute);
         out.push({ kind: 'file', path: a.path, content: text.slice(0, MAX_ATTACHMENT_CHARS), truncated: text.length > MAX_ATTACHMENT_CHARS || undefined });
       } catch (e) {
@@ -564,6 +614,91 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   toggleMode() {
     this.setMode(this.mode === 'plan' ? 'act' : 'plan');
+  }
+
+  /**
+   * Changes how much Act mode may do without asking, for this window. Turning on Auto needs a native confirmation
+   * once per window: it is an informed choice, and a compromised webview could not switch it on silently.
+   */
+  async setApprovalMode(mode: ApprovalMode): Promise<void> {
+    if (mode !== 'ask' && !vscode.workspace.isTrusted) {
+      this.notice('warning', 'Automatic approvals need a trusted workspace. Use "Manage Workspace Trust" to trust this folder.');
+      return this.patch({ approvalMode: this.approvalMode });
+    }
+    if (mode === 'auto' && !this.autoConfirmed) {
+      const choice = await vscode.window.showWarningMessage(
+        'Turn on Auto mode?',
+        {
+          modal: true,
+          detail:
+            'Sovran will edit files and run commands without asking.\n\n' +
+            'It still asks for protected files, commands that delete, push, publish, use sudo, reach the network or leave the workspace, and anything with hidden characters. Every response can be undone with "Undo changes", but commands are not sandboxed.\n\n' +
+            'Use Auto only in repositories you trust.',
+        },
+        'Turn On Auto',
+      );
+      if (choice !== 'Turn On Auto') return this.patch({ approvalMode: this.approvalMode });
+      this.autoConfirmed = true;
+    }
+    // Plan mode stays read-only: the approval mode is remembered and applies when the user switches to Act.
+    this.approvalMode = mode;
+    this.deps.logger.info(`Approval mode: ${mode}`);
+    this.updateStatusBar();
+    this.patch({ approvalMode: mode });
+  }
+
+  async pickApprovalMode() {
+    const options: Array<{ value: ApprovalMode; icon: string; description: string }> = [
+      { value: 'ask', icon: 'shield', description: 'Approve every file change and command' },
+      { value: 'edits', icon: 'edit', description: 'Apply file changes without asking; commands still ask' },
+      { value: 'auto', icon: 'zap', description: 'No approvals, except protected files and risky commands' },
+    ];
+    const items = options.map((o) => ({
+      value: o.value,
+      label: `${o.value === this.approvalMode ? '$(check) ' : ''}$(${o.icon}) ${APPROVAL_LABEL[o.value]}`,
+      description: o.description,
+    }));
+    const pick = await vscode.window.showQuickPick(items, { title: 'Sovran: Approvals in Act Mode', placeHolder: `Current: ${APPROVAL_LABEL[this.approvalMode]}` });
+    if (pick) await this.setApprovalMode(pick.value);
+  }
+
+  /** Sets the Act or Plan model explicitly (Settings view). A null Plan model means "same as Act". */
+  private async setModel(role: 'act' | 'plan', sel: SelectedModel | null) {
+    if (role === 'plan') {
+      if (sel && !this.exists(sel)) return;
+      this.planModel = sel;
+      await writePlanModel(sel ? `${sel.providerId}/${sel.modelId}` : '');
+      this.patch({ planModel: sel });
+    } else {
+      if (!this.exists(sel)) return;
+      this.selected = sel;
+      await writeDefaultModel(`${sel.providerId}/${sel.modelId}`);
+      this.patch({ selected: sel });
+    }
+    this.updateStatusBar();
+  }
+
+  /** Adds discovered or typed models to a provider (onboarding), optionally selecting one as the Act model. */
+  private async addModels(providerId: string, modelIds: string[], select?: string) {
+    const provider = this.providers.find((p) => p.id === providerId);
+    if (!provider) return;
+    const known = new Set((provider.models ?? []).map((m) => m.id));
+    const added = [...new Set(modelIds)].filter((id) => !known.has(id));
+    if (added.length) {
+      provider.models = [...(provider.models ?? []), ...added.map((id) => ({ id }))];
+      await writeProviders(this.providers);
+    }
+    if (select && provider.models?.some((m) => m.id === select)) await this.setModel('act', { providerId, modelId: select });
+    this.patch({ providers: this.providerViews(), selected: this.selected });
+  }
+
+  private async updateSetting(update: SettingUpdate) {
+    await writeSetting(update);
+    if (update.key === 'sessions.persist') {
+      const choice = await vscode.window.showInformationMessage('Sovran: the chat history setting applies after the window reloads.', 'Reload Window');
+      if (choice) await vscode.commands.executeCommand('workbench.action.reloadWindow');
+    }
+    // onDidChangeConfiguration refreshes the state and pushes it to the webview.
   }
 
   private validSelection(sel: SelectedModel | null): SelectedModel | null {
@@ -721,7 +856,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     return id;
   }
 
-  private async saveProvider(input: ProviderInput) {
+  private async saveProvider(input: ProviderInput, requestId?: string) {
     const existing = input.id ? this.providers.find((p) => p.id === input.id) : undefined;
     const id = existing?.id ?? this.slug(input.name);
     const config: ProviderConfig = {
@@ -751,7 +886,13 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (this.selected) await writeDefaultModel(`${this.selected.providerId}/${this.selected.modelId}`);
     this.updateStatusBar();
     this.patch({ providers: this.providerViews(), selected: this.selected });
-    this.notice('info', `Saved ${config.name}.`);
+    if (requestId) {
+      // Guided setup: confirm the save, then test the connection and report the models the server offers.
+      this.send({ type: 'providerSaved', requestId, providerId: id });
+      await this.testProvider(requestId, id);
+    } else {
+      this.notice('info', `Saved ${config.name}.`);
+    }
   }
 
   private async deleteProvider(id: string) {
@@ -923,6 +1064,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         projectInstructions: await this.projectInstructions(),
         secrets: [secret],
         autoCompact: this.settings.autoCompact,
+        // Read live: switching the approval mode or allowing a command mid-run applies to the next action.
+        policy: () => ({ ...this.settings.agent.policy, approvalMode: this.approvalMode }),
       });
       this.deps.logger.info(`Run finished · ${outcome.reason}${outcome.error ? ` · ${outcome.error.kind}` : ''}`);
     } catch (e) {
@@ -1099,9 +1242,10 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private async attachPath(p: string) {
     let resolved;
     try {
-      resolved = resolveWorkspacePath(p, this.deps.workspace.roots());
-    } catch {
-      return this.notice('warning', `${p} is not inside the workspace.`);
+      // Symlink-aware: a link inside the repository must not attach a file from outside it.
+      resolved = await resolveAndVerify(p, this.deps.workspace);
+    } catch (e) {
+      return this.notice('warning', e instanceof PathError ? e.message : `${p} is not inside the workspace.`);
     }
     const stat = await this.deps.workspace.stat(resolved.absolute);
     if (stat?.type !== 'file') return this.notice('warning', `${resolved.relative} is not a file.`);
@@ -1222,8 +1366,9 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
           d.kind === 'edit'
             ? { kind: 'edit', path: d.path, isNew: d.isNew, diff: d.diff, added: d.added, removed: d.removed }
             : d.kind === 'command'
-              ? { kind: 'command', command: d.command, cwd: d.cwd, warnings: d.warnings }
+              ? { kind: 'command', command: d.command, cwd: d.cwd, warnings: d.warnings, allowPrefix: d.warnings.length ? null : suggestAllowPrefix(d.command) }
               : { kind: 'read', path: d.path, reason: d.reason },
+        ...(request.reason ? { reason: request.reason } : {}),
       };
       const cleanup = () => {
         signal.removeEventListener('abort', onAbort);
@@ -1258,8 +1403,23 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     });
   }
 
-  private resolveApproval(id: string, response: ApprovalResponse) {
-    this.approvals.get(id)?.settle(response);
+  private async resolveApproval(id: string, response: ApprovalResponse, allowCommand?: string) {
+    const pending = this.approvals.get(id);
+    if (!pending) return;
+    const detail = pending.request.detail;
+    // Grants only apply to the kind of action they describe.
+    if (response.grant === 'session-edits' && detail.kind !== 'edit') delete response.grant;
+    if (response.approved && allowCommand && detail.kind === 'command') {
+      // "Always allow": the entry must match the command being approved, so it cannot widen anything else.
+      if (matchesAllowList(detail.command, [allowCommand])) {
+        await addAllowedCommand(allowCommand);
+        this.settings = readSettings(); // the running agent reads the policy live, so the next command benefits
+        this.notice('info', `Commands starting with "${allowCommand}" now run without asking. Manage the list in Settings.`);
+      } else {
+        this.deps.logger.warn('Ignored an allow-list entry that does not match the approved command.');
+      }
+    }
+    pending.settle(response);
   }
 
   // ------------------------------------------------------------------ editor helpers

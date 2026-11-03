@@ -103,6 +103,12 @@
         "icon": "$(history)"
       },
       {
+        "command": "sovran.openSettings",
+        "title": "Settings",
+        "category": "Sovran",
+        "icon": "$(settings-gear)"
+      },
+      {
         "command": "sovran.manageProviders",
         "title": "Manage Model Providers",
         "category": "Sovran",
@@ -121,6 +127,11 @@
       {
         "command": "sovran.toggleMode",
         "title": "Toggle Plan / Act Mode",
+        "category": "Sovran"
+      },
+      {
+        "command": "sovran.setApprovalMode",
+        "title": "Change Approval Mode…",
         "category": "Sovran"
       },
       {
@@ -167,9 +178,24 @@
           "group": "navigation@2"
         },
         {
-          "command": "sovran.manageProviders",
+          "command": "sovran.openSettings",
           "when": "view == sovran.chat",
           "group": "navigation@3"
+        },
+        {
+          "command": "sovran.manageProviders",
+          "when": "view == sovran.chat",
+          "group": "1_configure@1"
+        },
+        {
+          "command": "sovran.setApprovalMode",
+          "when": "view == sovran.chat",
+          "group": "1_configure@2"
+        },
+        {
+          "command": "sovran.showLogs",
+          "when": "view == sovran.chat",
+          "group": "2_help@1"
         }
       ],
       "editor/context": [
@@ -193,218 +219,289 @@
         "when": "editorTextFocus && editorHasSelection"
       }
     ],
-    "configuration": {
-      "title": "Sovran",
-      "properties": {
-        "sovran.providers": {
-          "type": "array",
-          "scope": "application",
-          "default": [],
-          "markdownDescription": "Model providers (OpenAI-compatible endpoints). API keys are **not** stored here; use `SOVRAN: Set Provider API Key…`. Only user settings are honored, workspace settings are ignored for security.",
-          "items": {
-            "type": "object",
-            "required": [
-              "id",
-              "name",
-              "baseUrl"
-            ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "pattern": "^[a-z0-9][a-z0-9_-]{0,47}$",
-                "description": "Stable identifier (lowercase letters, digits, - and _)."
-              },
-              "name": {
-                "type": "string",
-                "description": "Display name."
-              },
-              "baseUrl": {
-                "type": "string",
-                "description": "Base URL including the API version path, e.g. http://localhost:11434/v1"
-              },
-              "auth": {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": [
-                      "none",
-                      "bearer",
-                      "header"
-                    ],
-                    "default": "bearer"
-                  },
-                  "headerName": {
-                    "type": "string",
-                    "description": "Header name used when type is 'header' (e.g. api-key)."
-                  }
-                }
-              },
-              "headers": {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "string"
+    "configuration": [
+      {
+        "id": "sovran-models",
+        "title": "Models",
+        "order": 1,
+        "properties": {
+          "sovran.providers": {
+            "type": "array",
+            "scope": "application",
+            "default": [],
+            "markdownDescription": "Model providers (OpenAI-compatible endpoints). API keys are **not** stored here; use `SOVRAN: Set Provider API Key…`. Only user settings are honored, workspace settings are ignored for security.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "baseUrl"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9_-]{0,47}$",
+                  "description": "Stable identifier (lowercase letters, digits, - and _)."
                 },
-                "description": "Additional non-secret headers sent with every request."
-              },
-              "timeoutSeconds": {
-                "type": "number",
-                "minimum": 5,
-                "maximum": 1800,
-                "default": 120
-              },
-              "models": {
-                "type": "array",
-                "items": {
+                "name": {
+                  "type": "string",
+                  "description": "Display name."
+                },
+                "baseUrl": {
+                  "type": "string",
+                  "description": "Base URL including the API version path, e.g. http://localhost:11434/v1"
+                },
+                "auth": {
                   "type": "object",
-                  "required": [
-                    "id"
-                  ],
                   "properties": {
-                    "id": {
-                      "type": "string"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "contextWindow": {
-                      "type": "number",
-                      "minimum": 1024
-                    },
-                    "maxOutputTokens": {
-                      "type": "number",
-                      "minimum": 64
-                    },
-                    "temperature": {
-                      "type": "number",
-                      "minimum": 0,
-                      "maximum": 2
-                    },
-                    "toolMode": {
+                    "type": {
                       "type": "string",
                       "enum": [
-                        "auto",
-                        "native",
-                        "prompted",
-                        "none"
+                        "none",
+                        "bearer",
+                        "header"
                       ],
-                      "default": "auto"
+                      "default": "bearer"
+                    },
+                    "headerName": {
+                      "type": "string",
+                      "description": "Header name used when type is 'header' (e.g. api-key)."
+                    }
+                  }
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Additional non-secret headers sent with every request."
+                },
+                "timeoutSeconds": {
+                  "type": "number",
+                  "minimum": 5,
+                  "maximum": 1800,
+                  "default": 120
+                },
+                "models": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "contextWindow": {
+                        "type": "number",
+                        "minimum": 1024
+                      },
+                      "maxOutputTokens": {
+                        "type": "number",
+                        "minimum": 64
+                      },
+                      "temperature": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 2
+                      },
+                      "toolMode": {
+                        "type": "string",
+                        "enum": [
+                          "auto",
+                          "native",
+                          "prompted",
+                          "none"
+                        ],
+                        "default": "auto"
+                      }
                     }
                   }
                 }
               }
-            }
+            },
+            "order": 1
+          },
+          "sovran.defaultModel": {
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "description": "Model used for new chats, as providerId/modelId.",
+            "order": 2
+          },
+          "sovran.planModel": {
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "description": "Model used in Plan mode, as providerId/modelId. Empty means the same model as Act mode.",
+            "order": 3
           }
-        },
-        "sovran.defaultModel": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "description": "Model used for new chats, as providerId/modelId."
-        },
-        "sovran.planModel": {
-          "type": "string",
-          "scope": "application",
-          "default": "",
-          "description": "Model used in Plan mode, as providerId/modelId. Empty means the same model as Act mode."
-        },
-        "sovran.agent.maxIterations": {
-          "type": "number",
-          "default": 25,
-          "minimum": 1,
-          "maximum": 200,
-          "description": "Maximum model round-trips per request before the agent stops."
-        },
-        "sovran.approvals.fileEdits": {
-          "type": "string",
-          "scope": "application",
-          "enum": [
-            "ask",
-            "auto"
-          ],
-          "default": "ask",
-          "enumDescriptions": [
-            "Review every file change in a diff before it is applied.",
-            "Apply file changes without asking (protected paths still ask)."
-          ],
-          "description": "How file edits proposed in Act mode are approved."
-        },
-        "sovran.approvals.allowedCommands": {
-          "type": "array",
-          "scope": "application",
-          "items": {
-            "type": "string"
+        }
+      },
+      {
+        "id": "sovran-approvals",
+        "title": "Approvals & Safety",
+        "order": 2,
+        "properties": {
+          "sovran.approvals.mode": {
+            "type": "string",
+            "scope": "application",
+            "enum": [
+              "ask",
+              "edits",
+              "auto"
+            ],
+            "enumItemLabels": [
+              "Ask",
+              "Auto-edit",
+              "Auto"
+            ],
+            "default": "ask",
+            "markdownEnumDescriptions": [
+              "Review every file change in a diff and approve every command.",
+              "Apply file changes without asking. Commands still ask unless they are in `#sovran.approvals.allowedCommands#`.",
+              "Edit files and run commands without asking. Protected files, risky commands (delete, push, publish, `sudo`, network, paths outside the workspace) and hidden characters still ask. **Use only in repositories you trust.**"
+            ],
+            "markdownDescription": "Approval mode Act mode starts in when a window opens. Change it for the current window from the composer, from Sovran Settings or with `Sovran: Change Approval Mode…`. Plan mode is always read-only.",
+            "order": 1
           },
-          "default": [],
-          "markdownDescription": "Commands that run without approval when the requested command equals an entry or starts with it followed by a space (e.g. `npm test`). Commands containing shell operators (`; & | $ > <` …) always ask."
-        },
-        "sovran.security.protectedPaths": {
-          "type": "array",
-          "scope": "application",
-          "items": {
-            "type": "string"
+          "sovran.approvals.allowedCommands": {
+            "type": "array",
+            "scope": "application",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "markdownDescription": "Commands that run without approval when the requested command equals an entry or starts with it followed by a space (e.g. `npm test`). Commands containing shell operators (`; & | $ > <` …) and risky commands (delete, push, publish, `sudo`, network, paths outside the workspace) always ask. Add entries from an approval card with **Always allow**.",
+            "order": 2
           },
-          "default": [
-            "**/.env",
-            "**/.env.*",
-            "**/*.pem",
-            "**/*.key",
-            "**/id_rsa*",
-            "**/id_ed25519*",
-            "**/.git/**",
-            "**/.npmrc",
-            "**/.pypirc",
-            "**/.netrc"
-          ],
-          "description": "Glob patterns that always require approval to read or modify."
-        },
-        "sovran.terminal.timeoutSeconds": {
-          "type": "number",
-          "scope": "application",
-          "default": 120,
-          "minimum": 5,
-          "maximum": 3600,
-          "description": "Default timeout for agent terminal commands."
-        },
-        "sovran.terminal.mirrorToTerminal": {
-          "type": "boolean",
-          "default": true,
-          "description": "Mirror agent command output to a SOVRAN terminal panel."
-        },
-        "sovran.context.maxToolResultChars": {
-          "type": "number",
-          "default": 20000,
-          "minimum": 2000,
-          "maximum": 200000,
-          "description": "Maximum characters of a single tool result sent to the model."
-        },
-        "sovran.context.autoCompact": {
-          "type": "boolean",
-          "default": true,
-          "description": "When the context window is full, summarize older messages instead of dropping them."
-        },
-        "sovran.context.includeActiveEditor": {
-          "type": "boolean",
-          "default": true,
-          "description": "Attach the active file (or selection) to new messages by default."
-        },
-        "sovran.context.projectInstructions": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Include `AGENTS.md` from the workspace root as project instructions (trusted workspaces only)."
-        },
-        "sovran.sessions.persist": {
-          "type": "boolean",
-          "default": true,
-          "description": "Save chats in VS Code workspace storage so they survive restarts."
-        },
-        "sovran.diff.openOnProposal": {
-          "type": "boolean",
-          "default": true,
-          "description": "Open the native diff editor automatically when the agent proposes a file change."
+          "sovran.security.protectedPaths": {
+            "type": "array",
+            "scope": "application",
+            "items": {
+              "type": "string"
+            },
+            "default": [
+              "**/.env",
+              "**/.env.*",
+              "**/*.pem",
+              "**/*.key",
+              "**/id_rsa*",
+              "**/id_ed25519*",
+              "**/.git/**",
+              "**/.npmrc",
+              "**/.pypirc",
+              "**/.netrc"
+            ],
+            "description": "Glob patterns that always require approval to read or modify, in every approval mode. Their contents are excluded from search, and commands that name them ask too.",
+            "order": 3
+          },
+          "sovran.approvals.fileEdits": {
+            "type": "string",
+            "scope": "application",
+            "enum": [
+              "ask",
+              "auto"
+            ],
+            "default": "ask",
+            "enumDescriptions": [
+              "Review every file change in a diff before it is applied.",
+              "Apply file changes without asking (protected paths still ask)."
+            ],
+            "description": "How file edits proposed in Act mode are approved.",
+            "markdownDeprecationMessage": "Use `#sovran.approvals.mode#` instead. `auto` here is the same as `edits` there.",
+            "order": 4
+          }
+        }
+      },
+      {
+        "id": "sovran-agent",
+        "title": "Agent",
+        "order": 3,
+        "properties": {
+          "sovran.agent.maxIterations": {
+            "type": "number",
+            "default": 25,
+            "minimum": 1,
+            "maximum": 200,
+            "description": "Maximum model round-trips per request before the agent stops.",
+            "order": 1
+          },
+          "sovran.terminal.timeoutSeconds": {
+            "type": "number",
+            "scope": "application",
+            "default": 120,
+            "minimum": 5,
+            "maximum": 3600,
+            "description": "Default timeout for agent terminal commands.",
+            "order": 2
+          },
+          "sovran.terminal.mirrorToTerminal": {
+            "type": "boolean",
+            "default": true,
+            "description": "Mirror agent command output to a Sovran terminal panel. User settings only.",
+            "scope": "application",
+            "order": 3
+          },
+          "sovran.diff.openOnProposal": {
+            "type": "boolean",
+            "default": true,
+            "description": "Open the native diff editor automatically when the agent proposes a file change.",
+            "order": 4
+          }
+        }
+      },
+      {
+        "id": "sovran-context",
+        "title": "Context",
+        "order": 4,
+        "properties": {
+          "sovran.context.includeActiveEditor": {
+            "type": "boolean",
+            "default": true,
+            "description": "Attach the active file (or selection) to new messages by default.",
+            "order": 1
+          },
+          "sovran.context.autoCompact": {
+            "type": "boolean",
+            "default": true,
+            "description": "When the context window is full, summarize older messages instead of dropping them.",
+            "order": 2
+          },
+          "sovran.context.projectInstructions": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Include `AGENTS.md` from the workspace root as project instructions (trusted workspaces only).",
+            "order": 3
+          },
+          "sovran.context.maxToolResultChars": {
+            "type": "number",
+            "default": 20000,
+            "minimum": 2000,
+            "maximum": 200000,
+            "description": "Maximum characters of a single tool result sent to the model.",
+            "order": 4
+          }
+        }
+      },
+      {
+        "id": "sovran-chats",
+        "title": "Chats",
+        "order": 5,
+        "properties": {
+          "sovran.sessions.persist": {
+            "type": "boolean",
+            "default": true,
+            "description": "Save chats in VS Code workspace storage so they survive restarts.",
+            "order": 1
+          }
         }
       }
-    }
+    ]
   },
   "scripts": {
     "build": "npm run build:host && npm run build:webview",

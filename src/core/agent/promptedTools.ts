@@ -32,8 +32,25 @@ export function serializeToolCall(name: string, argumentsJson: string): string {
   return `<tool_call>\n${JSON.stringify({ name, arguments: args })}\n</tool_call>`;
 }
 
+/** Escapes a value for use inside a double-quoted pseudo-XML attribute. */
+export function escapeAttribute(value: string): string {
+  return value.replace(/[&"<>\n\r]/g, (c) => ({ '&': '&amp;', '"': '&quot;', '<': '&lt;', '>': '&gt;', '\n': ' ', '\r': ' ' })[c]!);
+}
+
+/**
+ * Untrusted content (file text, command output) is quoted inside pseudo-XML wrappers that tell the model "this is
+ * data". If the content contained the wrapper's closing tag, it could end the data region early and continue with
+ * text that reads like instructions. Rewriting `</tag` as `<\/tag` keeps the text readable but unable to close it.
+ */
+export function neutralizeClosingTags(content: string, tags: readonly string[]): string {
+  if (!tags.length) return content;
+  const re = new RegExp(`<(\\s*)/(\\s*)(${tags.map((t) => t.replace(/[^\w-]/g, '')).join('|')})`, 'gi');
+  return content.replace(re, '<$1\\/$2$3');
+}
+
 export function formatToolResult(name: string, id: string, content: string, status: string): string {
-  return `<tool_result name="${name}" id="${id}" status="${status}">\n${content}\n</tool_result>`;
+  const attrs = `name="${escapeAttribute(name)}" id="${escapeAttribute(id)}" status="${escapeAttribute(status)}"`;
+  return `<tool_result ${attrs}>\n${neutralizeClosingTags(content, ['tool_result'])}\n</tool_result>`;
 }
 
 /** Light repair for common model JSON mistakes: code fences, trailing commas, surrounding prose. */

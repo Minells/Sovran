@@ -10,7 +10,7 @@ import { FakeProcess, MemoryWorkspace, ScriptedApprovals, ScriptedProvider, call
 
 const settings: AgentSettings = {
   maxIterations: 10,
-  policy: { fileEdits: 'ask', allowedCommands: ['npm test'], protectedPaths: ['**/.env'] },
+  policy: { approvalMode: 'ask', allowedCommands: ['npm test'], protectedPaths: ['**/.env'] },
   tools: { terminalTimeoutMs: 1000, maxToolResultChars: 20_000, protectedPaths: ['**/.env'] },
   defaultContextWindow: 32_768,
   defaultMaxOutputTokens: 4096,

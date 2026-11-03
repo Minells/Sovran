@@ -186,8 +186,13 @@ changed while it awaited approval. Writes go through `WorkspaceEdit` so they are
 | Risk | Plan | Act |
 |---|---|---|
 | read | allow (ask if path matches `protectedPaths`) | same |
-| write | **deny** | `ask` (default) · `allow` if `approvals.fileEdits = auto` or a session grant exists. Protected paths always ask |
-| execute | **deny** | `ask` · `allow` only if the command matches `approvals.allowedCommands` **and** contains no shell metacharacters (`; & \| \` $ > < ( ) { }` and newlines) |
+| write | **deny** | `ask` in Ask mode · `allow` in Auto-edit and Auto mode, or when a session grant exists. Protected paths always ask |
+| execute | **deny** | Guardrails first: high-risk patterns, protected paths or paths outside the workspace named in the command, and invisible characters always **ask**. Otherwise `allow` if the command matches `approvals.allowedCommands` (no shell metacharacters `; & \| \` $ > < ( ) { }` or newlines) or the mode is Auto, else `ask` |
+
+**Approval modes** (`ask` · `edits` · `auto`) decide how much Act mode may do without asking. The mode is per window,
+starts from `sovran.approvals.mode`, and is read before every action (`RunOptions.policy`), so a change during a run
+applies to the next action. Actions that run without asking carry `ToolMessage.autoApproved` with the policy's reason,
+which the transcript shows as an *auto* badge.
 
 Act mode is unavailable when the workspace is untrusted (Restricted Mode).
 
@@ -226,16 +231,21 @@ Interrupted runs are restored as `cancelled`.
 All contracts are in `src/shared/protocol.ts`.
 
 **Webview → host** messages (validated with zod and rejected if malformed):
-`ready`, `send`, `cancel`, `approval`, `newSession`, `openSession`, `renameSession`,
-`deleteSession`, `setMode`, `selectModel`, `attachFiles`, `removeAttachment`, `toggleEditorContext`,
-`openDiff`, `openFile`, `saveProvider`, `deleteProvider`, `testProvider`, `discoverModels`,
-`setApiKey`, `openSettings`, `setView`.
+- Chat and runs: `ready`, `send`, `cancel`, `approval` (with an optional `allowCommand` for "Always allow", checked
+  against the approved command by the host), `openApprovalDiff`, `retry`, `editMessage`, `compact`, `restoreCheckpoint`
+- Sessions: `newSession`, `openSession`, `renameSession`, `deleteSession`
+- Modes and models: `setMode`, `setApprovalMode`, `pickModel`, `selectModel`, `setModel`, `addModels`, `discoverModels`
+- Context: `attachFiles`, `attachPath`, `removeAttachment`, `setIncludeEditor`, `suggestFiles`
+- Editor: `openFile`, `openExternal` (http/https only), `insertCode`
+- Providers: `saveProvider` (with an optional `requestId` for the guided setup), `deleteProvider`, `testProvider`, `setApiKey`
+- Settings and views: `updateSetting` (a discriminated union of the keys the Settings view may change, each with its
+  own value schema), `openSettings`, `showLogs`, `setView`
 
 **Host → webview** messages:
 - `state`: a full snapshot (providers without secrets, `hasKey` booleans, sessions index, active
-  session, run state, approvals, workspace and trust info)
-- incremental `messageAppended`, `messageDelta` and `messageReplaced`
-- `toolOutput`, `run`, `approvals`, `notice` and `providerResult`
+  session, run state, approvals, approval mode, settings view, workspace and trust info)
+- `patch` (partial state), and the incremental `messageUpsert`, `messageDelta` and `messageRemoved`
+- `toolOutput`, `notice`, `providerTest`, `providerSaved`, `fileSuggestions` and `focusComposer`
 
 The host batches text deltas (about 40 ms) to limit message traffic. The webview keeps only UI
 ephemera (draft text, scroll position, expanded rows) in `vscode.setState`.

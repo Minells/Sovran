@@ -3,13 +3,14 @@
  * Every webview → host message is validated with `webviewMessageSchema` before it is handled.
  */
 import { z } from 'zod';
-import type { AgentMode } from '../core/permissions/policy';
+import { hasShellMetacharacters } from '../core/permissions/shell';
+import type { AgentMode, ApprovalMode } from '../core/permissions/policy';
 import type { ToolMode } from '../core/providers/types';
 import type { SessionMessage, SessionSummary } from '../core/sessions/model';
 
-export type { SessionMessage, SessionSummary, AgentMode, ToolMode };
+export type { SessionMessage, SessionSummary, AgentMode, ApprovalMode, ToolMode };
 
-export type View = 'chat' | 'history' | 'providers';
+export type View = 'chat' | 'history' | 'providers' | 'settings';
 
 export interface ModelView {
   id: string;
@@ -49,7 +50,8 @@ export interface RunView {
 
 export type ApprovalDetailView =
   | { kind: 'edit'; path: string; isNew: boolean; diff: string; added: number; removed: number }
-  | { kind: 'command'; command: string; cwd: string; warnings: string[] }
+  /** `allowPrefix` is the suggested "always allow" entry, or null when this command can never be allow-listed. */
+  | { kind: 'command'; command: string; cwd: string; warnings: string[]; allowPrefix: string | null }
   | { kind: 'read'; path: string; reason: string };
 
 export interface ApprovalView {
@@ -58,6 +60,8 @@ export interface ApprovalView {
   toolName: string;
   title: string;
   detail: ApprovalDetailView;
+  /** Why the policy asked (shown when the approval mode would otherwise have allowed the action). */
+  reason?: string;
 }
 
 export interface AttachmentView {
@@ -71,6 +75,8 @@ export interface EditorContextView {
   label: string;
   startLine?: number;
   endLine?: number;
+  /** Set when the active file is never attached: it is outside the workspace or a protected path. */
+  blocked?: 'outside' | 'protected';
 }
 
 export interface ComposerContextView {
@@ -103,6 +109,26 @@ export interface SlashCommandView {
   source: 'builtin' | 'workspace';
 }
 
+/** User-scope settings edited from the Settings view. Effective values; see `overriddenByWorkspace`. */
+export interface SettingsView {
+  /** Approval mode a new window starts in (`sovran.approvals.mode`). */
+  defaultApprovalMode: ApprovalMode;
+  allowedCommands: string[];
+  protectedPaths: string[];
+  defaultProtectedPaths: string[];
+  maxIterations: number;
+  terminalTimeoutSeconds: number;
+  mirrorToTerminal: boolean;
+  openDiffOnProposal: boolean;
+  includeActiveEditor: boolean;
+  autoCompact: boolean;
+  projectInstructions: boolean;
+  maxToolResultChars: number;
+  persistSessions: boolean;
+  /** Keys whose effective value comes from workspace settings, so a change here may not apply in this workspace. */
+  overriddenByWorkspace: SettingKey[];
+}
+
 export interface AppState {
   view: View;
   workspace: { name: string | null; trusted: boolean; hasFolder: boolean };
@@ -111,16 +137,18 @@ export interface AppState {
   /** Model used in Plan mode; null means "same as Act". */
   planModel: SelectedModel | null;
   mode: AgentMode;
+  /** How much Act mode may do without asking, for this window. */
+  approvalMode: ApprovalMode;
   sessions: SessionSummary[];
   session: CurrentSessionView | null;
   run: RunView | null;
   approvals: ApprovalView[];
   context: ComposerContextView;
   grants: { edits: boolean };
-  fileEdits: 'ask' | 'auto';
   usage: ContextUsageView | null;
   compaction: CompactionView | null;
   commands: SlashCommandView[];
+  settings: SettingsView;
 }
 
 export interface ProviderTestResult {
@@ -140,6 +168,8 @@ export type HostMessage =
   | { type: 'toolOutput'; sessionId: string; callId: string; chunk: string }
   | { type: 'notice'; id: string; level: 'info' | 'warning' | 'error'; message: string }
   | { type: 'providerTest'; requestId: string; providerId: string; result: ProviderTestResult }
+  /** Answers a `saveProvider` that carried a requestId; a `providerTest` for the same request follows. */
+  | { type: 'providerSaved'; requestId: string; providerId: string }
   | { type: 'focusComposer'; text?: string }
   | { type: 'fileSuggestions'; requestId: string; items: Array<{ path: string; label: string }> };
 
@@ -180,6 +210,37 @@ export const providerInputSchema = z.object({
 });
 export type ProviderInput = z.infer<typeof providerInputSchema>;
 
+const approvalModeSchema = z.enum(['ask', 'edits', 'auto']);
+
+/** Allow-list entries with shell operators can never match a command, so they are rejected up front. */
+const allowEntry = z
+  .string()
+  .trim()
+  .min(1)
+  .max(200)
+  .refine((v) => !hasShellMetacharacters(v), 'Allowed commands cannot contain shell operators such as ; | & $ > <');
+
+/**
+ * The settings the Settings view may change, each with its own value schema. Anything else (providers, headers,
+ * models) goes through dedicated messages, so the webview can never write an arbitrary key.
+ */
+export const settingUpdateSchema = z.discriminatedUnion('key', [
+  z.object({ key: z.literal('approvals.mode'), value: approvalModeSchema }),
+  z.object({ key: z.literal('approvals.allowedCommands'), value: z.array(allowEntry).max(200) }),
+  z.object({ key: z.literal('security.protectedPaths'), value: z.array(z.string().trim().min(1).max(300)).max(200) }),
+  z.object({ key: z.literal('agent.maxIterations'), value: z.number().int().min(1).max(200) }),
+  z.object({ key: z.literal('terminal.timeoutSeconds'), value: z.number().int().min(5).max(3600) }),
+  z.object({ key: z.literal('terminal.mirrorToTerminal'), value: z.boolean() }),
+  z.object({ key: z.literal('diff.openOnProposal'), value: z.boolean() }),
+  z.object({ key: z.literal('context.includeActiveEditor'), value: z.boolean() }),
+  z.object({ key: z.literal('context.autoCompact'), value: z.boolean() }),
+  z.object({ key: z.literal('context.projectInstructions'), value: z.boolean() }),
+  z.object({ key: z.literal('context.maxToolResultChars'), value: z.number().int().min(2000).max(200_000) }),
+  z.object({ key: z.literal('sessions.persist'), value: z.boolean() }),
+]);
+export type SettingUpdate = z.infer<typeof settingUpdateSchema>;
+export type SettingKey = SettingUpdate['key'];
+
 export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ready') }),
   z.object({ type: z.literal('send'), text: z.string().min(1).max(200_000) }),
@@ -190,6 +251,8 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
     approved: z.boolean(),
     grant: z.literal('session-edits').optional(),
     feedback: z.string().max(4000).optional(),
+    /** Adds this prefix to the allowed commands before running (the host checks it matches the command). */
+    allowCommand: allowEntry.optional(),
   }),
   z.object({ type: z.literal('openApprovalDiff'), id }),
   z.object({ type: z.literal('newSession') }),
@@ -197,16 +260,35 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('renameSession'), id, title: z.string().trim().min(1).max(120) }),
   z.object({ type: z.literal('deleteSession'), id }),
   z.object({ type: z.literal('setMode'), mode: z.enum(['plan', 'act']) }),
+  z.object({ type: z.literal('setApprovalMode'), mode: approvalModeSchema }),
   z.object({ type: z.literal('pickModel') }),
   z.object({ type: z.literal('selectModel'), providerId, modelId: z.string().min(1).max(200) }),
+  /** Sets the Act or Plan model explicitly; a Plan model without ids means "same as Act". */
+  z.object({
+    type: z.literal('setModel'),
+    role: z.enum(['act', 'plan']),
+    providerId: providerId.optional(),
+    modelId: z.string().min(1).max(200).optional(),
+  }),
+  z.object({
+    type: z.literal('addModels'),
+    providerId,
+    modelIds: z.array(z.string().trim().min(1).max(200)).min(1).max(200),
+    /** Model to select as the Act model once added. */
+    select: z.string().min(1).max(200).optional(),
+  }),
+  z.object({ type: z.literal('discoverModels') }),
+  z.object({ type: z.literal('updateSetting'), setting: settingUpdateSchema }),
+  z.object({ type: z.literal('showLogs') }),
   z.object({ type: z.literal('attachFiles') }),
   z.object({ type: z.literal('removeAttachment'), id }),
   z.object({ type: z.literal('setIncludeEditor'), value: z.boolean() }),
   z.object({ type: z.literal('openFile'), path: z.string().min(1).max(2000), line: z.number().int().min(1).optional() }),
   z.object({ type: z.literal('openExternal'), url: z.string().max(4000) }),
   z.object({ type: z.literal('insertCode'), code: z.string().max(500_000) }),
-  z.object({ type: z.literal('setView'), view: z.enum(['chat', 'history', 'providers']) }),
-  z.object({ type: z.literal('saveProvider'), provider: providerInputSchema }),
+  z.object({ type: z.literal('setView'), view: z.enum(['chat', 'history', 'providers', 'settings']) }),
+  /** With a requestId the host answers `providerSaved`, then tests the connection and reports `providerTest`. */
+  z.object({ type: z.literal('saveProvider'), provider: providerInputSchema, requestId: id.optional() }),
   z.object({ type: z.literal('deleteProvider'), id: providerId }),
   z.object({ type: z.literal('testProvider'), requestId: id, providerId }),
   z.object({ type: z.literal('setApiKey'), providerId }),

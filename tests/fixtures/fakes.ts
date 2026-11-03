@@ -21,6 +21,8 @@ export class MemoryWorkspace implements WorkspacePort {
   readonly dirs = new Set<string>([this.root]);
   /** absolute path prefix → real target (for symlink tests). */
   readonly links = new Map<string, string>();
+  /** Absolute paths that exist but cannot be resolved, like a broken symbolic link. */
+  readonly broken = new Set<string>();
   trusted = true;
   active: EditorContext | null = null;
   writes: string[] = [];
@@ -57,9 +59,11 @@ export class MemoryWorkspace implements WorkspacePort {
   async stat(abs: string): Promise<FileStat | null> {
     if (this.files.has(abs)) return { type: 'file', size: this.files.get(abs)!.length, mtimeMs: 0 };
     if (this.dirs.has(abs)) return { type: 'directory', size: 0, mtimeMs: 0 };
+    if (this.broken.has(abs)) return { type: 'other', size: 0, mtimeMs: 0 };
     return null;
   }
   async realpath(abs: string) {
+    if (this.broken.has(abs)) throw Object.assign(new Error(`ENOENT: ${abs}`), { code: 'ENOENT' });
     for (const [link, target] of this.links) {
       if (abs === link || abs.startsWith(link + path.sep)) return target + abs.slice(link.length);
     }

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { commandRiskHints } from '../../permissions/commands';
+import { commandPathRisks, commandRiskHints } from '../../permissions/commands';
 import { resolveAndVerify } from '../../security/paths';
 import { ToolError, defineTool } from '../types';
 
@@ -24,11 +24,18 @@ export const executeTerminalTool = defineTool({
     const stat = await ctx.workspace.stat(resolved.absolute);
     if (!stat || stat.type !== 'directory') throw new ToolError(`Working directory ${resolved.relative} does not exist.`);
     const state: TerminalState = { cwd: resolved.absolute, cwdRelative: resolved.relative };
+    // Commands can read files the read tools protect, so the paths they name are checked too.
+    const risks = commandPathRisks(a.command, {
+      protectedPaths: ctx.settings.protectedPaths,
+      roots: ctx.workspace.roots().map((r) => r.path),
+    });
+    const warnings = [...new Set([...commandRiskHints(a.command), ...risks])];
     return {
       paths: [],
       command: a.command,
+      risks,
       state,
-      approval: { kind: 'command', command: a.command, cwd: resolved.relative, warnings: commandRiskHints(a.command) },
+      approval: { kind: 'command', command: a.command, cwd: resolved.relative, warnings },
     };
   },
   async execute(a, ctx, prepared) {

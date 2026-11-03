@@ -72,6 +72,11 @@ export async function activate(context: vscode.ExtensionContext) {
       controller.showView('providers');
       await reveal();
     }),
+    command('sovran.openSettings', async () => {
+      controller.showView('settings');
+      await reveal();
+    }),
+    command('sovran.setApprovalMode', () => controller.pickApprovalMode()),
     command('sovran.selectModel', () => controller.pickModel()),
     command('sovran.setApiKey', () => controller.promptApiKey()),
     command('sovran.toggleMode', () => controller.toggleMode()),

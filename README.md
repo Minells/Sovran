@@ -23,7 +23,7 @@ Most AI coding tools assume a specific vendor, a cloud account or a separate edi
 - **Your models.** Sovran works with any OpenAI-compatible Chat Completions endpoint, including Ollama, LM Studio, vLLM, LiteLLM, llama.cpp, LocalAI and internal gateways.
 - **Your infrastructure.** The extension talks directly to your endpoint. There is no Sovran server, no account and no telemetry.
 - **Your code.** Nothing leaves your machine except the requests you send to endpoints you configured.
-- **Your control.** Every file change is previewed in VS Code's diff editor, and every command needs your approval. Plan mode is read-only by construction, not by prompt.
+- **Your control.** By default every file change is previewed in VS Code's diff editor and every command needs your approval. When you trust the task, Auto-edit and Auto hand over more, while guardrails in code still stop risky actions. Plan mode is read-only by construction, not by prompt.
 
 ## Features
 
@@ -54,10 +54,34 @@ It works through ten built-in tools:
 |---|---|---|
 | Read & search the workspace | ✓ | ✓ |
 | Produce a structured plan | ✓ | ✓ |
-| Edit files | ✗ (tools are not even offered) | ✓ with diff approval |
-| Run commands | ✗ | ✓ with approval |
+| Edit files | ✗ (tools are not even offered) | ✓ (see approvals below) |
+| Run commands | ✗ | ✓ (see approvals below) |
 
-The current mode is always visible: blue means read-only, amber means the agent can change things.
+**Approvals in Act mode: Ask, Auto-edit and Auto.** Pick how much Sovran may do without asking from the composer
+(<kbd>Alt+A</kbd> cycles), from Settings or with `Sovran: Change Approval Mode…`:
+
+| | Ask (default) | Auto-edit | Auto |
+|---|---|---|---|
+| File changes | Diff review for each | Applied without asking | Applied without asking |
+| Commands | Approve each (allowed commands run directly) | Approve each | Run without asking |
+| Protected files, risky commands | Ask | Ask | **Still ask** |
+
+Auto works like Claude Code's auto-accept, with guardrails enforced in code: commands that delete recursively, push or
+force-push, publish, use `sudo`, run downloaded or hidden scripts, reach the network, read credentials or touch paths
+outside the workspace always stop for you, and so do protected files. The card says why. Everything that ran without
+asking carries an *auto* badge, and each response can still be undone with **Undo changes**. Turning Auto on asks for
+confirmation once per window, and new windows start in the mode set by `sovran.approvals.mode` (Ask by default).
+
+<p align="center">
+  <img src="media/screenshots/approval-modes-dark.png" width="320" alt="The approvals menu with Ask, Auto-edit and Auto">
+  &nbsp;
+  <img src="media/screenshots/auto-mode-dark.png" width="320" alt="Auto mode: edits and tests ran without asking, a push still asks">
+</p>
+
+On a command card, **Always allow…** adds the command's prefix (for example `npm test`) to your allowed commands after
+showing you exactly what will be allowed.
+
+The current mode is always visible in the composer and the status bar.
 
 **Built for imperfect servers.** "OpenAI-compatible" covers a wide range of behavior, so Sovran detects what each model supports:
 
@@ -71,9 +95,10 @@ Errors tell you what went wrong and how to fix it.
 
 - The model picker is a Quick Pick, and the status bar shows the model and mode.
 - The UI follows your theme, including high contrast.
-- Keyboard first: <kbd>Enter</kbd> sends, <kbd>Shift+Enter</kbd> adds a newline, <kbd>Esc</kbd> stops, <kbd>Alt+M</kbd> switches mode.
+- Keyboard first: <kbd>Enter</kbd> sends, <kbd>Shift+Enter</kbd> adds a newline, <kbd>Esc</kbd> stops, <kbd>Alt+M</kbd> switches mode, <kbd>Alt+A</kbd> cycles approvals.
+- **Settings in the panel.** The gear in the view title opens Sovran Settings: Act and Plan models, providers, approvals, allowed commands, protected files, limits and context options, without editing JSON.
 
-**Context you can see.** The active file or selection is attached as a chip you can toggle. You can add more files from a Quick Pick. Large files are paged and long conversations are trimmed to the model's context window.
+**Context you can see.** The active file or selection is attached as a chip you can toggle. Files outside the workspace and protected files are never attached automatically, and their chip says so. You can add more files from a Quick Pick. Large files are paged and long conversations are trimmed to the model's context window.
 
 **Conversations that persist.** Chats are saved per workspace and restored after restart, and you can search, rename or delete them.
 
@@ -106,16 +131,22 @@ Requires VS Code 1.95 or later.
 
 ## Quick start
 
-1. Click the **Sovran** icon in the Activity Bar.
-2. Pick a preset (Ollama, LM Studio, vLLM, LiteLLM) or **Enterprise gateway**, and adjust the URL.
-3. If the endpoint needs a key, VS Code asks for it in a secure input. Keys are stored in VS Code Secret Storage, never in settings.
-4. Click **Test connection**, add a discovered model, and start a chat.
+1. Click the **Sovran** icon in the Activity Bar. A three-step setup opens.
+2. **Choose** where your model runs: Ollama, LM Studio, vLLM, LiteLLM or a **custom endpoint** such as your company gateway.
+3. **Connect**: check the URL and authentication. If the endpoint needs a key, VS Code asks for it in a secure input. Keys are stored in VS Code Secret Storage, never in settings. Sovran tests the connection right away.
+4. **Choose a model** from the ones the server reports (or type its ID) and start chatting.
 
-<p align="center"><img src="media/screenshots/onboarding-dark.png" width="320" alt="Onboarding with provider presets"></p>
+Everything else (a separate Plan model, more providers, approvals and limits) lives behind the gear in the view title.
+
+<p align="center">
+  <img src="media/screenshots/onboarding-dark.png" width="320" alt="Guided setup with provider presets">
+  &nbsp;
+  <img src="media/screenshots/settings-dark.png" width="320" alt="Sovran Settings in the panel">
+</p>
 
 ## Provider setup examples
 
-Providers live in your **user** settings (`sovran.providers`). Workspace settings are ignored for security; see [Security](#security).
+Providers live in your **user** settings (`sovran.providers`). Workspace settings are ignored for security; see [Security](#security). The guided setup and **Settings → Manage providers** write these entries for you; the examples below are for reference and for advanced options such as extra headers.
 
 **Ollama (local)**
 ```jsonc
@@ -162,9 +193,9 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
 | `sovran.defaultModel` | `""` | `providerId/modelId` for new chats (the Act model) |
 | `sovran.planModel` | `""` | Model for Plan mode. Empty means the same as Act |
 | `sovran.agent.maxIterations` | `25` | Maximum model round-trips per request |
-| `sovran.approvals.fileEdits` | `ask` | `ask` shows a diff for every change. `auto` applies changes without asking, but protected paths still ask |
-| `sovran.approvals.allowedCommands` | `[]` | Commands that run without asking, for example `npm test`. Never applies to commands that contain shell operators |
-| `sovran.security.protectedPaths` | `.env`, keys, `.git/` and others | Always ask before reading or changing these. Their contents are excluded from search |
+| `sovran.approvals.mode` | `ask` | Approval mode a new window starts in: `ask`, `edits` (Auto-edit) or `auto`. User scope only |
+| `sovran.approvals.allowedCommands` | `[]` | Commands that run without asking, for example `npm test`. Never applies to commands that contain shell operators or trip a guardrail |
+| `sovran.security.protectedPaths` | `.env`, keys, `.git/` and others | Always ask before reading, changing or naming these in a command, in every mode. Their contents are excluded from search |
 | `sovran.terminal.timeoutSeconds` | `120` | Command timeout |
 | `sovran.terminal.mirrorToTerminal` | `true` | Show command output in a Sovran terminal |
 | `sovran.context.includeActiveEditor` | `true` | Attach the active file or selection by default |
@@ -173,13 +204,17 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
 | `sovran.context.projectInstructions` | `true` | Use `AGENTS.md` from the workspace root (trusted workspaces only) |
 | `sovran.sessions.persist` | `true` | Save chats in VS Code workspace storage |
 | `sovran.diff.openOnProposal` | `true` | Open the diff editor automatically for proposed edits |
+| `sovran.approvals.fileEdits` | `ask` | *Deprecated*: use `sovran.approvals.mode`. `auto` here still starts windows in Auto-edit |
+
+All of these can be changed from **Sovran Settings** (the gear in the view title); the VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *Context* and *Chats*.
 
 ## Security
 
 Sovran executes actions on your behalf, so its safety controls are enforced in code rather than in the prompt:
 
 - **Credentials:** API keys stay in Secret Storage and in the extension host. They are never sent to the UI and are redacted from logs and errors.
-- **Approvals:** every file write is reviewed in a diff and checked for changes made while it waited. Every command is previewed, and the preview warns about risky patterns and invisible characters.
+- **Approvals:** in Ask mode every file write is reviewed in a diff and checked for changes made while it waited, and every command is previewed with warnings about risky patterns and invisible characters. Auto-edit and Auto skip those questions, but protected files and risky commands still ask, and the transcript marks what ran unattended.
+- **Endpoints:** requests never follow redirects, so your key and code only go to the address you configured. A key sent over plain `http` to another machine is flagged in the UI.
 - **Workspace boundary:** paths are confined to the workspace, including through symlinks. Commands run inside the workspace with a timeout and can be cancelled.
 - **Untrusted repositories:** a cloned repository cannot change your providers, approval policy or allow-list, because those settings are read from user scope only. In Restricted Mode, Sovran stays in Plan mode.
 

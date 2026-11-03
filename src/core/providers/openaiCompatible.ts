@@ -1,5 +1,5 @@
 import { parseSSE } from './sse';
-import { ProviderError, errorFromException, errorFromResponse } from './errors';
+import { ProviderError, errorFromException, errorFromResponse, isRedirect, redirectError } from './errors';
 import type { ChatProvider, ChatRequest, ProviderConfig, ProviderEvent } from './types';
 
 export interface OpenAICompatibleOptions {
@@ -89,7 +89,8 @@ export class OpenAICompatibleProvider implements ChatProvider {
     try {
       const h = await this.headers(false);
       secret = h.secret;
-      const res = await this.fetchImpl(url, { headers: h.headers, signal: watchdog.signal });
+      const res = await this.fetchImpl(url, { headers: h.headers, signal: watchdog.signal, redirect: 'manual' });
+      if (isRedirect(res.status)) throw redirectError(res.status, res.headers.get('location'), url);
       const text = await res.text();
       if (!res.ok) throw errorFromResponse(res.status, text, { url, secrets: [secret] });
       let json: unknown;
@@ -131,7 +132,10 @@ export class OpenAICompatibleProvider implements ChatProvider {
         headers: h.headers,
         body: JSON.stringify(body),
         signal: watchdog.signal,
+        // Never forward credentials or code to an address the user did not configure (see redirectError).
+        redirect: 'manual',
       });
+      if (isRedirect(res.status)) throw redirectError(res.status, res.headers.get('location'), url);
       if (!res.ok) throw errorFromResponse(res.status, await res.text(), { url, toolsSent, secrets: [secret] });
       watchdog.reset();
 

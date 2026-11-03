@@ -67,14 +67,25 @@ export async function resolveAndVerify(input: string, workspace: WorkspacePort):
   const resolved = resolveWorkspacePath(input, workspace.roots());
   const realRoot = await workspace.realpath(resolved.root.path).catch(() => resolved.root.path);
   let probe = resolved.absolute;
+  let exists = false;
   for (;;) {
-    const stat = await workspace.stat(probe);
-    if (stat) break;
+    if (await workspace.stat(probe)) {
+      exists = true;
+      break;
+    }
     const parent = path.dirname(probe);
     if (parent === probe) break;
     probe = parent;
   }
-  const realProbe = await workspace.realpath(probe).catch(() => probe);
+  let realProbe: string;
+  try {
+    realProbe = await workspace.realpath(probe);
+  } catch {
+    // Something exists here but cannot be resolved (typically a broken symbolic link): its target is unknown,
+    // so it must not be treated as inside the workspace. Fail closed.
+    if (exists) throw new PathError(`"${input}" cannot be verified (it may be a broken symbolic link).`);
+    realProbe = probe;
+  }
   if (!isInside(realRoot, realProbe)) {
     throw new PathError(`"${input}" resolves through a symbolic link to a location outside the workspace.`);
   }

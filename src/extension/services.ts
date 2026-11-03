@@ -65,21 +65,34 @@ export function createLogger(): HostLogger {
   };
 }
 
+export interface StatusBarState {
+  model: string | null;
+  location: string | null;
+  endpoint: string | null;
+  mode: 'plan' | 'act';
+  approvalMode: 'ask' | 'edits' | 'auto';
+  running: boolean;
+}
+
+const APPROVAL_TEXT = { ask: 'approves every change', edits: 'Auto-edit: applies file changes without asking', auto: 'Auto: runs without asking (guardrails still ask)' };
+
 export class SovranStatusBar implements vscode.Disposable {
   private readonly item = vscode.window.createStatusBarItem('sovran.status', vscode.StatusBarAlignment.Right, 100);
   constructor() {
     this.item.name = 'Sovran';
     this.item.command = 'sovran.selectModel';
-    this.update({ model: null, location: null, endpoint: null, mode: 'act', running: false });
+    this.update({ model: null, location: null, endpoint: null, mode: 'act', approvalMode: 'ask', running: false });
     this.item.show();
   }
-  /** Text format: `$(sovran-logo) sovran · <model> · <where requests go>`. */
-  update(s: { model: string | null; location: string | null; endpoint: string | null; mode: 'plan' | 'act'; running: boolean }) {
+  /** Text format: `$(sovran-logo) sovran · <model> · <where requests go>[ · auto]`. */
+  update(s: StatusBarState) {
     const icon = s.running ? '$(loading~spin)' : '$(sovran-logo)';
-    this.item.text = [`${icon} sovran`, s.model ?? 'no model', ...(s.model && s.location ? [s.location] : [])].join(' · ');
+    // Unattended modes are always visible: they change what the agent may do without asking.
+    const unattended = s.mode === 'act' && s.approvalMode !== 'ask' ? [s.approvalMode === 'auto' ? '$(zap) auto' : 'auto-edit'] : [];
+    this.item.text = [`${icon} sovran`, s.model ?? 'no model', ...(s.model && s.location ? [s.location] : []), ...unattended].join(' · ');
     const tip = new vscode.MarkdownString(
       [
-        `**Sovran** · ${s.mode === 'plan' ? 'Plan mode (read-only)' : 'Act mode'}`,
+        `**Sovran** · ${s.mode === 'plan' ? 'Plan mode (read-only)' : `Act mode · ${APPROVAL_TEXT[s.approvalMode]}`}`,
         `Model: ${s.model ?? 'none selected'}`,
         s.endpoint ? `Endpoint: \`${s.endpoint}\`` : '',
         'Click to change model.',
@@ -88,7 +101,8 @@ export class SovranStatusBar implements vscode.Disposable {
         .join('\n\n'),
     );
     this.item.tooltip = tip;
-    this.item.backgroundColor = s.model ? undefined : new vscode.ThemeColor('statusBarItem.warningBackground');
+    const warn = !s.model || (s.mode === 'act' && s.approvalMode === 'auto');
+    this.item.backgroundColor = warn ? new vscode.ThemeColor('statusBarItem.warningBackground') : undefined;
   }
   dispose() {
     this.item.dispose();

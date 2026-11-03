@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { Checkpoint, FileSnapshot } from '../../core/checkpoints/checkpoints';
@@ -16,7 +17,8 @@ export class FsCheckpointRepository {
   async save(cp: Checkpoint): Promise<void> {
     await fs.mkdir(this.dir, { recursive: true });
     const target = this.file(cp.sessionId, cp.id);
-    const tmp = `${target}.${process.pid}.tmp`;
+    // Unique per write: two saves of the same checkpoint must not share (and corrupt) one temporary file.
+    const tmp = `${target}.${process.pid}.${randomUUID()}.tmp`;
     await fs.writeFile(tmp, JSON.stringify(cp), 'utf8');
     await fs.rename(tmp, target);
   }

@@ -12,7 +12,8 @@ export type ProviderErrorKind =
   | 'tls'
   | 'timeout'
   | 'cancelled'
-  | 'invalid_response';
+  | 'invalid_response'
+  | 'redirect';
 
 export class ProviderError extends Error {
   override name = 'ProviderError';
@@ -88,6 +89,28 @@ export function errorFromResponse(status: number, body: string, ctx: ErrorContex
   if (status >= 500) return new ProviderError('server', detail, 'The model server reported an internal error.', status);
   return new ProviderError('bad_request', detail, undefined, status);
 }
+
+/**
+ * Redirects are never followed: fetch keeps custom auth headers (e.g. `api-key`) and the request body (prompts and
+ * code) when it follows a redirect to another origin, so a misconfigured or compromised gateway could forward both.
+ */
+export function redirectError(status: number, location: string | null, url: string): ProviderError {
+  let target = '';
+  try {
+    const t = new URL(location ?? '', url);
+    target = `${t.origin}${t.pathname}`;
+  } catch {
+    /* no usable Location header */
+  }
+  return new ProviderError(
+    'redirect',
+    `HTTP ${status}: ${origin(url)} redirected the request${target ? ` to ${target}` : ''}.`,
+    'Sovran does not follow redirects, so your API key and code are never sent to an address you did not configure. If the new address is correct, use it as the base URL.',
+    status,
+  );
+}
+
+export const isRedirect = (status: number) => status >= 300 && status < 400;
 
 const TLS_CODES = new Set([
   'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
