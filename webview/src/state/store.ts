@@ -14,11 +14,12 @@ export interface UiState {
   providerTests: Record<string, ProviderTestResult & { requestId: string }>;
   focusToken: number;
   focusText?: string;
+  fileSuggestions: { requestId: string; items: Array<{ path: string; label: string }> } | null;
 }
 
 export type UiAction = HostMessage | { type: 'dismissNotice'; id: string };
 
-export const initialUiState: UiState = { app: null, notices: [], toolOutputs: {}, providerTests: {}, focusToken: 0 };
+export const initialUiState: UiState = { app: null, notices: [], toolOutputs: {}, providerTests: {}, focusToken: 0, fileSuggestions: null };
 
 const MAX_OUTPUT = 60_000;
 
@@ -74,6 +75,8 @@ export function reducer(state: UiState, action: UiAction): UiState {
       return { ...state, providerTests: { ...state.providerTests, [action.providerId]: { ...action.result, requestId: action.requestId } } };
     case 'focusComposer':
       return { ...state, focusToken: state.focusToken + 1, focusText: action.text };
+    case 'fileSuggestions':
+      return { ...state, fileSuggestions: { requestId: action.requestId, items: action.items } };
     default:
       return state;
   }

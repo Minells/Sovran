@@ -14,6 +14,7 @@ const COMMANDS = [
   'sovran.attachFiles',
   'sovran.cancelRun',
   'sovran.showLogs',
+  'sovran.compact',
 ];
 
 async function test(name, fn) {
