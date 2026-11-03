@@ -1,0 +1,12 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build-dev",
+      "type": "shell",
+      "command": "node scripts/build-host.mjs && npx vite build --config webview/vite.config.ts --mode development",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": []
+    }
+  ]
+}

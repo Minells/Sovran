@@ -1,0 +1,12 @@
+**
+!dist/extension.js
+!dist/extension.js.LEGAL.txt
+!dist/webview/**
+!media/icon.png
+!media/activity-bar.svg
+!package.json
+!README.md
+!CHANGELOG.md
+!LICENSE
+!SECURITY.md
+!THIRD_PARTY_NOTICES.md
