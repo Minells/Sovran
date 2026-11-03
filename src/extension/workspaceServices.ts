@@ -25,9 +25,16 @@ export class FileIndex implements vscode.Disposable {
     return this.files;
   }
 
-  async suggest(query: string, limit = 20): Promise<Array<{ path: string; label: string }>> {
+  /** Fuzzy matches for `query`. Without a query, `preferred` files (open editors) come first, then the rest. */
+  async suggest(query: string, limit = 20, preferred: readonly string[] = []): Promise<Array<{ path: string; label: string }>> {
     const all = await this.list();
-    const ranked = query.trim() ? rankFuzzy(query, all, limit) : all.slice(0, limit);
+    let ranked: string[];
+    if (query.trim()) ranked = rankFuzzy(query, all, limit);
+    else {
+      const first = [...new Set(preferred)];
+      const seen = new Set(first);
+      ranked = [...first, ...all.filter((p) => !seen.has(p))].slice(0, limit);
+    }
     return ranked.map((p) => ({ path: p, label: path.basename(p) }));
   }
 

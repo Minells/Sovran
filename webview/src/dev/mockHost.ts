@@ -25,6 +25,8 @@ const THEMES: Record<string, Record<string, string>> = {
     focusBorder: '#0078d4',
     'list-hoverBackground': '#2a2d2e',
     'list-inactiveSelectionBackground': '#37373d',
+    'list-activeSelectionBackground': '#04395e',
+    'list-activeSelectionForeground': '#ffffff',
     'input-background': '#313131',
     'input-foreground': '#cccccc',
     'input-border': '#3c3c3c',
@@ -65,6 +67,8 @@ const THEMES: Record<string, Record<string, string>> = {
     focusBorder: '#005fb8',
     'list-hoverBackground': '#f2f2f2',
     'list-inactiveSelectionBackground': '#e4e6f1',
+    'list-activeSelectionBackground': '#e8e8e8',
+    'list-activeSelectionForeground': '#000000',
     'input-background': '#ffffff',
     'input-foreground': '#3b3b3b',
     'input-border': '#cecece',
@@ -221,10 +225,23 @@ const autoConversation: SessionMessage[] = [
   },
 ];
 
+const doneConversation: SessionMessage[] = [
+  ...conversation.slice(0, 2),
+  { role: 'user', id: 'u9', createdAt: now - 20_000, content: 'Is the health check covered by tests?' },
+  {
+    role: 'assistant',
+    id: 'a9',
+    createdAt: now - 18_000,
+    model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
+    content:
+      'Not yet: `src/http/health.ts` has no test. A request to `GET /healthz` that expects **200** and `{ "status": "ok" }` would cover it, next to the existing tests in `test/http`.',
+  },
+];
+
 const diff = `--- a/src/auth/session.ts\n+++ b/src/auth/session.ts\n@@ -1,7 +1,7 @@\n import { randomUUID } from 'node:crypto';\n import type { User } from '../users';\n \n-const TTL = 3600;\n+const TTL = Number(process.env.SESSION_TTL ?? 3600);\n \n export interface Session {\n   id: string;`;
 
 function baseState(): AppState {
-  const messages = scenario === 'conversation' ? conversation : scenario === 'auto' ? autoConversation : [];
+  const messages = scenario === 'conversation' ? conversation : scenario === 'auto' ? autoConversation : scenario === 'done' ? doneConversation : [];
   const approvalParam = (['ask', 'edits', 'auto'] as const).find((m) => m === params.get('approval')) ?? 'ask';
   return {
     view: scenario === 'providers' ? 'providers' : scenario === 'history' ? 'history' : scenario === 'settings' ? 'settings' : 'chat',
@@ -239,7 +256,7 @@ function baseState(): AppState {
       { id: 's3', title: 'Plan the migration to Postgres 17', createdAt: now - 86_400_000 * 1.2, updatedAt: now - 86_400_000 * 1.2, messageCount: 11 },
       { id: 's4', title: 'Add tests for the billing webhooks', createdAt: now - 86_400_000 * 4, updatedAt: now - 86_400_000 * 4, messageCount: 9 },
     ],
-    session: { id: 's1', title: messages.length ? 'Make the session TTL configurable' : 'New chat', messages },
+    session: { id: messages.length ? 's1' : 'draft', title: messages.length ? 'Make the session TTL configurable' : 'New chat', messages },
     run:
       scenario === 'conversation'
         ? { sessionId: 's1', iteration: 3, maxIterations: 25, startedAt: now - 58_000, activity: { phase: 'awaiting_approval', label: 'src/auth/session.ts', toolName: 'edit_file', callId: 't3' } }
@@ -262,7 +279,14 @@ function baseState(): AppState {
             ]
           : [],
     context: {
-      editor: params.get('editor') === 'outside' ? { path: '/home/dev/.aws/credentials', label: 'credentials', blocked: 'outside' } : { path: 'src/auth/session.ts', label: 'session.ts' },
+      editor:
+        params.get('editor') === 'outside'
+          ? { path: '/home/dev/.aws/credentials', label: 'credentials', blocked: 'outside' }
+          : params.get('editor') === 'none'
+            ? null
+            : params.get('editor') === 'selection'
+              ? { path: 'src/auth/session.ts', label: 'session.ts:12-30', startLine: 12, endLine: 30 }
+              : { path: 'src/auth/session.ts', label: 'session.ts' },
       includeEditor: true,
       attachments: [],
     },
@@ -299,6 +323,45 @@ function baseState(): AppState {
 
 let state = baseState();
 const send = (m: HostMessage) => window.postMessage(m, '*');
+
+/** A small fake repository for the attach menu. */
+const TREE: Record<string, Array<{ name: string; type: 'file' | 'directory' }>> = {
+  '': [
+    { name: '.github', type: 'directory' },
+    { name: 'src', type: 'directory' },
+    { name: 'test', type: 'directory' },
+    { name: '.env', type: 'file' },
+    { name: 'AGENTS.md', type: 'file' },
+    { name: 'package.json', type: 'file' },
+    { name: 'README.md', type: 'file' },
+    { name: 'tsconfig.json', type: 'file' },
+  ],
+  '.github': [{ name: 'workflows', type: 'directory' }],
+  '.github/workflows': [{ name: 'ci.yml', type: 'file' }],
+  src: [
+    { name: 'auth', type: 'directory' },
+    { name: 'http', type: 'directory' },
+    { name: 'index.ts', type: 'file' },
+  ],
+  'src/auth': [
+    { name: 'refresh.ts', type: 'file' },
+    { name: 'session.ts', type: 'file' },
+  ],
+  'src/http': [
+    { name: 'client.ts', type: 'file' },
+    { name: 'health.ts', type: 'file' },
+    { name: 'server.ts', type: 'file' },
+  ],
+  test: [{ name: 'auth', type: 'directory' }],
+  'test/auth': [{ name: 'session.spec.ts', type: 'file' }],
+};
+const ALL_FILES = Object.entries(TREE).flatMap(([dir, entries]) => entries.filter((e) => e.type === 'file').map((e) => (dir ? `${dir}/${e.name}` : e.name)));
+const OPEN = ['src/auth/session.ts', 'src/http/server.ts', 'src/auth/refresh.ts'];
+let attachmentSeq = 0;
+const setAttachments = (attachments: AppState['context']['attachments']) => {
+  state = { ...state, context: { ...state.context, attachments } };
+  send({ type: 'patch', patch: { context: state.context } });
+};
 
 onPost((m) => {
   switch (m.type) {
@@ -369,14 +432,34 @@ onPost((m) => {
     case 'approval':
       return send({ type: 'patch', patch: { approvals: [], run: null } });
     case 'suggestFiles': {
-      const files = ['src/auth/session.ts', 'src/auth/refresh.ts', 'src/http/server.ts', 'src/http/health.ts', 'test/auth/session.spec.ts'];
       const q = m.query.toLowerCase();
-      return send({
-        type: 'fileSuggestions',
-        requestId: m.requestId,
-        items: files.filter((f) => f.toLowerCase().includes(q)).map((f) => ({ path: f, label: f.split('/').pop()! })),
-      });
+      const items = q
+        ? ALL_FILES.filter((f) => f.toLowerCase().includes(q)).map((f) => ({ path: f, label: f.split('/').pop()! }))
+        : [
+            ...OPEN.map((f, i) => ({ path: f, label: f.split('/').pop()!, hint: i === 0 ? ('active' as const) : ('open' as const) })),
+            ...ALL_FILES.filter((f) => !OPEN.includes(f)).map((f) => ({ path: f, label: f.split('/').pop()! })),
+          ];
+      return send({ type: 'fileSuggestions', requestId: m.requestId, items });
     }
+    case 'listDirectory': {
+      const dir = m.path;
+      const entries = (TREE[dir] ?? []).map((e) => ({
+        ...e,
+        path: dir ? `${dir}/${e.name}` : e.name,
+        ...(e.name === '.env' ? { protected: true } : {}),
+      }));
+      return setTimeout(() => send({ type: 'directoryListing', requestId: m.requestId, listing: { path: dir, entries } }), 60);
+    }
+    case 'attachPath':
+      if (state.context.attachments.some((a) => a.path === m.path)) return;
+      return setAttachments([...state.context.attachments, { id: `att${++attachmentSeq}`, path: m.path, label: m.path.split('/').pop()! }]);
+    case 'removeAttachment':
+      return setAttachments(state.context.attachments.filter((a) => a.id !== m.id));
+    case 'uploadFiles':
+      return setTimeout(
+        () => setAttachments([...state.context.attachments, { id: `att${++attachmentSeq}`, path: '~/Downloads/api-spec.md', label: 'api-spec.md', external: true }]),
+        300,
+      );
     default:
       // eslint-disable-next-line no-console -- development harness only
       console.info('[mock host] received', m);

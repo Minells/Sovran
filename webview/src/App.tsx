@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useReducer, useState } from 'react';
 import type { HostMessage } from '../../src/shared/protocol';
 import { Composer, RunStatus } from './components/Composer';
-import { EmptyState, HistoryView, Notices, ProvidersView, useSetupActive } from './components/Panels';
+import { EmptyState } from './components/Home';
+import { HistoryView, Notices, ProvidersView, useSetupActive } from './components/Panels';
 import { Mark } from './components/primitives';
 import { SettingsView } from './components/Settings';
 import { Transcript } from './components/Transcript';

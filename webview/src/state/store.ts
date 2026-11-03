@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { AppState, HostMessage, ProviderTestResult, SessionMessage } from '../../../src/shared/protocol';
+import type { AppState, DirectoryListingView, FileSuggestionView, HostMessage, ProviderTestResult, SessionMessage } from '../../../src/shared/protocol';
 
 export interface Notice {
   id: string;
@@ -14,7 +14,9 @@ export interface UiState {
   providerTests: Record<string, ProviderTestResult & { requestId: string }>;
   focusToken: number;
   focusText?: string;
-  fileSuggestions: { requestId: string; items: Array<{ path: string; label: string }> } | null;
+  fileSuggestions: { requestId: string; items: FileSuggestionView[] } | null;
+  /** Latest folder listing for the attach menu, matched to its request. */
+  directoryListing: { requestId: string; listing: DirectoryListingView } | null;
   /** Provider ids the host assigned to `saveProvider` requests, by request id (guided setup). */
   savedProviders: Record<string, string>;
   /** True while the guided setup is open, so it stays on screen after its provider is saved. */
@@ -30,6 +32,7 @@ export const initialUiState: UiState = {
   providerTests: {},
   focusToken: 0,
   fileSuggestions: null,
+  directoryListing: null,
   savedProviders: {},
   setupActive: false,
 };
@@ -94,6 +97,8 @@ export function reducer(state: UiState, action: UiAction): UiState {
       return { ...state, focusToken: state.focusToken + 1, focusText: action.text };
     case 'fileSuggestions':
       return { ...state, fileSuggestions: { requestId: action.requestId, items: action.items } };
+    case 'directoryListing':
+      return { ...state, directoryListing: { requestId: action.requestId, listing: action.listing } };
     default:
       return state;
   }

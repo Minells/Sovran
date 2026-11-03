@@ -235,7 +235,9 @@ All contracts are in `src/shared/protocol.ts`.
   against the approved command by the host), `openApprovalDiff`, `retry`, `editMessage`, `compact`, `restoreCheckpoint`
 - Sessions: `newSession`, `openSession`, `renameSession`, `deleteSession`
 - Modes and models: `setMode`, `setApprovalMode`, `pickModel`, `selectModel`, `setModel`, `addModels`, `discoverModels`
-- Context: `attachFiles`, `attachPath`, `removeAttachment`, `setIncludeEditor`, `suggestFiles`
+- Context: `attachFiles`, `attachPath`, `removeAttachment`, `setIncludeEditor`, `suggestFiles`, `listDirectory` (one workspace
+  folder for the attach menu, confined like every path) and `uploadFiles` (opens the system file dialog: the only way to
+  attach a file from outside the workspace, because the user picks it in a host-owned dialog)
 - Editor: `openFile`, `openExternal` (http/https only), `insertCode`
 - Providers: `saveProvider` (with an optional `requestId` for the guided setup), `deleteProvider`, `testProvider`, `setApiKey`
 - Settings and views: `updateSetting` (a discriminated union of the keys the Settings view may change, each with its
@@ -245,7 +247,8 @@ All contracts are in `src/shared/protocol.ts`.
 - `state`: a full snapshot (providers without secrets, `hasKey` booleans, sessions index, active
   session, run state, approvals, approval mode, settings view, workspace and trust info)
 - `patch` (partial state), and the incremental `messageUpsert`, `messageDelta` and `messageRemoved`
-- `toolOutput`, `notice`, `providerTest`, `providerSaved`, `fileSuggestions` and `focusComposer`
+- `toolOutput`, `notice`, `providerTest`, `providerSaved`, `fileSuggestions` (with an `active`/`open` hint for files open in
+  the editor), `directoryListing` and `focusComposer`
 
 The host batches text deltas (about 40 ms) to limit message traffic. The webview keeps only UI
 ephemera (draft text, scroll position, expanded rows) in `vscode.setState`.

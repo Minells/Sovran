@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import picomatch from 'picomatch';
 import { AgentRunner } from '../core/agent/agentRunner';
 import { CheckpointRecorder, planRestore, restoreFiles, type Checkpoint, type FileSnapshot } from '../core/checkpoints/checkpoints';
 import { expandCommand, mergeCommands, parseSlash, type SlashCommand } from '../core/commands/slashCommands';
@@ -9,12 +12,13 @@ import type { AgentEvent } from '../core/agent/events';
 import { matchesAllowList, suggestAllowPrefix } from '../core/permissions/commands';
 import type { AgentMode, ApprovalMode, SessionGrants } from '../core/permissions/policy';
 import { isProtectedPath } from '../core/permissions/policy';
-import type { ApprovalPort, ApprovalRequest, ApprovalResponse, WorkspacePort } from '../core/ports';
+import type { ApprovalPort, ApprovalRequest, ApprovalResponse, DirEntry, WorkspacePort, WorkspaceRoot } from '../core/ports';
 import { capabilityKey, type CapabilityStore } from '../core/providers/capabilities';
 import { ProviderError, errorFromException } from '../core/providers/errors';
 import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
 import type { ModelConfig, ProviderConfig } from '../core/providers/types';
-import { PathError, resolveAndVerify, resolveWorkspacePath } from '../core/security/paths';
+import { PathError, resolveAndVerify, resolveWorkspacePath, type ResolvedPath } from '../core/security/paths';
+import { compareEntries, displayPath, looksBinary } from '../core/util/files';
 import {
   DEFAULT_TITLE,
   deriveTitle,
@@ -31,7 +35,10 @@ import type {
   AppState,
   ApprovalView,
   AttachmentView,
+  DirectoryEntryView,
+  DirectoryListingView,
   EditorContextView,
+  FileSuggestionView,
   HostMessage,
   ProviderInput,
   ProviderTestResult,
@@ -65,7 +72,25 @@ import type { HostLogger, ProviderSecrets, SovranStatusBar } from './services';
 
 const MAX_ATTACHMENT_CHARS = 50_000;
 const MAX_EDITOR_FILE_CHARS = 12_000;
+/** Larger files are refused rather than read into memory only to be truncated to MAX_ATTACHMENT_CHARS. */
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+/** Entries sent per folder to the attach menu. */
+const MAX_LISTING = 500;
+/** Never shown in the attach menu: version-control internals and dependency folders. */
+const BROWSE_HIDDEN = new Set(['.git', '.hg', '.svn', 'node_modules']);
 const DELTA_FLUSH_MS = 40;
+
+/** The first bytes of a file, enough to tell text from binary without reading all of it. */
+async function readHead(absolute: string, length = 8000): Promise<Uint8Array> {
+  const handle = await fs.open(absolute, 'r');
+  try {
+    const buffer = new Uint8Array(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, 0);
+    return buffer.subarray(0, bytesRead);
+  } finally {
+    await handle.close();
+  }
+}
 
 export interface ControllerDeps {
   logger: HostLogger;
@@ -286,9 +311,13 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         case 'compact':
           return await this.compactNow();
         case 'suggestFiles':
-          return this.send({ type: 'fileSuggestions', requestId: msg.requestId, items: await this.deps.fileIndex.suggest(msg.query) });
+          return this.send({ type: 'fileSuggestions', requestId: msg.requestId, items: await this.suggestFiles(msg.query) });
         case 'attachPath':
           return await this.attachPath(msg.path);
+        case 'listDirectory':
+          return await this.listDirectory(msg.requestId, msg.path);
+        case 'uploadFiles':
+          return await this.uploadFiles();
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -382,7 +411,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     return {
       editor: this.editor,
       includeEditor: this.includeEditor,
-      attachments: this.attachments.map(({ id, path: p, label }) => ({ id, path: p, label })),
+      attachments: this.attachments.map(({ id, path: p, label, external }) => ({ id, path: p, label, ...(external ? { external } : {}) })),
     };
   }
 
@@ -477,10 +506,25 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     for (const a of this.attachments) {
       if (out.some((o) => o.path === a.path && o.kind === 'file')) continue;
       try {
-        // Re-verified at send time: a symbolic link must not smuggle a file from outside the workspace.
-        await resolveAndVerify(a.absolute, this.deps.workspace);
+        if (a.external) {
+          // Picked by the user in the system dialog. It may have changed since: check it is still a text file.
+          const problem = await this.fileProblem(a.absolute, a.path);
+          if (problem) {
+            this.notice('warning', problem);
+            continue;
+          }
+        } else {
+          // Re-verified at send time: a symbolic link must not smuggle a file from outside the workspace.
+          await resolveAndVerify(a.absolute, this.deps.workspace);
+        }
         const text = await this.deps.workspace.readFile(a.absolute);
-        out.push({ kind: 'file', path: a.path, content: text.slice(0, MAX_ATTACHMENT_CHARS), truncated: text.length > MAX_ATTACHMENT_CHARS || undefined });
+        out.push({
+          kind: 'file',
+          path: a.path,
+          content: text.slice(0, MAX_ATTACHMENT_CHARS),
+          truncated: text.length > MAX_ATTACHMENT_CHARS || undefined,
+          ...(a.external ? { external: true } : {}),
+        });
       } catch (e) {
         this.notice('warning', `Could not attach ${a.path}: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -501,11 +545,133 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       title: 'Sovran: Add Files to Context',
     });
     if (!picked?.length) return;
-    for (const p of picked) {
-      if (this.attachments.some((a) => a.absolute === p.uri.fsPath)) continue;
-      this.attachments.push({ id: randomUUID(), path: p.description, label: p.label, absolute: p.uri.fsPath });
+    for (const p of picked) await this.attachPath(p.uri.fsPath, false);
+    this.patch({ context: this.contextView() });
+  }
+
+  /**
+   * "Upload from computer" in the attach menu. Files inside the workspace follow the usual rules; files outside it are
+   * accepted only from this host-owned dialog, never from a path the webview sends, so the user picks every one of them.
+   */
+  private async uploadFiles() {
+    const uris = await vscode.window.showOpenDialog({
+      canSelectFiles: true,
+      canSelectFolders: false,
+      canSelectMany: true,
+      defaultUri: vscode.workspace.workspaceFolders?.[0]?.uri,
+      openLabel: 'Attach',
+      title: 'Sovran: Attach Files to the Next Message',
+    });
+    if (!uris?.length) return;
+    for (const uri of uris) {
+      if (uri.scheme !== 'file') {
+        this.notice('warning', `${path.basename(uri.path)} is not a local file, so it cannot be attached.`);
+        continue;
+      }
+      if (vscode.workspace.getWorkspaceFolder(uri)) {
+        await this.attachPath(uri.fsPath, false);
+        continue;
+      }
+      const shown = displayPath(uri.fsPath, os.homedir());
+      const problem = await this.fileProblem(uri.fsPath, shown);
+      if (problem) {
+        this.notice('warning', problem);
+        continue;
+      }
+      await this.addAttachment(uri.fsPath, shown, true);
     }
     this.patch({ context: this.contextView() });
+  }
+
+  /** Why a file cannot be attached (missing, too large or binary), or undefined when it can. */
+  private async fileProblem(absolute: string, shown: string): Promise<string | undefined> {
+    const stat = await this.deps.workspace.stat(absolute);
+    if (stat?.type !== 'file') return `${shown} is not a file.`;
+    if (stat.size > MAX_ATTACHMENT_BYTES) return `${shown} is larger than 5 MB. Attach an excerpt, or ask Sovran to read the part you need.`;
+    const head = await readHead(absolute).catch(() => null);
+    if (!head) return `${shown} could not be read.`;
+    if (looksBinary(head)) return `${shown} looks like a binary file. Sovran can attach text files only.`;
+    return undefined;
+  }
+
+  /** Adds a checked file to the next message. Protected files ask first, as they would when the agent reads them. */
+  private async addAttachment(absolute: string, shown: string, external = false) {
+    if (this.attachments.some((a) => a.absolute === absolute)) return;
+    const label = path.basename(absolute);
+    if (isProtectedPath(shown, this.settings.agent.policy.protectedPaths)) {
+      const choice = await vscode.window.showWarningMessage(
+        `Attach ${label}?`,
+        { modal: true, detail: `${shown} matches a protected-path pattern. Its contents are sent to the model with your next message.` },
+        'Attach',
+      );
+      if (choice !== 'Attach' || this.attachments.some((a) => a.absolute === absolute)) return;
+    }
+    this.attachments.push({ id: randomUUID(), path: shown, label, absolute, ...(external ? { external: true } : {}) });
+  }
+
+  /** `@` and attach-menu suggestions. Before anything is typed, the active editor and the open tabs come first. */
+  private async suggestFiles(query: string): Promise<FileSuggestionView[]> {
+    if (query.trim()) return this.deps.fileIndex.suggest(query);
+    const multi = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
+    const active = vscode.window.activeTextEditor?.document.uri;
+    const activeAbs = active?.scheme === 'file' ? active.fsPath : undefined;
+    const activeRel = activeAbs ? vscode.workspace.asRelativePath(activeAbs, multi) : undefined;
+    // Open files outside the workspace and protected files are never suggested.
+    const preferred = [...new Set([...(activeAbs ? [activeAbs] : []), ...this.deps.workspace.openEditors()])]
+      .filter((abs) => vscode.workspace.getWorkspaceFolder(vscode.Uri.file(abs)))
+      .map((abs) => vscode.workspace.asRelativePath(abs, multi))
+      .filter((rel) => !isProtectedPath(rel, this.settings.agent.policy.protectedPaths));
+    const open = new Set(preferred);
+    const items = await this.deps.fileIndex.suggest('', 20, preferred);
+    return items.map((i) => (open.has(i.path) ? { ...i, hint: i.path === activeRel ? 'active' : 'open' } : i));
+  }
+
+  /** One folder of the workspace for the attach menu, confined to the workspace like every other path. */
+  private async listDirectory(requestId: string, requested: string) {
+    const reply = (listing: DirectoryListingView) => this.send({ type: 'directoryListing', requestId, listing });
+    const roots = this.deps.workspace.roots();
+    const dir = requested.trim().replace(/^\.\/?$/, '').replace(/\/+$/, '');
+    if (!roots.length) return reply({ path: '', entries: [], error: 'Open a folder to browse its files.' });
+    if (!dir && roots.length > 1) {
+      return reply({ path: '', entries: roots.map((r) => ({ name: r.name, path: r.name, type: 'directory' as const })) });
+    }
+    let resolved: ResolvedPath;
+    try {
+      resolved = await resolveAndVerify(dir || '.', this.deps.workspace);
+    } catch (e) {
+      return reply({ path: dir, entries: [], error: e instanceof PathError ? e.message : `${dir} is not inside the workspace.` });
+    }
+    let raw: DirEntry[];
+    try {
+      raw = await this.deps.workspace.readDirectory(resolved.absolute);
+    } catch {
+      return reply({ path: dir, entries: [], error: `${dir || 'The workspace folder'} could not be read.` });
+    }
+    // '.' is the root of a single-folder workspace; multi-root paths always start with the folder name.
+    const base = resolved.relative === '.' ? '' : resolved.relative;
+    const excluded = this.filesExclude(resolved.root);
+    const protectedPaths = this.settings.agent.policy.protectedPaths;
+    const entries: DirectoryEntryView[] = [];
+    for (const e of raw) {
+      if ((e.type !== 'file' && e.type !== 'directory') || BROWSE_HIDDEN.has(e.name)) continue;
+      const inRoot = path.relative(resolved.root.path, path.join(resolved.absolute, e.name)).split(path.sep).join('/');
+      if (excluded(inRoot)) continue;
+      const p = base ? `${base}/${e.name}` : e.name;
+      entries.push({ name: e.name, path: p, type: e.type, ...(e.type === 'file' && isProtectedPath(p, protectedPaths) ? { protected: true } : {}) });
+    }
+    entries.sort(compareEntries);
+    reply({ path: base, entries: entries.slice(0, MAX_LISTING), ...(entries.length > MAX_LISTING ? { truncated: true } : {}) });
+  }
+
+  /** The user's `files.exclude` patterns (those set to true) for one workspace folder, as the Explorer applies them. */
+  private filesExclude(root: WorkspaceRoot): (pathInRoot: string) => boolean {
+    const config = vscode.workspace.getConfiguration('files', vscode.Uri.file(root.path)).get<Record<string, unknown>>('exclude') ?? {};
+    const globs = Object.entries(config)
+      .filter(([, on]) => on === true)
+      .map(([glob]) => glob);
+    if (!globs.length) return () => false;
+    const isMatch = picomatch(globs, { dot: true });
+    return (p) => isMatch(p);
   }
 
   // ------------------------------------------------------------------ sessions
@@ -1239,7 +1405,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     }
   }
 
-  private async attachPath(p: string) {
+  /** Attaches a workspace file named by the webview (`@` mention, attach menu) or picked in a dialog. */
+  private async attachPath(p: string, push = true) {
     let resolved;
     try {
       // Symlink-aware: a link inside the repository must not attach a file from outside it.
@@ -1247,12 +1414,10 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     } catch (e) {
       return this.notice('warning', e instanceof PathError ? e.message : `${p} is not inside the workspace.`);
     }
-    const stat = await this.deps.workspace.stat(resolved.absolute);
-    if (stat?.type !== 'file') return this.notice('warning', `${resolved.relative} is not a file.`);
-    if (!this.attachments.some((a) => a.absolute === resolved.absolute)) {
-      this.attachments.push({ id: randomUUID(), path: resolved.relative, label: path.basename(resolved.absolute), absolute: resolved.absolute });
-    }
-    this.patch({ context: this.contextView() });
+    const problem = await this.fileProblem(resolved.absolute, resolved.relative);
+    if (problem) return this.notice('warning', problem);
+    await this.addAttachment(resolved.absolute, resolved.relative);
+    if (push) this.patch({ context: this.contextView() });
   }
 
   cancel() {

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppState, HostMessage, WebviewMessage } from '../../src/shared/protocol';
 import { App } from './App';
 import { renderMarkdown } from './lib/markdown';
@@ -68,11 +68,22 @@ function mount(state: AppState) {
 }
 
 describe('App', () => {
-  it('handshakes with the host and renders the empty state with starters', () => {
+  it('handshakes with the host and renders the start page with starters', async () => {
     mount(baseState());
     expect(sent[0]).toEqual({ type: 'ready' });
-    expect(screen.getByRole('img', { name: /Own your intelligence/ })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent(/\S/);
+    expect(screen.getByTitle('Local · coder. Click to change the model.')).toHaveTextContent('coder');
+    expect(screen.getByText('on this machine')).toBeInTheDocument();
     expect(screen.getByText('Act mode · you approve every change')).toBeInTheDocument();
+    const starters = within(screen.getByRole('list', { name: 'Suggestions' })).getAllByRole('button');
+    expect(starters.map((b) => b.textContent)).toEqual([
+      expect.stringContaining('Explain a.ts'),
+      expect.stringContaining('Fix problems'),
+      expect.stringContaining('Write tests'),
+      expect.stringContaining('Review my changes'),
+    ]);
+    await userEvent.click(starters[0]!);
+    expect(sent).toContainEqual({ type: 'send', text: 'Explain the active file' });
   });
 
   it('shows onboarding without a composer when no provider exists', () => {
@@ -290,11 +301,233 @@ describe('brand refresh UX', () => {
     expect(screen.getByText('src/a.ts')).toBeInTheDocument();
   });
 
-  it('shows keyboard hints only while the composer is focused', async () => {
+  it('keeps one line of key hints that follows what the keys do right now', async () => {
     mount(baseState());
-    expect(screen.queryByText('commands')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByLabelText('Message Sovran'));
+    // Visible before the composer is focused, so focusing it does not shift the layout.
     expect(screen.getByText('commands')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Message Sovran'), 'hi');
+    expect(screen.getByText('new line')).toBeInTheDocument();
+    expect(screen.queryByText('commands')).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Message Sovran'), ' /');
+    expect(screen.getByText('send')).toBeInTheDocument();
+  });
+
+  it('lists every shortcut in a popover and closes it with Escape', async () => {
+    mount(baseState());
+    const button = screen.getByRole('button', { name: /Shortcuts/ });
+    await userEvent.click(button);
+    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' });
+    expect(within(dialog).getByText('Switch Plan / Act')).toBeInTheDocument();
+    expect(within(dialog).getByText('Change approvals')).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Keyboard shortcuts' })).not.toBeInTheDocument();
+    expect(button).toHaveFocus();
+  });
+});
+
+describe('start page', () => {
+  it('builds starters from the selection and fills the composer for Plan a change', async () => {
+    const { unmount } = mount(baseState({ context: { editor: { path: 'src/a.ts', label: 'a.ts:3-9', startLine: 3, endLine: 9 }, includeEditor: true, attachments: [] } }));
+    await userEvent.click(screen.getByRole('button', { name: /Explain the selection/ }));
+    expect(sent).toContainEqual({ type: 'send', text: 'Explain the selected code' });
+    unmount();
+    sent.length = 0;
+
+    mount(baseState({ mode: 'plan' }));
+    expect(screen.getByText('Plan mode · read-only')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Plan a change/ }));
+    expect(screen.getByLabelText('Message Sovran')).toHaveValue('Plan how to ');
+    expect(screen.getByLabelText('Message Sovran')).toHaveFocus();
+    expect(sent.some((m) => m.type === 'send')).toBe(false);
+  });
+
+  it('does not offer a file Sovran will not send as a subject', () => {
+    mount(baseState({ context: { editor: { path: '/home/u/.aws/credentials', label: 'credentials', blocked: 'outside' }, includeEditor: true, attachments: [] } }));
+    expect(screen.getByRole('button', { name: /Explain this workspace/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Explain credentials/ })).not.toBeInTheDocument();
+  });
+
+  it('opens a recent chat or the full history', async () => {
+    mount(
+      baseState({
+        sessions: [
+          { id: 's', title: 'New chat', createdAt: 0, updatedAt: Date.now(), messageCount: 0 },
+          { id: 'old', title: 'Older work', createdAt: 0, updatedAt: Date.now() - 7_200_000, messageCount: 4 },
+          { id: 'new', title: 'Latest work', createdAt: 0, updatedAt: Date.now() - 60_000, messageCount: 2 },
+        ],
+      }),
+    );
+    const nav = screen.getByRole('navigation', { name: 'Recent chats' });
+    // Newest first, and never the chat that is already open.
+    expect(within(nav).getAllByRole('listitem').map((li) => li.textContent)).toEqual([expect.stringContaining('Latest work'), expect.stringContaining('Older work')]);
+    await userEvent.click(within(nav).getByRole('button', { name: /Latest work/ }));
+    expect(sent).toContainEqual({ type: 'openSession', id: 'new' });
+    await userEvent.click(within(nav).getByRole('button', { name: /All chats/ }));
+    expect(sent).toContainEqual({ type: 'setView', view: 'history' });
+  });
+
+  it('shows a warning dot and a model picker when no model is selected', async () => {
+    mount(baseState({ selected: null }));
+    expect(screen.getByText('No model selected.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Choose a model' }));
+    expect(sent).toContainEqual({ type: 'pickModel' });
+  });
+
+  it('cycles tips', async () => {
+    mount(baseState());
+    const tip = () => screen.getByText('Tip').nextElementSibling?.textContent;
+    const first = tip();
+    await userEvent.click(screen.getByRole('button', { name: 'Next tip' }));
+    expect(tip()).not.toBe(first);
+  });
+});
+
+describe('attach menu', () => {
+  const lastOf = <T extends WebviewMessage['type']>(type: T) => [...sent].reverse().find((m) => m.type === type) as Extract<WebviewMessage, { type: T }>;
+  const open = async (state = baseState()) => {
+    mount(state);
+    await userEvent.click(screen.getByRole('button', { name: 'Attach files' }));
+    const list = lastOf('listDirectory');
+    expect(list.path).toBe('');
+    host({
+      type: 'directoryListing',
+      requestId: list.requestId,
+      listing: {
+        path: '',
+        entries: [
+          { name: 'src', path: 'src', type: 'directory' },
+          { name: '.env', path: '.env', type: 'file', protected: true },
+          { name: 'README.md', path: 'README.md', type: 'file' },
+        ],
+      },
+    });
+    await waitFor(() => expect(sent.some((m) => m.type === 'suggestFiles')).toBe(true));
+    const suggest = lastOf('suggestFiles');
+    expect(suggest.query).toBe('');
+    host({
+      type: 'fileSuggestions',
+      requestId: suggest.requestId,
+      items: [
+        { path: 'src/a.ts', label: 'a.ts', hint: 'active' },
+        { path: 'src/b.ts', label: 'b.ts', hint: 'open' },
+        { path: 'zzz.txt', label: 'zzz.txt' },
+      ],
+    });
+    return screen.getByRole('dialog', { name: 'Attach files' });
+  };
+
+  it('suggests open files, browses folders and toggles attachments', async () => {
+    const dialog = await open();
+    expect(within(dialog).getByRole('group', { name: 'Suggested' })).toHaveTextContent(/a\.ts.*active editor.*b\.ts.*open/);
+    // Files without a hint are not "suggested".
+    expect(within(dialog).queryByText('zzz.txt')).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('option', { name: /\.env/ })).toHaveAttribute('title', expect.stringContaining('protected'));
+
+    await userEvent.click(within(dialog).getByRole('option', { name: /README\.md/ }));
+    expect(sent).toContainEqual({ type: 'attachPath', path: 'README.md' });
+    host({ type: 'patch', patch: { context: { editor: null, includeEditor: true, attachments: [{ id: 'att1', path: 'README.md', label: 'README.md' }] } } });
+    const readme = within(dialog).getByRole('option', { name: /README\.md/ });
+    expect(readme).toHaveAttribute('aria-selected', 'true');
+    await userEvent.click(readme);
+    expect(sent).toContainEqual({ type: 'removeAttachment', id: 'att1' });
+
+    await userEvent.click(within(dialog).getByRole('option', { name: 'src, folder' }));
+    expect(lastOf('listDirectory').path).toBe('src');
+    expect(within(dialog).getByRole('option', { name: 'Up one folder' })).toBeInTheDocument();
+    // Backspace in the empty search field goes back up.
+    await userEvent.keyboard('{Backspace}');
+    expect(lastOf('listDirectory').path).toBe('');
+  });
+
+  it('is keyboard operable from the search field', async () => {
+    const dialog = await open();
+    const search = within(dialog).getByRole('combobox', { name: 'Search files' });
+    expect(search).toHaveFocus();
+    // Suggested a.ts, b.ts, then src/, .env, README.md: three steps down reach the folder.
+    await userEvent.keyboard('{ArrowDown}{ArrowDown}');
+    expect(search).toHaveAttribute('aria-activedescendant', within(dialog).getByRole('option', { name: 'src, folder' }).id);
+    await userEvent.keyboard('{ArrowRight}');
+    expect(lastOf('listDirectory').path).toBe('src');
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(lastOf('listDirectory').path).toBe('');
+    await userEvent.keyboard('{ArrowUp}{Enter}');
+    expect(sent).toContainEqual({ type: 'attachPath', path: 'src/b.ts' });
+  });
+
+  it('searches the workspace, uploads from the computer and closes with Escape', async () => {
+    const dialog = await open();
+    await userEvent.type(within(dialog).getByRole('combobox', { name: 'Search files' }), 'conf');
+    await waitFor(() => expect(lastOf('suggestFiles').query).toBe('conf'));
+    host({ type: 'fileSuggestions', requestId: lastOf('suggestFiles').requestId, items: [{ path: 'src/config.ts', label: 'config.ts' }] });
+    expect(within(dialog).getByRole('group', { name: 'Results' })).toHaveTextContent('config.ts');
+    await userEvent.keyboard('{Enter}');
+    expect(sent).toContainEqual({ type: 'attachPath', path: 'src/config.ts' });
+
+    // Escape clears the search first, then closes and returns focus to the attach button.
+    await userEvent.keyboard('{Escape}');
+    expect(within(dialog).getByRole('combobox', { name: 'Search files' })).toHaveValue('');
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: 'Attach files' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Attach files' })).toHaveFocus();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Attach files' }));
+    await userEvent.click(screen.getByRole('button', { name: /Upload from computer/ }));
+    expect(sent).toContainEqual({ type: 'uploadFiles' });
+    expect(screen.queryByRole('dialog', { name: 'Attach files' })).not.toBeInTheDocument();
+  });
+
+  it('marks files picked from the computer', () => {
+    mount(baseState({ context: { editor: null, includeEditor: true, attachments: [{ id: 'x', path: '~/Downloads/spec.md', label: 'spec.md', external: true }] } }));
+    expect(screen.getByRole('button', { name: 'Remove spec.md' })).toHaveAttribute('title', expect.stringContaining('from your computer'));
+  });
+
+  it('shows the folder error from the host', async () => {
+    mount(baseState());
+    await userEvent.click(screen.getByRole('button', { name: 'Attach files' }));
+    host({ type: 'directoryListing', requestId: lastOf('listDirectory').requestId, listing: { path: '', entries: [], error: 'Open a folder to browse its files.' } });
+    expect(screen.getByText('Open a folder to browse its files.')).toBeInTheDocument();
+  });
+});
+
+describe('response actions', () => {
+  const twoTurns = () =>
+    baseState({
+      session: {
+        id: 's',
+        title: 't',
+        messages: [
+          { role: 'user', id: 'u1', content: 'one', createdAt: 0 },
+          { role: 'assistant', id: 'a1', content: 'First answer', createdAt: 0 },
+          { role: 'user', id: 'u2', content: 'two', createdAt: 0 },
+          { role: 'assistant', id: 'a2', content: 'Second answer', createdAt: 0 },
+        ],
+      },
+    });
+
+  it('offers Retry only on the last response, as an icon in a quiet toolbar', () => {
+    mount(twoTurns());
+    const [first, last] = screen.getAllByRole('toolbar', { name: 'Response actions' });
+    expect(within(first!).queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
+    const retry = within(last!).getByRole('button', { name: 'Retry' });
+    expect(retry).not.toHaveTextContent('Retry');
+    expect(retry).toHaveAttribute('title', expect.stringContaining('generate this response again'));
+  });
+
+  it('copies a response', async () => {
+    const writeText = vi.fn(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    mount(twoTurns());
+    const [first] = screen.getAllByRole('button', { name: 'Copy response' });
+    await userEvent.click(first!);
+    expect(writeText).toHaveBeenCalledWith('First answer');
+    expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument();
+  });
+
+  it('hides the actions while the response is still being written', () => {
+    mount({ ...twoTurns(), run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'streaming', label: 'Writing' } } });
+    expect(screen.getAllByRole('toolbar', { name: 'Response actions' })).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
   });
 });
 
@@ -325,6 +558,12 @@ describe('reducer', () => {
     expect(s.app).toBeNull();
     for (let i = 0; i < 5; i++) s = reducer(s, { type: 'notice', id: String(i), level: 'info', message: `n${i}` });
     expect(s.notices.map((n) => n.message)).toEqual(['n2', 'n3', 'n4']);
+  });
+
+  it('keeps the latest folder listing with its request id', () => {
+    const listing = { path: 'src', entries: [{ name: 'a.ts', path: 'src/a.ts', type: 'file' as const }] };
+    const s = reducer(initialUiState, { type: 'directoryListing', requestId: 'r1', listing });
+    expect(s.directoryListing).toEqual({ requestId: 'r1', listing });
   });
 });
 

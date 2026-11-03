@@ -1,4 +1,4 @@
-import { memo, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { ApprovalView, AssistantMessageView, RunViewT, ToolCallView, ToolMessageView } from './types';
 import type { SessionMessage } from '../../../src/shared/protocol';
 import { hasShellMetacharacters } from '../../../src/core/permissions/shell';
@@ -652,20 +652,28 @@ function UserBlock({ message, canEdit }: { message: UserMessageView; canEdit: bo
     <div className="sv-user">
       {message.attachments?.length ? (
         <div className="sv-user__context">
-          {message.attachments.map((a) => (
-            <button
-              key={`${a.path}:${a.startLine ?? ''}`}
-              type="button"
-              className="sv-chip"
-              onClick={() => post({ type: 'openFile', path: a.path, line: a.startLine })}
-            >
-              <Icon name={a.kind === 'selection' ? 'selection' : 'file'} />
-              <span>
-                {a.path.split('/').pop()}
-                {a.startLine ? `:${a.startLine}-${a.endLine}` : ''}
+          {message.attachments.map((a) =>
+            a.external ? (
+              // Files from the computer are outside the workspace, so they cannot be opened from here.
+              <span key={a.path} className="sv-chip sv-chip--static" title={`${a.path} (from your computer)`}>
+                <Icon name="device-desktop" />
+                <span>{a.path.split('/').pop()}</span>
               </span>
-            </button>
-          ))}
+            ) : (
+              <button
+                key={`${a.path}:${a.startLine ?? ''}`}
+                type="button"
+                className="sv-chip"
+                onClick={() => post({ type: 'openFile', path: a.path, line: a.startLine })}
+              >
+                <Icon name={a.kind === 'selection' ? 'selection' : 'file'} />
+                <span>
+                  {a.path.split('/').pop()}
+                  {a.startLine ? `:${a.startLine}-${a.endLine}` : ''}
+                </span>
+              </button>
+            ),
+          )}
         </div>
       ) : null}
       {shown}
@@ -678,18 +686,46 @@ function UserBlock({ message, canEdit }: { message: UserMessageView; canEdit: bo
   );
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <IconButton
+      icon={copied ? 'check' : 'copy'}
+      label={copied ? 'Copied' : 'Copy response'}
+      onClick={() => void navigator.clipboard?.writeText(text).then(() => setCopied(true))}
+    />
+  );
+}
+
+/**
+ * Under a response: the files it changed (always visible, with Undo), and a quiet toolbar that appears on hover or
+ * keyboard focus. Retry lives there, as an icon, because regenerating a response is a rare move.
+ */
 function TurnFooter({
   user,
+  messages,
   isLast,
   running,
 }: {
   user: UserMessageView | undefined;
+  messages: AssistantMessageView[];
   isLast: boolean;
   running: boolean;
 }) {
   const cp = user?.checkpoint;
-  const showRetry = isLast && !running;
-  if (!cp && !showRetry) return null;
+  const streaming = isLast && running;
+  const canRetry = isLast && !running;
+  const text = messages
+    .map((m) => m.content.trim())
+    .filter(Boolean)
+    .join('\n\n');
+  const actions = !streaming && (canRetry || !!text);
+  if (!cp && !actions) return null;
   const n = cp?.files.length ?? 0;
   return (
     <div className="sv-turn__footer">
@@ -716,15 +752,13 @@ function TurnFooter({
         )
       ) : null}
       <span className="sv-composer__spacer" />
-      {showRetry ? (
-        <Button
-          variant="ghost"
-          icon="refresh"
-          onClick={() => post({ type: 'retry' })}
-          title="Generate this response again"
-        >
-          Retry
-        </Button>
+      {actions ? (
+        <div className="sv-turn__actions" role="toolbar" aria-label="Response actions">
+          {text ? <CopyButton text={text} /> : null}
+          {canRetry ? (
+            <IconButton icon="refresh" label="Retry" title="Retry: generate this response again" onClick={() => post({ type: 'retry' })} />
+          ) : null}
+        </div>
       ) : null}
     </div>
   );
@@ -811,7 +845,7 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
                 {modelOf(b) ? <span>{modelOf(b)}</span> : null}
               </div>
               <TurnBody messages={b.messages} results={results} run={run} />
-              <TurnFooter user={user} isLast={i === blocks.length - 1} running={running} />
+              <TurnFooter user={user} messages={b.messages} isLast={i === blocks.length - 1} running={running} />
             </article>
           );
         })}

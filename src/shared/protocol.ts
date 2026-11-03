@@ -68,6 +68,34 @@ export interface AttachmentView {
   id: string;
   path: string;
   label: string;
+  /** Picked from the computer with the system dialog: the file is outside the workspace. */
+  external?: boolean;
+}
+
+export interface FileSuggestionView {
+  path: string;
+  label: string;
+  /** Why a file is suggested before anything is typed: it is the active editor, or open in a tab. */
+  hint?: 'active' | 'open';
+}
+
+export interface DirectoryEntryView {
+  name: string;
+  /** Workspace-relative path with forward slashes (prefixed with the folder name in multi-root workspaces). */
+  path: string;
+  type: 'file' | 'directory';
+  /** Matches `sovran.security.protectedPaths`: attaching it asks for confirmation first. */
+  protected?: boolean;
+}
+
+export interface DirectoryListingView {
+  /** Workspace-relative folder; '' is the workspace root (the list of folders in a multi-root workspace). */
+  path: string;
+  entries: DirectoryEntryView[];
+  /** The folder has more entries than were sent. */
+  truncated?: boolean;
+  /** Why the folder could not be listed. */
+  error?: string;
 }
 
 export interface EditorContextView {
@@ -171,7 +199,9 @@ export type HostMessage =
   /** Answers a `saveProvider` that carried a requestId; a `providerTest` for the same request follows. */
   | { type: 'providerSaved'; requestId: string; providerId: string }
   | { type: 'focusComposer'; text?: string }
-  | { type: 'fileSuggestions'; requestId: string; items: Array<{ path: string; label: string }> };
+  | { type: 'fileSuggestions'; requestId: string; items: FileSuggestionView[] }
+  /** Answers `listDirectory`. */
+  | { type: 'directoryListing'; requestId: string; listing: DirectoryListingView };
 
 // ---------------------------------------------------------------------------------------------
 // Webview → host (validated)
@@ -299,6 +329,10 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('compact') }),
   z.object({ type: z.literal('suggestFiles'), requestId: id, query: z.string().max(200) }),
   z.object({ type: z.literal('attachPath'), path: z.string().min(1).max(2000) }),
+  /** Lists one workspace folder for the attach menu ('' is the root). The host confines it to the workspace. */
+  z.object({ type: z.literal('listDirectory'), requestId: id, path: z.string().max(2000) }),
+  /** Opens the system file dialog. Only files the user picks there may come from outside the workspace. */
+  z.object({ type: z.literal('uploadFiles') }),
 ]);
 
 export type WebviewMessage = z.infer<typeof webviewMessageSchema>;
