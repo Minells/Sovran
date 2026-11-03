@@ -7,6 +7,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DirEntry, FileStat, WorkspaceRoot } from '../../src/core/ports';
+import { displayPath } from '../../src/core/util/files';
 import type { HostMessage } from '../../src/shared/protocol';
 
 const h = vi.hoisted(() => ({
@@ -146,7 +147,8 @@ beforeEach(async () => {
   await write('.git/HEAD', 'ref: refs/heads/main\n');
   await write('notes.md', '# notes from elsewhere\n', outside);
   await write('blob.bin', Uint8Array.from([0, 1, 2, 3]), outside);
-  await fs.symlink(outside, path.join(h.root, 'escape'));
+  // A junction on Windows needs no extra privilege; other platforms ignore the type and create a symbolic link.
+  await fs.symlink(outside, path.join(h.root, 'escape'), 'junction');
 
   messages = [];
   controller = new SovranController({
@@ -236,7 +238,8 @@ describe('uploadFiles', () => {
     h.dialog = [path.join(outside, 'notes.md'), path.join(h.root, 'src/b.ts'), path.join(outside, 'blob.bin')];
     await controller.handle({ type: 'uploadFiles' });
     expect(attachments()).toEqual([
-      { id: expect.any(String), path: path.join(outside, 'notes.md').split(path.sep).join('/'), label: 'notes.md', external: true },
+      // `~/…` when the temporary folder is under the home folder (Windows), the full path otherwise.
+      { id: expect.any(String), path: displayPath(path.join(outside, 'notes.md'), os.homedir()), label: 'notes.md', external: true },
       { id: expect.any(String), path: 'src/b.ts', label: 'b.ts' },
     ]);
     expect(notices()).toEqual([expect.stringMatching(/blob\.bin looks like a binary file/)]);
