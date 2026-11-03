@@ -1,9 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { EditorContextView, RunView } from '../../../src/shared/protocol';
 import { APPROVAL_OPTIONS, approvalOption, nextApprovalMode } from '../lib/approvals';
 import { elapsed, toolInfo } from '../lib/format';
+import { altLabel, shortcutList } from '../lib/keys';
 import { useStore } from '../state/store';
 import { getUiState, post, setUiState } from '../vscode';
+import { AttachMenu } from './AttachMenu';
 import { Icon, MenuButton } from './primitives';
 
 export function ModeToggle() {
@@ -59,7 +61,71 @@ export function ApprovalPicker() {
   );
 }
 
-const altLabel = () => (typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌥' : 'Alt+');
+/** Every shortcut in one place, opened from the hint line instead of crowding it. A non-modal dialog. */
+function ShortcutsButton({ approvals }: { approvals: boolean }) {
+  const [open, setOpen] = useState(false);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    panelRef.current?.focus();
+    const onPointer = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (!panelRef.current?.contains(target) && !buttonRef.current?.contains(target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onPointer);
+    return () => document.removeEventListener('mousedown', onPointer);
+  }, [open]);
+
+  const close = () => {
+    setOpen(false);
+    buttonRef.current?.focus();
+  };
+  return (
+    <div className="sv-menu-anchor sv-shortcuts">
+      <button
+        ref={buttonRef}
+        type="button"
+        className="sv-hint-btn"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Keyboard shortcuts"
+        onClick={() => (open ? close() : setOpen(true))}
+      >
+        <Icon name="keyboard" />
+        <span className="sv-hint-btn__label">Shortcuts</span>
+      </button>
+      {open ? (
+        <div
+          ref={panelRef}
+          className="sv-menu sv-shortcuts__panel"
+          role="dialog"
+          aria-label="Keyboard shortcuts"
+          tabIndex={-1}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              close();
+            }
+          }}
+        >
+          <div className="sv-menu__heading">Keyboard shortcuts</div>
+          <dl className="sv-shortcuts__list">
+            {shortcutList({ approvals }).map((s) => (
+              <div key={s.keys} className="sv-shortcuts__row">
+                <dt>
+                  <kbd>{s.keys}</kbd>
+                </dt>
+                <dd>{s.label}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /** The active-file chip. Files Sovran never attaches automatically say so instead of pretending to be included. */
 function EditorChip({ editor, included }: { editor: EditorContextView; included: boolean }) {
@@ -163,7 +229,8 @@ export function Composer() {
   const [caret, setCaret] = useState(0);
   const [active, setActive] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
-  const [focused, setFocused] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
+  const attachRef = useRef<HTMLButtonElement>(null);
   const requestSeq = useRef(0);
   const [requestId, setRequestId] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -214,7 +281,12 @@ export function Composer() {
           .filter((c) => c.name.startsWith(trigger.query) || (trigger.query.length > 1 && c.name.includes(trigger.query)))
           .map((c) => ({ id: c.name, label: `/${c.name}`, detail: c.description, icon: c.source === 'workspace' ? 'file-code' : 'symbol-event' }))
       : state.fileSuggestions && state.fileSuggestions.requestId === requestId
-        ? state.fileSuggestions.items.map((f) => ({ id: f.path, label: f.label, detail: f.path, icon: 'file' }))
+        ? state.fileSuggestions.items.map((f) => ({
+            id: f.path,
+            label: f.label,
+            detail: f.hint ? `${f.path} · ${f.hint === 'active' ? 'active editor' : 'open'}` : f.path,
+            icon: 'file',
+          }))
         : [];
   const activeIndex = Math.min(active, Math.max(0, items.length - 1));
 
@@ -273,6 +345,11 @@ export function Composer() {
     }
   };
 
+  const closeAttach = useCallback((refocus: boolean) => {
+    setAttachOpen(false);
+    if (refocus) attachRef.current?.focus();
+  }, []);
+
   const editor = app.context.editor;
   const placeholder = !app.selected
     ? 'Add a model provider to start'
@@ -283,10 +360,31 @@ export function Composer() {
         : 'Ask Sovran, or give it a task';
   const altKey = altLabel();
   const listId = 'sv-suggest';
+  const suggesting = open && (items.length > 0 || trigger?.kind === 'mention');
+  // One line, always there (no jump on focus), and it says what the keys do right now.
+  const hints: Array<[string, string]> = running
+    ? [['Esc', 'stop']]
+    : suggesting
+      ? [
+          ['↑↓', 'choose'],
+          ['↵', 'select'],
+          ['Esc', 'close'],
+        ]
+      : text.trim()
+        ? [
+            ['↵', 'send'],
+            ['⇧↵', 'new line'],
+          ]
+        : [
+            ['@', 'files'],
+            ['/', 'commands'],
+            [`${altKey}M`, 'mode'],
+          ];
 
   return (
     <div className="sv-composer">
-      {open && (items.length || trigger?.kind === 'mention') ? (
+      {attachOpen ? <AttachMenu trigger={attachRef} onClose={closeAttach} /> : null}
+      {suggesting ? (
         <ul className="sv-suggest" id={listId} role="listbox" aria-label={trigger?.kind === 'command' ? 'Commands' : 'Files'}>
           {items.length === 0 ? (
             <li className="sv-suggest__empty">{trigger?.kind === 'mention' ? 'Type to search files' : 'No matching command'}</li>
@@ -317,8 +415,16 @@ export function Composer() {
           <div className="sv-chips" aria-label="Context for the next message">
             {editor ? <EditorChip editor={editor} included={app.context.includeEditor} /> : null}
             {app.context.attachments.map((a) => (
-              <button key={a.id} type="button" className="sv-chip" title={`${a.path} · click to remove`} onClick={() => post({ type: 'removeAttachment', id: a.id })}>
-                <Icon name="file" />
+              <button
+                key={a.id}
+                type="button"
+                className="sv-chip"
+                data-external={a.external || undefined}
+                title={`${a.path}${a.external ? ' (from your computer)' : ''} · click to remove`}
+                aria-label={`Remove ${a.label}`}
+                onClick={() => post({ type: 'removeAttachment', id: a.id })}
+              >
+                <Icon name={a.external ? 'device-desktop' : 'file'} />
                 <span>{a.label}</span>
                 <Icon name="close" />
               </button>
@@ -342,14 +448,21 @@ export function Composer() {
             setActive(0);
           }}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart ?? 0)}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
           onKeyDown={onKeyDown}
         />
         <div className="sv-composer__bar">
           <ModeToggle />
           <ApprovalPicker />
-          <button type="button" className="sv-icon-btn" title="Add files to context" aria-label="Add files to context" onClick={() => post({ type: 'attachFiles' })}>
+          <button
+            ref={attachRef}
+            type="button"
+            className="sv-icon-btn sv-attach-btn"
+            title="Attach files from the workspace or your computer"
+            aria-label="Attach files"
+            aria-haspopup="dialog"
+            aria-expanded={attachOpen}
+            onClick={() => (attachOpen ? closeAttach(false) : setAttachOpen(true))}
+          >
             <Icon name="attach" />
           </button>
           <button
@@ -375,35 +488,16 @@ export function Composer() {
           )}
         </div>
       </div>
-      {focused && !open ? (
-        <div className="sv-composer__hint" aria-hidden="true">
-          <span>
-            <kbd>↵</kbd> send
-          </span>
-          <span>
-            <kbd>⇧↵</kbd> new line
-          </span>
-          <span>
-            <kbd>@</kbd> files
-          </span>
-          <span>
-            <kbd>/</kbd> commands
-          </span>
-          <span>
-            <kbd>{altKey}M</kbd> mode
-          </span>
-          {app.mode === 'act' && app.workspace.trusted ? (
-            <span>
-              <kbd>{altKey}A</kbd> approvals
+      <div className="sv-composer__hint">
+        <span className="sv-composer__keys" aria-hidden="true">
+          {hints.map(([key, label]) => (
+            <span key={key}>
+              <kbd>{key}</kbd> {label}
             </span>
-          ) : null}
-          {running ? (
-            <span>
-              <kbd>Esc</kbd> stop
-            </span>
-          ) : null}
-        </div>
-      ) : null}
+          ))}
+        </span>
+        <ShortcutsButton approvals={app.mode === 'act' && app.workspace.trusted} />
+      </div>
     </div>
   );
 }

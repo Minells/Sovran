@@ -997,15 +997,6 @@ a {
   color: var(--sv-fg);
 }
 
-.sv-hint {
-  margin-top: var(--sv-s1);
-  color: var(--sv-muted);
-  font-size: var(--sv-text-xs);
-  display: flex;
-  gap: var(--sv-s3);
-  flex-wrap: wrap;
-}
-
 kbd {
   font-family: var(--sv-mono);
   font-size: 10px;
@@ -1025,33 +1016,9 @@ kbd {
   max-width: 420px;
 }
 
-.sv-brand {
-  display: flex;
-  align-items: center;
-  gap: var(--sv-s3);
-}
-
-.sv-brand__text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.sv-brand .sv-wordmark {
-  font-size: var(--sv-text-lg);
-}
-
 .sv-tagline {
   color: var(--sv-muted);
   font-size: var(--sv-text-sm);
-}
-
-.sv-status-line {
-  display: flex;
-  align-items: center;
-  gap: var(--sv-s2);
-  font-size: var(--sv-text-sm);
-  color: var(--sv-muted);
 }
 
 .sv-dot {
@@ -1072,33 +1039,6 @@ kbd {
   font-size: var(--sv-text-xs);
   color: var(--sv-muted);
   margin: 0;
-}
-
-.sv-starters {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.sv-starter {
-  display: flex;
-  align-items: center;
-  gap: var(--sv-s2);
-  padding: 6px var(--sv-s2);
-  margin-left: calc(-1 * var(--sv-s2));
-  border: 0;
-  border-radius: var(--sv-radius);
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-}
-
-.sv-starter:hover {
-  background: var(--sv-hover);
-}
-
-.sv-starter .codicon {
-  color: var(--sv-muted);
 }
 
 .sv-presets {
@@ -1689,10 +1629,6 @@ body.vscode-high-contrast .sv-code {
   width: min(220px, 70%);
 }
 
-.sv-brand {
-  padding-bottom: var(--sv-s1);
-}
-
 /* Readable line length when the view is wide (secondary sidebar, editor area). */
 .sv-transcript > * {
   width: 100%;
@@ -1750,17 +1686,6 @@ body.vscode-high-contrast .sv-code {
   white-space: nowrap;
 }
 
-.sv-composer__hint {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px var(--sv-s3);
-  padding: 6px 2px 0;
-  font-family: var(--sv-mono);
-  font-size: 10.5px;
-  color: var(--sv-muted);
-  animation: sv-fade 160ms var(--sv-ease);
-}
-
 .sv-history-item[aria-current='true'] .sv-history-item__title::before {
   content: '';
   display: inline-block;
@@ -1774,10 +1699,6 @@ body.vscode-high-contrast .sv-code {
 
 .sv-history-item[aria-current='true'] {
   background: transparent;
-}
-
-.sv-starter span {
-  overflow-wrap: anywhere;
 }
 
 @keyframes sv-fade {
@@ -2451,8 +2372,754 @@ body.vscode-high-contrast .sv-code {
   overflow-wrap: anywhere;
 }
 
-/* Empty state */
+/* ---------------------------------------------------------------- start page */
 
-.sv-section-label[data-tone='warn'] {
+/* Centred in the free space when the view is tall; scrolls normally when it is short. */
+.sv-transcript > .sv-home {
+  max-width: 560px;
+  margin-block: auto;
+}
+
+.sv-home {
+  container: sv-home / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-s6);
+  padding: var(--sv-s4) 0 var(--sv-s6);
+}
+
+.sv-home > :not(.sv-starter-grid),
+.sv-starter-grid > li {
+  animation: sv-rise 520ms var(--sv-ease) both;
+}
+
+.sv-starter-grid > li:nth-child(1) {
+  animation-delay: 90ms;
+}
+
+.sv-starter-grid > li:nth-child(2) {
+  animation-delay: 130ms;
+}
+
+.sv-starter-grid > li:nth-child(3) {
+  animation-delay: 170ms;
+}
+
+.sv-starter-grid > li:nth-child(4) {
+  animation-delay: 210ms;
+}
+
+.sv-home > .sv-recent {
+  animation-delay: 260ms;
+}
+
+.sv-home > .sv-tip {
+  animation-delay: 320ms;
+}
+
+.sv-hero {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sv-s2);
+  padding-top: var(--sv-s5);
+  text-align: center;
+}
+
+/*
+ * The logo's dot, repeated as a faint field behind the mark and faded out from the centre. It is a texture drawn in
+ * the theme's text colour (no new colour, no glow), and it is purely decorative.
+ */
+.sv-hero::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  top: -12px;
+  left: 50%;
+  width: min(100%, 360px);
+  height: 132px;
+  transform: translateX(-50%);
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--sv-fg) 26%, transparent) 0.8px, transparent 1.2px);
+  background-size: 11px 11px;
+  background-position: center;
+  mask-image: radial-gradient(closest-side, #000 15%, transparent 100%);
+  pointer-events: none;
+  animation: sv-fade 1.2s var(--sv-ease) both;
+}
+
+.sv-hero__mark {
+  overflow: visible;
+  margin-bottom: var(--sv-s2);
+  color: var(--sv-fg);
+}
+
+/* The brackets part, then the dot lands between them and breathes while a model is ready. */
+.sv-hero__bracket {
+  fill: currentColor;
+  animation: sv-bracket-left 700ms var(--sv-ease) both;
+}
+
+.sv-hero__bracket--right {
+  animation-name: sv-bracket-right;
+}
+
+.sv-hero__dot {
+  fill: var(--sv-accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation:
+    sv-dot-land 560ms 300ms cubic-bezier(0.34, 1.56, 0.64, 1) both,
+    sv-breathe 3.2s 1.6s ease-in-out infinite;
+}
+
+/* No model yet: the dot is an outline in the warning colour, and it holds still. */
+.sv-hero__mark[data-ready='false'] .sv-hero__dot {
+  fill: none;
+  stroke: var(--sv-warn);
+  stroke-width: 2;
+  animation: sv-dot-land 560ms 300ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.sv-hero__title {
+  margin: 0;
+  font-size: clamp(18px, 4.6vw, 24px);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.015em;
+  color: var(--sv-fg);
+  text-wrap: balance;
+}
+
+.sv-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 2px var(--sv-s1);
+  max-width: 100%;
+  margin: 0;
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-xs);
+  color: var(--sv-muted);
+}
+
+.sv-hero__fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--sv-radius);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sv-hero__fact .codicon {
+  font-size: 12px;
+}
+
+.sv-hero__model {
+  color: var(--sv-fg);
+  cursor: pointer;
+}
+
+.sv-hero__model:hover {
+  background: var(--sv-hover);
+}
+
+.sv-hero__model .sv-dot {
+  width: 6px;
+  height: 6px;
+}
+
+.sv-hero__mode {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 2px 10px;
+  border: 1px solid var(--sv-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--sv-muted);
+  font-size: var(--sv-text-xs);
+  cursor: pointer;
+  transition: color 140ms var(--sv-ease), border-color 140ms var(--sv-ease);
+}
+
+.sv-hero__mode span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-hero__mode .codicon {
+  font-size: 12px;
+}
+
+.sv-hero__mode:hover {
+  color: var(--sv-fg);
+  border-color: color-mix(in srgb, var(--sv-fg) 32%, transparent);
+}
+
+/* Auto mode changes what runs unattended, so its line keeps the warning colour here too. */
+.sv-hero__mode[data-tone='warn'] {
   color: var(--sv-warn);
+  border-color: color-mix(in srgb, var(--sv-warn) 45%, transparent);
+}
+
+.sv-starter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sv-s2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sv-starter-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  grid-template-rows: auto 1fr;
+  gap: 3px 10px;
+  width: 100%;
+  height: 100%;
+  min-height: 60px;
+  padding: 10px 26px 10px 12px;
+  border: 1px solid var(--sv-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--sv-fg) 2.5%, transparent);
+  color: var(--sv-fg);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 160ms var(--sv-ease),
+    background-color 160ms var(--sv-ease);
+}
+
+.sv-starter-card:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--sv-fg) 28%, transparent);
+  background: var(--sv-hover);
+}
+
+.sv-starter-card:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.sv-starter-card__icon {
+  grid-row: 1 / span 2;
+  margin-top: 1px;
+  color: var(--sv-muted);
+  transition: color 160ms var(--sv-ease);
+}
+
+.sv-starter-card:hover:not(:disabled) .sv-starter-card__icon {
+  color: var(--sv-fg);
+}
+
+.sv-starter-card__title {
+  font-size: var(--sv-text-md);
+  font-weight: 500;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.sv-starter-card__title code,
+.sv-tip__text code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--sv-surface-strong);
+  font-family: var(--sv-mono);
+  font-size: 0.92em;
+}
+
+.sv-starter-card__detail {
+  font-size: var(--sv-text-xs);
+  line-height: 1.4;
+  color: var(--sv-muted);
+  overflow-wrap: anywhere;
+}
+
+.sv-starter-card__go {
+  position: absolute;
+  top: 11px;
+  right: 9px;
+  color: var(--sv-muted);
+  opacity: 0;
+  transform: translateX(-3px);
+  transition:
+    opacity 160ms var(--sv-ease),
+    transform 160ms var(--sv-ease);
+}
+
+.sv-starter-card:hover:not(:disabled) .sv-starter-card__go,
+.sv-starter-card:focus-visible .sv-starter-card__go {
+  opacity: 1;
+  transform: none;
+}
+
+.sv-recent {
+  display: flex;
+  flex-direction: column;
+}
+
+.sv-recent__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--sv-s1);
+}
+
+.sv-recent ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sv-recent__all {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+  padding: 0 2px 0 6px;
+  margin-right: -2px;
+  border: 0;
+  border-radius: var(--sv-radius);
+  background: transparent;
+  color: var(--sv-muted);
+  font-size: var(--sv-text-xs);
+  cursor: pointer;
+}
+
+.sv-recent__all:hover {
+  background: var(--sv-hover);
+  color: var(--sv-fg);
+}
+
+.sv-recent__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sv-s3);
+  width: calc(100% + 2 * var(--sv-s2));
+  margin-inline: calc(-1 * var(--sv-s2));
+  padding: 5px var(--sv-s2);
+  border: 0;
+  border-radius: var(--sv-radius);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sv-recent__item:hover {
+  background: var(--sv-hover);
+}
+
+.sv-recent__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-recent__time {
+  flex: none;
+  font-size: var(--sv-text-xs);
+  color: var(--sv-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.sv-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sv-s2);
+  padding-top: var(--sv-s3);
+  border-top: 1px solid var(--sv-border);
+  font-size: var(--sv-text-sm);
+  line-height: 20px;
+  color: var(--sv-muted);
+}
+
+.sv-tip__label {
+  flex: none;
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-xs);
+  color: var(--sv-fg);
+}
+
+.sv-tip__text {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  animation: sv-fade 240ms var(--sv-ease);
+}
+
+.sv-tip__next {
+  flex: none;
+  width: 20px;
+  height: 20px;
+}
+
+@keyframes sv-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes sv-bracket-left {
+  from {
+    opacity: 0;
+    transform: translateX(9px);
+  }
+}
+
+@keyframes sv-bracket-right {
+  from {
+    opacity: 0;
+    transform: translateX(-9px);
+  }
+}
+
+@keyframes sv-dot-land {
+  from {
+    opacity: 0;
+    transform: scale(0.2);
+  }
+}
+
+@keyframes sv-breathe {
+  50% {
+    transform: scale(0.8);
+  }
+}
+
+/* Narrow sidebars: one starter per row rather than two cramped columns. */
+@container sv-home (max-width: 300px) {
+  .sv-starter-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sv-starter-card {
+    min-height: 0;
+  }
+}
+
+body.vscode-high-contrast .sv-hero::before,
+body.vscode-high-contrast-light .sv-hero::before {
+  display: none;
+}
+
+body.vscode-high-contrast .sv-starter-card,
+body.vscode-high-contrast-light .sv-starter-card {
+  border-color: var(--vscode-contrastBorder);
+}
+
+/* ---------------------------------------------------------------- composer hints & shortcuts */
+
+/* Always present, so nothing moves when the composer gains focus; quieter while it does not have it. */
+.sv-composer__hint {
+  container: sv-hint / inline-size;
+  display: flex;
+  align-items: center;
+  gap: var(--sv-s2);
+  min-height: 22px;
+  padding: 4px 0 0 2px;
+  font-family: var(--sv-mono);
+  font-size: 10.5px;
+  color: var(--sv-muted);
+}
+
+.sv-composer__keys {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  gap: var(--sv-s3);
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 0.7;
+  transition: opacity 160ms var(--sv-ease);
+}
+
+.sv-composer:focus-within .sv-composer__keys {
+  opacity: 1;
+}
+
+.sv-composer__keys > span {
+  animation: sv-fade 160ms var(--sv-ease);
+}
+
+.sv-hint-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 20px;
+  padding: 0 6px;
+  margin-right: -4px;
+  border: 0;
+  border-radius: var(--sv-radius);
+  background: transparent;
+  color: var(--sv-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.sv-hint-btn:hover,
+.sv-hint-btn[aria-expanded='true'] {
+  background: var(--sv-hover);
+  color: var(--sv-fg);
+}
+
+.sv-hint-btn .codicon {
+  font-size: 13px;
+}
+
+@container sv-hint (max-width: 300px) {
+  .sv-hint-btn__label {
+    display: none;
+  }
+}
+
+.sv-shortcuts__panel {
+  left: auto;
+  right: 0;
+  min-width: 260px;
+  font-family: var(--sv-font);
+  outline: none;
+}
+
+.sv-shortcuts__list {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0 var(--sv-s2) var(--sv-s2);
+}
+
+.sv-shortcuts__row {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: baseline;
+  gap: var(--sv-s2);
+}
+
+.sv-shortcuts__row dt,
+.sv-shortcuts__row dd {
+  margin: 0;
+}
+
+.sv-shortcuts__row dd {
+  font-size: var(--sv-text-sm);
+}
+
+/* ---------------------------------------------------------------- attach menu */
+
+.sv-attach-btn[aria-expanded='true'] {
+  background: var(--sv-hover);
+  color: var(--sv-fg);
+}
+
+.sv-attach {
+  position: absolute;
+  left: var(--sv-s3);
+  right: var(--sv-s3);
+  bottom: calc(100% - var(--sv-s1));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  max-height: min(420px, 70vh);
+  overflow: hidden;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--sv-bg)));
+  color: var(--vscode-menu-foreground, var(--sv-fg));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, var(--sv-border)));
+  border-radius: var(--sv-radius-lg);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+  animation: sv-enter 120ms var(--sv-ease);
+}
+
+.sv-attach__search {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-s2);
+  padding: 0 var(--sv-s3);
+  border-bottom: 1px solid var(--vscode-menu-separatorBackground, var(--sv-border));
+}
+
+.sv-attach__search .codicon {
+  color: var(--sv-muted);
+}
+
+.sv-attach__search input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+}
+
+.sv-attach__search input::placeholder {
+  color: var(--vscode-input-placeholderForeground);
+}
+
+.sv-attach__list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sv-s1);
+}
+
+.sv-attach__group + .sv-attach__group {
+  margin-top: var(--sv-s1);
+  padding-top: var(--sv-s1);
+  border-top: 1px solid var(--vscode-menu-separatorBackground, var(--sv-border));
+}
+
+.sv-attach__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px var(--sv-s2);
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-xs);
+  color: var(--sv-muted);
+  white-space: nowrap;
+}
+
+.sv-attach__label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sv-attach__item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, max-content) minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: var(--sv-s2);
+  height: 26px;
+  padding: 0 var(--sv-s2);
+  border-radius: var(--sv-radius);
+  font-size: var(--sv-text-sm);
+  cursor: pointer;
+}
+
+.sv-attach__item[data-active='true'] {
+  background: var(--vscode-quickInputList-focusBackground, var(--vscode-list-activeSelectionBackground, var(--sv-surface-strong)));
+  color: var(--vscode-quickInputList-focusForeground, var(--vscode-list-activeSelectionForeground, var(--sv-fg)));
+}
+
+.sv-attach__icon {
+  color: var(--sv-muted);
+}
+
+.sv-attach__item[data-kind='dir'] .sv-attach__icon {
+  color: var(--vscode-symbolIcon-folderForeground, var(--sv-muted));
+}
+
+.sv-attach__item[data-active='true'] .sv-attach__icon,
+.sv-attach__item[data-active='true'] .sv-attach__detail,
+.sv-attach__item[data-active='true'] .sv-attach__trail {
+  color: inherit;
+}
+
+.sv-attach__name,
+.sv-attach__detail {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-attach__detail {
+  font-size: var(--sv-text-xs);
+  color: var(--sv-muted);
+}
+
+.sv-attach__trail {
+  visibility: hidden;
+}
+
+.sv-attach__item[data-kind='dir'] .sv-attach__trail,
+.sv-attach__item[aria-selected='true'] .sv-attach__trail {
+  visibility: visible;
+}
+
+.sv-attach__item[data-kind='dir'] .sv-attach__trail {
+  color: var(--sv-muted);
+}
+
+.sv-attach__status {
+  padding: 6px var(--sv-s2);
+  font-size: var(--sv-text-sm);
+  color: var(--sv-muted);
+}
+
+.sv-attach__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-s2);
+  padding: var(--sv-s1);
+  border-top: 1px solid var(--vscode-menu-separatorBackground, var(--sv-border));
+}
+
+.sv-attach__upload {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 var(--sv-s2);
+  border: 0;
+  border-radius: var(--sv-radius);
+  background: transparent;
+  font-size: var(--sv-text-sm);
+  cursor: pointer;
+}
+
+.sv-attach__upload:hover {
+  background: var(--sv-hover);
+}
+
+.sv-attach__keys {
+  margin-left: auto;
+  padding-right: var(--sv-s1);
+  font-family: var(--sv-mono);
+  font-size: 10.5px;
+  color: var(--sv-muted);
+  white-space: nowrap;
+}
+
+@container (max-width: 300px) {
+  .sv-attach__keys {
+    display: none;
+  }
+}
+
+/* ---------------------------------------------------------------- response actions */
+
+/* Copy and Retry stay out of the way until the response is hovered or focused from the keyboard. */
+.sv-turn__actions {
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 140ms var(--sv-ease);
+}
+
+.sv-turn:hover .sv-turn__actions,
+.sv-turn:focus-within .sv-turn__actions {
+  opacity: 1;
+}
+
+.sv-turn__actions .sv-icon-btn {
+  width: 22px;
+  height: 22px;
 }

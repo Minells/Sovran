@@ -95,15 +95,22 @@ Errors tell you what went wrong and how to fix it.
 
 - The model picker is a Quick Pick, and the status bar shows the model and mode.
 - The UI follows your theme, including high contrast.
-- Keyboard first: <kbd>Enter</kbd> sends, <kbd>Shift+Enter</kbd> adds a newline, <kbd>Esc</kbd> stops, <kbd>Alt+M</kbd> switches mode, <kbd>Alt+A</kbd> cycles approvals.
+- Keyboard first: <kbd>Enter</kbd> sends, <kbd>Shift+Enter</kbd> adds a newline, <kbd>Esc</kbd> stops, <kbd>Alt+M</kbd> switches mode, <kbd>Alt+A</kbd> cycles approvals. A hint line under the composer shows what the keys do right now, and **Shortcuts** lists them all.
+- **A start page for every chat:** the model and where it runs, the current mode, starters built from the active file or selection, your latest chats and a tip.
 - **Settings in the panel.** The gear in the view title opens Sovran Settings: Act and Plan models, providers, approvals, allowed commands, protected files, limits and context options, without editing JSON.
 
-**Context you can see.** The active file or selection is attached as a chip you can toggle. Files outside the workspace and protected files are never attached automatically, and their chip says so. You can add more files from a Quick Pick. Large files are paged and long conversations are trimmed to the model's context window.
+**Context you can see.** The active file or selection is attached as a chip you can toggle. Files outside the workspace and protected files are never attached automatically, and their chip says so. The paperclip opens the **attach menu**: search the workspace, pick a suggested file (the active editor and open tabs), browse folders from the workspace root, or **upload from your computer** through the system file dialog. Protected files ask before they are attached, and binary files are refused. Large files are paged and long conversations are trimmed to the model's context window.
+
+<p align="center">
+  <img src="media/screenshots/start-dark.png" width="320" alt="The start page of a new chat: model, mode, starters and recent chats">
+  &nbsp;
+  <img src="media/screenshots/attach-dark.png" width="320" alt="The attach menu with suggested files, the workspace folders and Upload from computer">
+</p>
 
 **Conversations that persist.** Chats are saved per workspace and restored after restart, and you can search, rename or delete them.
 
 **Mistakes are cheap to undo.** Every response that changed files ends with a footer: *2 files changed · Undo changes*. Undo puts every file back the way it was before that response and deletes files the agent created. If you edited a file afterwards, Sovran asks before overwriting it.
-- **Retry** generates a response again.
+- **Retry** generates a response again. It sits next to **Copy** under the last response and appears when you hover it or reach it with the keyboard.
 - **Edit** (pencil on any message) rewrites a message and continues from there, and can undo the file changes of the discarded responses too.
 
 **You can see the context window.** A meter in the composer shows how full the model's context is. When it fills up, Sovran **summarizes older messages** instead of silently forgetting them. The full transcript stays visible to you. You can also summarize on demand with `/compact` or by clicking the meter.

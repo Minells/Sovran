@@ -1,84 +1,18 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { ProviderInput, ProviderView, SessionSummary, ToolMode } from '../../../src/shared/protocol';
 import { sendsKeyInsecurely } from '../../../src/shared/endpoints';
-import { approvalOption } from '../lib/approvals';
 import { dayGroup, relativeTime } from '../lib/format';
 import { useStore } from '../state/store';
 import { post } from '../vscode';
 import { AuthField, SetupWizard } from './Onboarding';
-import { Button, Icon, IconButton, Logo } from './primitives';
+import { Button, Icon, IconButton } from './primitives';
 
-// ------------------------------------------------------------------------------------- brand
-
-function Brand() {
-  return (
-    <div className="sv-brand">
-      <Logo className="sv-hero-logo" />
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------------------------- empty state
-
-const STARTERS = {
-  plan: ['Explain how this workspace is structured', 'Find where errors are handled and how', 'Plan unit tests for the active file'],
-  act: ['Explain the active file', 'Fix the problems reported in the active file', 'Write unit tests for the selected code'],
-};
+// ------------------------------------------------------------------------------------- setup
 
 /** True while the first-run setup should be on screen (no provider yet, or the guided setup is still open). */
 export function useSetupActive(): boolean {
   const { app, state } = useStore();
   return app.providers.length === 0 || state.setupActive;
-}
-
-export function EmptyState() {
-  const { app } = useStore();
-  const setup = useSetupActive();
-  if (setup) return <SetupWizard />;
-  const provider = app.providers.find((p) => p.id === app.selected?.providerId);
-  const model = provider?.models.find((m) => m.id === app.selected?.modelId);
-  const approval = approvalOption(app.approvalMode);
-  return (
-    <div className="sv-empty">
-      <Brand />
-      {provider && app.selected ? (
-        <div className="sv-status-line">
-          <span className="sv-dot" aria-hidden="true" />
-          <span>
-            <strong>{model?.name ?? app.selected.modelId}</strong> on {provider.name}
-          </span>
-        </div>
-      ) : (
-        <div className="sv-status-line">
-          <span className="sv-dot sv-dot--warn" aria-hidden="true" />
-          <span>No model selected.</span>
-          <Button variant="ghost" onClick={() => post({ type: 'pickModel' })}>
-            Choose a model
-          </Button>
-        </div>
-      )}
-      <div className="sv-starters">
-        <p className="sv-section-label" data-tone={app.mode === 'act' ? approval.tone : undefined}>
-          {app.mode === 'plan' ? 'Plan mode · read-only' : `Act mode · ${approval.summary}`}
-        </p>
-        {STARTERS[app.mode].map((s) => (
-          <button key={s} type="button" className="sv-starter" disabled={!app.selected} onClick={() => post({ type: 'send', text: s })}>
-            <Icon name="arrow-right" />
-            <span>{s}</span>
-          </button>
-        ))}
-      </div>
-      <button type="button" className="sv-link" onClick={() => post({ type: 'setView', view: 'settings' })}>
-        <Icon name="settings-gear" /> Models &amp; approvals
-      </button>
-      {!app.workspace.hasFolder ? (
-        <p className="sv-fineprint">
-          <Icon name="folder" />
-          Open a folder so Sovran can read and edit your project.
-        </p>
-      ) : null}
-    </div>
-  );
 }
 
 // ------------------------------------------------------------------------------------- provider form

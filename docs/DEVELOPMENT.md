@@ -31,7 +31,9 @@ Query parameters:
 
 | Parameter | Values |
 |---|---|
-| `scenario` | `conversation`, `empty`, `onboarding`, `providers`, `history` |
+| `scenario` | `conversation`, `done` (finished, no pending approval), `auto`, `empty`, `onboarding`, `providers`, `history`, `settings` |
+| `editor` | `none`, `selection`, `outside` (default: an open file) |
+| `approval` | `ask`, `edits`, `auto` |
 | `theme` | `dark`, `light` |
 | `mode` | `plan`, `act` |
 | `width` | Sidebar width in px |

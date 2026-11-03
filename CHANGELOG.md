@@ -6,6 +6,10 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- **New start page** for every chat: the animated `[•]` mark, what Sovran is connected to (workspace, model, and whether it runs on this machine), the current mode, four starters built from the active file or selection, the three latest chats and a tip. The layout centres in tall sidebars and switches to one column in narrow ones; motion stops with *reduce motion*.
+- **Attach menu** on the paperclip: search workspace files, pick from suggestions (active editor and open tabs), browse folders from the workspace root (protected files are marked), or **upload from your computer** with the system file dialog. Files toggle, so several can be added in a row; fully keyboard operable.
+- **Keyboard shortcuts popover** under the composer, listing every shortcut including the global ones.
+- **Copy response** button under each response.
 - **Approval modes for Act mode: Ask, Auto-edit and Auto.** Choose them from the composer (<kbd>Alt+A</kbd> cycles), from Settings or with `Sovran: Change Approval Mode…`. Auto edits files and runs commands without asking; turning it on needs a confirmation once per window. New setting `sovran.approvals.mode` sets the mode a window starts in.
 - **Guardrails** that always ask, in every mode and for allow-listed commands: recursive deletes, `sudo`, downloaded or hidden scripts (`curl | sh`, `eval`, nested shells), pushes, publishing, infrastructure changes, network uploads, credential stores, environment dumps, system services, global installs, protected files, and paths outside the workspace. The approval card says why Auto mode still asks.
 - **"auto" badge** on every file change or command that ran without asking, with the reason (Auto mode, Auto-edit, allowed command).
@@ -15,6 +19,8 @@ pre-releases and even minor versions are stable releases.
 - The status bar shows `auto-edit` or `auto` when Act mode runs unattended.
 
 ### Security
+- Attaching a file that matches `sovran.security.protectedPaths` asks for confirmation first, whether it comes from `@`, the attach menu or the file dialog.
+- Files outside the workspace can be attached only through the system file dialog that the extension host opens; a path sent by the webview is still confined to the workspace.
 - Provider requests no longer follow HTTP redirects. A redirect could forward a custom auth header (`api-key`) and the request body to another origin.
 - The active file is attached only when it is inside the workspace and not protected. Previously a file opened from outside the workspace (for example `~/.aws/credentials`) was attached automatically.
 - `@` mentions and attached files are verified through `realpath`, so a symbolic link cannot attach a file from outside the workspace.
@@ -25,6 +31,9 @@ pre-releases and even minor versions are stable releases.
 - Agent commands no longer inherit `ELECTRON_RUN_AS_NODE` from the extension host.
 
 ### Changed
+- **Retry** under the last response is now a quiet icon that appears on hover or keyboard focus, next to Copy. Errors keep their visible Retry button.
+- `@` with nothing typed yet suggests the active editor and open tabs first.
+- Binary files and files larger than 5 MB are refused with a notice when attached, instead of being sent as unreadable text.
 - Settings are grouped into *Models*, *Approvals & Safety*, *Agent*, *Context* and *Chats* in the VS Code Settings editor. `sovran.approvals.fileEdits` is deprecated in favor of `sovran.approvals.mode` and is still honored when the new setting is unset.
 - The view title shows New Chat, History and Settings; providers, approvals and logs moved to the `…` menu.
 - The chip for a file Sovran does not share now says so instead of looking included.
@@ -37,7 +46,7 @@ pre-releases and even minor versions are stable releases.
 ### Added
 - **Exploration rows** group consecutive file reads and searches (*Explored · 3 files read, 1 search*).
 - **"Latest" / "Approval needed" pill** appears when you scroll away from the end of a running conversation.
-- **Keyboard hints** appear under the composer while it is focused.
+- **Keyboard hints** under the composer, on one line that follows what the keys do right now (send, choose a suggestion, stop). It is always shown, so focusing the composer no longer shifts the layout.
 - **Undo changes.** Each response that edits files records a checkpoint, and one click restores the pre-response state. The prompt protects files you changed afterwards, and the restore is itself undoable.
 - **Retry, edit and resend.** Rewind the conversation, optionally undoing file changes from the discarded responses.
 - **Conversation compaction.** Older turns are summarized when the context is full (`sovran.context.autoCompact`), or on demand with `/compact` or the context meter.

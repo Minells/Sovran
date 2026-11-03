@@ -27,9 +27,9 @@ export function Icon({ name, spin, label, className }: { name: string; spin?: bo
   );
 }
 
-export function IconButton({ icon, label, onClick, disabled }: { icon: string; label: string; onClick: () => void; disabled?: boolean }) {
+export function IconButton({ icon, label, onClick, disabled, title }: { icon: string; label: string; onClick: () => void; disabled?: boolean; title?: string }) {
   return (
-    <button type="button" className="sv-icon-btn" title={label} aria-label={label} onClick={onClick} disabled={disabled}>
+    <button type="button" className="sv-icon-btn" title={title ?? label} aria-label={label} onClick={onClick} disabled={disabled}>
       <Icon name={icon} />
     </button>
   );

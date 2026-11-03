@@ -9,8 +9,10 @@ export interface ToolCall {
 
 export interface ContextAttachment {
   kind: 'file' | 'selection';
-  /** Workspace-relative path. */
+  /** Workspace-relative path, or `~/…` / an absolute path for a file picked from outside the workspace. */
   path: string;
+  /** Picked by the user from outside the workspace with the system file dialog. */
+  external?: boolean;
   startLine?: number;
   endLine?: number;
   content: string;
