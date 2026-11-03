@@ -33,6 +33,8 @@ export interface BuildContextOptions {
   /** Tokens consumed by tool schemas sent alongside the messages. */
   toolSchemaTokens: number;
   maxToolResultChars: number;
+  /** Summary of compacted earlier conversation, injected into the system prompt. */
+  summary?: string;
 }
 
 export interface BuildContextResult {
@@ -109,7 +111,10 @@ const sum = (msgs: WireMessage[]) => msgs.reduce((n, m) => n + wireTokens(m), 0)
  */
 export function buildContext(o: BuildContextOptions): BuildContextResult {
   const turns = toWire(o.messages, o.toolMode, o.maxToolResultChars);
-  const system: WireMessage = { role: 'system', content: o.systemPrompt };
+  const system: WireMessage = {
+    role: 'system',
+    content: o.summary ? `${o.systemPrompt}\n\n# Summary of the earlier conversation\n${o.summary}` : o.systemPrompt,
+  };
   const fixed = wireTokens(system) + o.toolSchemaTokens;
   const total = () => fixed + turns.reduce((n, t) => n + sum(t), 0);
   let elidedResults = 0;

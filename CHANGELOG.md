@@ -3,6 +3,18 @@
 All notable changes to SOVRAN are documented here. Versions follow `major.minor.patch`; odd minor versions are
 pre-releases and even minor versions are stable releases.
 
+## Unreleased
+
+### Added
+- **Undo changes.** Each response that edits files records a checkpoint, and one click restores the pre-response state. The prompt protects files you changed afterwards, and the restore is itself undoable.
+- **Retry, edit and resend.** Rewind the conversation, optionally undoing file changes from the discarded responses.
+- **Conversation compaction.** Older turns are summarized when the context is full (`sovran.context.autoCompact`), or on demand with `/compact` or the context meter.
+- **Context meter** in the composer, using an estimate first and then the token count reported by the server.
+- **`@` file mentions** with fuzzy search, and **`/` slash commands** (built-in, plus `.sovran/commands/*.md` in trusted workspaces).
+- **Separate Plan-mode model** (`sovran.planModel`).
+- **ripgrep search** through VS Code's bundled binary. It respects `.gitignore` and excludes protected paths, which are filtered again in core.
+- `SOVRAN: Compact Conversation` command.
+
 ## 0.1.0 — Preview
 
 First preview release.

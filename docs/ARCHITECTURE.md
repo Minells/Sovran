@@ -240,7 +240,25 @@ All contracts are in `src/shared/protocol.ts`.
 The host batches text deltas (about 40 ms) to limit message traffic. The webview keeps only UI
 ephemera (draft text, scroll position, expanded rows) in `vscode.setState`.
 
-## 11. Extension points for the future
+## 11. Checkpoints, rewind and compaction (v0.2)
+
+- **Checkpoints.** For each run, the host wraps the workspace port in a `CheckpointRecorder` (decorator). It snapshots a file
+  right before the run's *first* write to it, recording whether the file existed and its original content, plus the
+  hash of the final content. Tools are unaware of it.
+  - The snapshots are saved per user message (`UserMessage.checkpoint`) in workspace storage.
+  - `planRestore` marks each file *clean* or *modified* (changed after the agent wrote it). `restoreFiles` writes files back or
+    deletes created ones through undoable `WorkspaceEdit`s.
+  - Retrying while keeping files merges the snapshots: the earliest "before" and the latest "after" win.
+- **Rewind.** Retry and edit truncate the conversation at a user message. Discarded responses' checkpoints can be
+  restored in reverse chronological order.
+- **Compaction.** `planCompaction` cuts at a user-message boundary, so tool calls are never split from their results.
+  `summarize` runs a tool-free completion with a structured prompt. `Session.compaction.firstKeptId` marks the boundary:
+  `messagesForModel()` sends only later messages, and `buildContext` puts the summary in the system prompt. The UI still
+  shows the full transcript. Auto-compaction triggers at most once per run, and only when whole turns would otherwise be dropped.
+- **Search.** `WorkspacePort.searchText` is optional. The VS Code host implements it with the bundled ripgrep, passing
+  only negative globs, because a positive `--glob` would override `.gitignore`.
+
+## 12. Extension points for the future
 
 - **MCP:** an `McpToolSource` that registers external tools in the `ToolRegistry` with `risk:'execute'`
   semantics by default.

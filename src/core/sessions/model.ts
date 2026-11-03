@@ -29,11 +29,22 @@ export interface ErrorInfo {
   hint?: string;
 }
 
+export interface CheckpointRef {
+  id: string;
+  /** Workspace-relative paths changed during the run started by this message. */
+  files: string[];
+  restoredAt?: number;
+}
+
 export interface UserMessage {
   role: 'user';
   id: string;
+  /** Exactly what is sent to the model (slash commands are expanded). */
   content: string;
+  /** What the user typed, when it differs from `content` (e.g. "/review src/a.ts"). */
+  display?: string;
   attachments?: ContextAttachment[];
+  checkpoint?: CheckpointRef;
   createdAt: number;
 }
 
@@ -68,6 +79,21 @@ export interface ToolMessage {
 
 export type SessionMessage = UserMessage | AssistantMessage | ToolMessage;
 
+export interface ContextUsage {
+  tokens: number;
+  contextWindow: number;
+  source: 'estimate' | 'server';
+  updatedAt: number;
+}
+
+export interface CompactionState {
+  summary: string;
+  /** Messages before this id are represented to the model only by `summary`. */
+  firstKeptId: string;
+  summarizedCount: number;
+  createdAt: number;
+}
+
 export interface Session {
   id: string;
   title: string;
@@ -77,6 +103,15 @@ export interface Session {
   providerId?: string;
   modelId?: string;
   messages: SessionMessage[];
+  usage?: ContextUsage;
+  compaction?: CompactionState;
+}
+
+/** Messages the model still sees verbatim (after the compaction boundary, if any). */
+export function messagesForModel(session: Session): SessionMessage[] {
+  if (!session.compaction) return session.messages;
+  const idx = session.messages.findIndex((m) => m.id === session.compaction!.firstKeptId);
+  return idx === -1 ? session.messages : session.messages.slice(idx);
 }
 
 export interface SessionSummary {

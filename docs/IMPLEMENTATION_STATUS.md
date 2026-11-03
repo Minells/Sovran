@@ -17,6 +17,27 @@ _Last updated: 2026-11-03 · version 0.1.0 (preview)_
 | M5 Hardening | 🟡 Partial | Security self-review done (spoofing defense added). Manual compatibility matrix pending |
 | M6 Release readiness | 🟡 Partial | Icon, README, CHANGELOG, CI and release workflows, third-party notices and MIT LICENSE done. Blocked on D1 (name check), D2 (publisher) and the Marketplace setup |
 
+## v0.2 features (branch `feat/trust-and-productivity`)
+
+| Feature | Status | Evidence |
+|---|---|---|
+| F1 Checkpoints and Undo changes | ✅ Implemented | Recorder, restore planning and conflict handling unit-tested. UI footer tested |
+| F2 Context meter | ✅ Implemented | `context` and `usage` events tested. Meter thresholds tested |
+| F3 Retry, edit and rewind | ✅ Implemented | UI flows tested. Host orchestration is on the manual checklist |
+| F4 Compaction (auto and `/compact`) | ✅ Implemented | Boundary planning, auto-compaction, fallback on failure tested |
+| F5 ripgrep search | ✅ Implemented | Integration test against a real `rg` binary. Protected-path re-filtering tested |
+| F6 `@` mentions and `/` commands | ✅ Implemented | Fuzzy ranking, parsing and expansion, custom commands, popup keyboard flows tested |
+| F7 Plan-mode model | ✅ Implemented | UI test. Quick Pick behavior is on the manual checklist |
+
+Manual checks for v0.2 (first F5 session):
+- [ ] An agent edit followed by **Undo changes** restores the file, and Ctrl+Z in the editor brings the edit back.
+- [ ] Undo after manually editing the file shows the conflict prompt.
+- [ ] Retry with *Keep changes*, then Undo, returns to the state before the *first* attempt.
+- [ ] Edit an older message with *Undo changes*: later responses' files are restored.
+- [ ] A long session with a small `contextWindow` auto-compacts, and the divider shows the summary.
+- [ ] `@` suggestions appear quickly in a large repository. `/` lists custom commands from `.sovran/commands`.
+- [ ] Plan mode with a separate model: the status bar and the composer show the Plan model.
+
 ## What was verified in the development environment
 
 - **Provider compatibility** against a real local HTTP server:

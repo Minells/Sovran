@@ -45,6 +45,7 @@ The README screenshots are generated from this harness.
 | Core unit | `tests/unit/*.test.ts` | Agent loop (multi-step, approvals, plan-mode enforcement, downgrade to prompted tools, loop guard, iteration cap, cancellation, grants), tools, edit engine, path confinement (POSIX and Windows), policy, command analysis, redaction, SSE parser, tagged-stream parser, context budgeting, session repair |
 | Provider integration | `tests/integration/*.test.ts` | A real HTTP server replaying compatibility scenarios: split tool-call deltas, parallel calls, non-streaming JSON, `reasoning_content`, CRLF framing, tool rejection (400), HTTP error mapping, in-stream errors, cancellation, idle timeout, connection refused, custom auth headers, model listing variants |
 | Webview | `webview/src/*.test.tsx` | Handshake, onboarding, composer keys, streaming deltas, approval and rejection flows, mode switching, Restricted Mode, stop and cancel, error rendering, markdown sanitization |
+| v0.2 features | `tests/unit/wave1.test.ts`, `tests/integration/ripgrep.test.ts` | Checkpoint recording and restore conflicts, compaction planning, auto-compaction and fallback, usage events, protected-path filtering of fast search, slash commands, fuzzy ranking, ripgrep against a real binary (skipped when `rg` is absent) |
 | Extension | `tests/extension/suite.cjs` | Activation, command registration, secure defaults, opening the view (runs in CI) |
 
 ## Architecture rules

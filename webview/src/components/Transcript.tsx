@@ -5,7 +5,7 @@ import { renderMarkdown } from '../lib/markdown';
 import { toolInfo, toolTarget } from '../lib/format';
 import { post } from '../vscode';
 import { useStore } from '../state/store';
-import { Button, Icon } from './primitives';
+import { Button, Icon, IconButton } from './primitives';
 
 // ------------------------------------------------------------------------------------- markdown
 
@@ -311,11 +311,16 @@ function AssistantPart({ message, results, run }: { message: AssistantMessageVie
           <Icon name="error" />
           <div>{message.error.message}</div>
           {message.error.hint ? <div className="sv-error__hint">{message.error.hint}</div> : null}
-          {ERROR_ACTIONS.has(message.error.kind) ? (
+          {!run ? (
             <div className="sv-error__actions">
-              <Button variant="ghost" icon="server-environment" onClick={() => post({ type: 'setView', view: 'providers' })}>
-                Check provider settings
+              <Button variant="ghost" icon="refresh" onClick={() => post({ type: 'retry' })}>
+                Retry
               </Button>
+              {ERROR_ACTIONS.has(message.error.kind) ? (
+                <Button variant="ghost" icon="server-environment" onClick={() => post({ type: 'setView', view: 'providers' })}>
+                  Check provider settings
+                </Button>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -328,6 +333,117 @@ function AssistantPart({ message, results, run }: { message: AssistantMessageVie
         </div>
       ) : null}
     </>
+  );
+}
+
+type UserMessageView = Extract<SessionMessage, { role: 'user' }>;
+
+function UserBlock({ message, canEdit }: { message: UserMessageView; canEdit: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = message.display ?? message.content;
+  const submit = () => {
+    if (!draft?.trim()) return;
+    post({ type: 'editMessage', messageId: message.id, text: draft.trim() });
+    setDraft(null);
+  };
+  if (draft !== null) {
+    return (
+      <div className="sv-user sv-user--editing">
+        <textarea
+          className="sv-approval__feedback"
+          aria-label="Edit message"
+          value={draft}
+          autoFocus
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              submit();
+            } else if (e.key === 'Escape') setDraft(null);
+          }}
+        />
+        <div className="sv-approval__actions">
+          <Button variant="primary" onClick={submit} disabled={!draft.trim()}>
+            Send
+          </Button>
+          <Button variant="ghost" onClick={() => setDraft(null)}>
+            Cancel
+          </Button>
+          <span className="sv-hint-text">Messages after this one are removed.</span>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="sv-user">
+      {message.attachments?.length ? (
+        <div className="sv-user__context">
+          {message.attachments.map((a) => (
+            <button key={`${a.path}:${a.startLine ?? ''}`} type="button" className="sv-chip" onClick={() => post({ type: 'openFile', path: a.path, line: a.startLine })}>
+              <Icon name={a.kind === 'selection' ? 'selection' : 'file'} />
+              <span>
+                {a.path.split('/').pop()}
+                {a.startLine ? `:${a.startLine}-${a.endLine}` : ''}
+              </span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {shown}
+      {canEdit ? (
+        <div className="sv-user__actions">
+          <IconButton icon="edit" label="Edit and resend" onClick={() => setDraft(shown)} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TurnFooter({ user, isLast, running }: { user: UserMessageView | undefined; isLast: boolean; running: boolean }) {
+  const cp = user?.checkpoint;
+  const showRetry = isLast && !running;
+  if (!cp && !showRetry) return null;
+  const n = cp?.files.length ?? 0;
+  return (
+    <div className="sv-turn__footer">
+      {cp && user ? (
+        cp.restoredAt ? (
+          <span className="sv-turn__files">
+            <Icon name="discard" /> Changes to {n} file{n === 1 ? '' : 's'} undone
+          </span>
+        ) : (
+          <>
+            <span className="sv-turn__files" title={cp.files.join('\n')}>
+              <Icon name="files" /> {n} file{n === 1 ? '' : 's'} changed
+            </span>
+            {!running ? (
+              <Button variant="ghost" icon="discard" onClick={() => post({ type: 'restoreCheckpoint', messageId: user.id })}>
+                Undo changes
+              </Button>
+            ) : null}
+          </>
+        )
+      ) : null}
+      <span className="sv-composer__spacer" />
+      {showRetry ? (
+        <Button variant="ghost" icon="refresh" onClick={() => post({ type: 'retry' })} title="Generate this response again">
+          Retry
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
+function CompactionDivider({ summary, count }: { summary: string; count: number }) {
+  return (
+    <details className="sv-compaction">
+      <summary>
+        <Icon name="fold" /> {count} earlier message{count === 1 ? '' : 's'} summarized for the model · show summary
+      </summary>
+      <div className="sv-compaction__body">
+        <Markdown text={summary} />
+      </div>
+    </details>
   );
 }
 
@@ -350,6 +466,7 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
   }, [app.session?.id]);
 
   const modelOf = (b: Extract<Block, { kind: 'turn' }>) => b.messages.find((m) => m.model)?.model?.modelId;
+  const running = !!run;
 
   return (
     <div
@@ -360,25 +477,18 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       }}
     >
-      {blocks.map((b) =>
-        b.kind === 'user' ? (
-          <div key={b.message.id} className="sv-user">
-            {b.message.attachments?.length ? (
-              <div className="sv-user__context">
-                {b.message.attachments.map((a) => (
-                  <button key={`${a.path}:${a.startLine ?? ''}`} type="button" className="sv-chip" onClick={() => post({ type: 'openFile', path: a.path, line: a.startLine })}>
-                    <Icon name={a.kind === 'selection' ? 'selection' : 'file'} />
-                    <span>
-                      {a.path.split('/').pop()}
-                      {a.startLine ? `:${a.startLine}-${a.endLine}` : ''}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {b.message.content}
-          </div>
-        ) : (
+      {blocks.map((b, i) => {
+        if (b.kind === 'user') {
+          return (
+            <div key={b.message.id} className="sv-block">
+              {app.compaction?.firstKeptId === b.message.id ? <CompactionDivider summary={app.compaction.summary} count={app.compaction.summarizedCount} /> : null}
+              <UserBlock message={b.message} canEdit={!running} />
+            </div>
+          );
+        }
+        const prev = blocks[i - 1];
+        const user = prev?.kind === 'user' ? prev.message : undefined;
+        return (
           <article key={b.id} className="sv-turn" aria-label="SOVRAN response">
             <div className="sv-turn__label">
               <span className="sv-wordmark">Sovran</span>
@@ -387,9 +497,10 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
             {b.messages.map((m) => (
               <AssistantPart key={m.id} message={m} results={results} run={run} />
             ))}
+            <TurnFooter user={user} isLast={i === blocks.length - 1} running={running} />
           </article>
-        ),
-      )}
+        );
+      })}
     </div>
   );
 }

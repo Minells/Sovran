@@ -79,6 +79,21 @@ Errors tell you what went wrong and how to fix it.
 
 **Conversations that persist.** Chats are saved per workspace and restored after restart, and you can search, rename or delete them.
 
+**Mistakes are cheap to undo.** Every response that changed files ends with a footer: *2 files changed · Undo changes*. Undo puts every file back the way it was before that response and deletes files the agent created. If you edited a file afterwards, SOVRAN asks before overwriting it.
+- **Retry** generates a response again.
+- **Edit** (pencil on any message) rewrites a message and continues from there, and can undo the file changes of the discarded responses too.
+
+**You can see the context window.** A meter in the composer shows how full the model's context is. When it fills up, SOVRAN **summarizes older messages** instead of silently forgetting them. The full transcript stays visible to you. You can also summarize on demand with `/compact` or by clicking the meter.
+
+**`@` files and `/` commands.**
+- **`@`:** type `@` to fuzzy-find a workspace file and attach it.
+- **Built-in commands:** type `/` for `/explain`, `/fix`, `/test`, `/review`, `/doc`, `/compact` and `/new`.
+- **Your own commands:** add Markdown files to `.sovran/commands/` (for example `.sovran/commands/release-notes.md`, using `$ARGUMENTS` for the text you type after the command). They load only in trusted workspaces.
+
+<p align="center"><img src="media/screenshots/slash-commands-dark.png" width="320" alt="Slash command suggestions"></p>
+
+**A model for each mode.** Plan can use a larger reasoning model while Act uses a fast coder. In Plan mode, pick the model from the composer, or choose *Same as Act model*.
+
 ## Installation
 
 From the VS Code Marketplace (once published): search for **SOVRAN** in the Extensions view.
@@ -146,7 +161,8 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
 | Setting | Default | Description |
 |---|---|---|
 | `sovran.providers` | `[]` | Model endpoints. User scope only |
-| `sovran.defaultModel` | `""` | `providerId/modelId` for new chats |
+| `sovran.defaultModel` | `""` | `providerId/modelId` for new chats (the Act model) |
+| `sovran.planModel` | `""` | Model for Plan mode. Empty means the same as Act |
 | `sovran.agent.maxIterations` | `25` | Maximum model round-trips per request |
 | `sovran.approvals.fileEdits` | `ask` | `ask` shows a diff for every change. `auto` applies changes without asking, but protected paths still ask |
 | `sovran.approvals.allowedCommands` | `[]` | Commands that run without asking, for example `npm test`. Never applies to commands that contain shell operators |
@@ -155,6 +171,7 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
 | `sovran.terminal.mirrorToTerminal` | `true` | Show command output in a SOVRAN terminal |
 | `sovran.context.includeActiveEditor` | `true` | Attach the active file or selection by default |
 | `sovran.context.maxToolResultChars` | `20000` | Size cap for each tool result sent to the model |
+| `sovran.context.autoCompact` | `true` | Summarize older messages when the context window is full |
 | `sovran.context.projectInstructions` | `true` | Use `AGENTS.md` from the workspace root (trusted workspaces only) |
 | `sovran.sessions.persist` | `true` | Save chats in VS Code workspace storage |
 | `sovran.diff.openOnProposal` | `true` | Open the diff editor automatically for proposed edits |
@@ -173,9 +190,9 @@ Read [SECURITY.md](SECURITY.md) for the threat model and known limitations. Choo
 ## Known limitations
 
 - **Quality depends on the model.** Tool-trained coding models work best. Small models may need `"toolMode": "prompted"`, and some still struggle with multi-step tasks.
-- **No checkpoints yet.** Edits are undoable per file with Ctrl+Z, but there is no one-click rollback of a whole run (planned).
-- **No MCP support yet** (planned).
-- **Search is built in.** It skips files over 1 MB and is slower than ripgrep on very large repositories (planned improvement).
+- **Undo covers only what the agent writes.** Changes made by terminal commands, such as code generators or `git checkout`, are not covered.
+- **No MCP support yet** (planned in v0.3).
+- **Search uses VS Code's bundled ripgrep.** It falls back to a slower built-in scan when ripgrep cannot be found.
 - **Long-running commands time out.** Watchers and dev servers are not supported as agent commands.
 - **Session files are plaintext.** They are not encrypted at rest.
 - **Not yet verified on every server.** Compatibility is covered by mocked-server tests, and the real-server compatibility matrix is still being run. See [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).

@@ -132,6 +132,21 @@ const editArgs = JSON.stringify({
 const conversation: SessionMessage[] = [
   {
     role: 'user',
+    id: 'u0',
+    createdAt: now - 300_000,
+    content: 'Add a health check endpoint',
+    display: '/review src/http/server.ts',
+    checkpoint: { id: 'cp0', files: ['src/http/health.ts', 'src/http/server.ts'] },
+  },
+  {
+    role: 'assistant',
+    id: 'a0',
+    createdAt: now - 290_000,
+    model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
+    content: 'Added `GET /healthz` in `src/http/health.ts` and registered it in the server.',
+  },
+  {
+    role: 'user',
     id: 'u1',
     createdAt: now - 60_000,
     content: 'Sessions expire too early in staging. Make the session TTL configurable and keep the current default.',
@@ -200,6 +215,17 @@ function baseState(): AppState {
     context: { editor: { path: 'src/auth/session.ts', label: 'session.ts' }, includeEditor: true, attachments: [] },
     grants: { edits: false },
     fileEdits: 'ask',
+    planModel: null,
+    usage: scenario === 'conversation' ? { tokens: 23_480, contextWindow: 32_768, source: 'server' } : null,
+    compaction: null,
+    commands: [
+      { name: 'explain', description: 'Explain the selection, a file or a concept', source: 'builtin' },
+      { name: 'fix', description: 'Find and fix problems (uses editor diagnostics)', source: 'builtin' },
+      { name: 'test', description: 'Write tests following the project conventions', source: 'builtin' },
+      { name: 'review', description: 'Review code for bugs and risks without editing', source: 'builtin' },
+      { name: 'release-notes', description: 'Draft release notes since the last tag', source: 'workspace' },
+      { name: 'compact', description: 'Summarize older messages to free context', source: 'builtin' },
+    ],
   };
 }
 
@@ -226,6 +252,15 @@ onPost((m) => {
       );
     case 'approval':
       return send({ type: 'patch', patch: { approvals: [], run: null } });
+    case 'suggestFiles': {
+      const files = ['src/auth/session.ts', 'src/auth/refresh.ts', 'src/http/server.ts', 'src/http/health.ts', 'test/auth/session.spec.ts'];
+      const q = m.query.toLowerCase();
+      return send({
+        type: 'fileSuggestions',
+        requestId: m.requestId,
+        items: files.filter((f) => f.toLowerCase().includes(q)).map((f) => ({ path: f, label: f.split('/').pop()! })),
+      });
+    }
     default:
       // eslint-disable-next-line no-console -- development harness only
       console.info('[mock host] received', m);

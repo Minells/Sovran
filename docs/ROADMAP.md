@@ -1,86 +1,73 @@
 # SOVRAN Roadmap
 
-> The order differs from the original brief: the **core contracts come before the UI** (decision D7), so the UI is
-> built against real behavior and never ships placeholder interactions.
-> Effort estimates assume one senior engineer working with an AI pair. Current status is in
+> **Principle: recoverability before reach.** Agents built on local and self-hosted models make more mistakes, so the
+> features that make mistakes cheap to undo and the agent's limits visible come before new integrations. Per-feature
+> designs are in [plans/v0.2-plan.md](plans/v0.2-plan.md). Current state is in
 > [IMPLEMENTATION_STATUS](IMPLEMENTATION_STATUS.md).
 
-## M0 — Discovery & blueprint · ~0.5 d · ✅
-- **Deliverables:** BLUEPRINT, PRODUCT_REQUIREMENTS, ARCHITECTURE, SECURITY, ROADMAP and DECISIONS.
-- **Definition of done:** decisions listed with recommendations, risks identified, and the official publishing rules verified.
+## v0.1 — Foundation (done, merged in `main` through Minells/sovran#1)
 
-## M1 — Foundation · ~1 d · ✅
-- **Objectives:** a reproducible build, lint, test and package pipeline, and an extension manifest that installs.
-- **Tasks:**
-  - `package.json` contributions: view container, view, commands, settings, keybindings, menus.
-  - Strict tsconfigs, esbuild for the host, Vite for the webview.
-  - vitest with node and jsdom environments.
-  - ESLint 9 with the core-isolation rule, plus Prettier.
-- **Acceptance:** `npm run check` and `npm run build` pass. `vsce package` produces a VSIX.
-- **Risks:** toolchain version drift. *Mitigation:* pinned versions and a lockfile.
-
-## M2 — Core engine · ~4 d · ✅
-- **Objectives:** a portable, fully unit-tested agent engine.
-- **Tasks:**
-  - SSE parser, OpenAI-compatible provider, error normalization and capability store.
-  - Tagged-stream parser (`<think>`, `<tool_call>`) and the prompted tool protocol.
-  - Tool registry and the ten tools on ports, the edit engine, path confinement, command analysis and redaction.
-  - Permission policy, context manager and AgentRunner.
-- **Tests:** a mock OpenAI server with scenarios for native tools, split argument deltas, parallel calls,
-  tools rejected (400), non-streaming JSON, `reasoning_content`, `<think>`, malformed arguments, abort, idle
-  timeout, 401, 404 and 429. Plus agent-loop scenarios: multi-step, deny, reject, max iterations, loop guard, cancel.
-- **Acceptance:** at least 85 % line coverage on `src/core`. Lint confirms there are no `vscode` imports.
-- **Risks:** server quirks not covered by the fixtures. *Mitigation:* the manual matrix in M5.
-
-## M3 — Host integration · ~3 d · ✅ (in-VS Code verification pending)
-- **Tasks:**
-  - Webview view provider with CSP and nonce, and the zod-validated protocol.
-  - Controller and run lifecycle with delta batching.
-  - SecretStorage, application-scoped settings reader, session repository with atomic writes.
-  - Workspace adapter (buffer-aware reads, `WorkspaceEdit` writes).
-  - Process runner with tree-kill and terminal mirror.
-  - DiffPresenter (virtual documents), status bar, Quick Picks (model, attach files), commands.
-- **Acceptance:** an end-to-end run against the mock server inside VS Code (manual), with sessions restored after reload.
-- **Risks:** webview lifecycle (hidden view and rehydration). *Mitigation:* the host-authoritative snapshot.
-
-## M4 — Premium UI · ~4 d · ✅
-- **Tasks:**
-  - Design tokens on VS Code variables.
-  - Header, transcript (user, assistant, reasoning, tool rows), markdown and code blocks, approval cards.
-  - Run status bar, composer (chips, mode toggle, model button, send and stop).
-  - Empty, onboarding and provider-manager screens, history view, notices.
-  - Keyboard shortcuts, plus a dev harness with mocked host events for visual QA and screenshots.
-- **Tests:** component tests for streaming, approval flow, composer keys, mode visuals and accessibility attributes.
-- **Acceptance:** correct in Dark+, Light+ and High Contrast. Fully keyboard operable.
-
-## M5 — Hardening · ~3 d · 🟡 partial
-- **Tasks:**
-  - `security-review` pass and fixes.
-  - `@vscode/test-electron` smoke tests (activation, commands, view).
-  - Performance with a long-session fixture.
-  - Accessibility audit and error-copy review.
-- **Manual compatibility matrix:** Ollama, LM Studio, vLLM, LiteLLM and one enterprise gateway, crossed with native tools, prompted tools, streaming, discovery and cancellation.
-- **Acceptance:** no high-severity findings open, and the matrix documented.
-
-## M6 — Release readiness · ~2 d · 🟡 blocked on D1–D2
-- **Tasks:**
-  - Icon (PNG) and gallery banner.
-  - README with screenshots from the harness, CHANGELOG, CONTRIBUTING and LICENSE (decision D3).
-  - Third-party notices.
-  - CI (Linux and Windows) plus a release workflow using **Trusted Publishing (OIDC)** behind a protected environment.
-  - Pre-release `0.1.0`.
-- **Acceptance:** the VSIX installs cleanly and `vsce ls` shows no development files. The release checklist in RELEASING.md is complete.
-- **Blocked by:** D1 (name), D2 (publisher) and D3 (license).
-
-## Post-v0.1 (v0.2 – v0.4)
-| Item | Value |
+| Milestone | Status |
 |---|---|
-| Checkpoints and rollback of agent edits | Trust and safety |
-| MCP client (stdio and HTTP) with per-tool approvals | Extensibility |
-| ripgrep-backed search (bundled VS Code `rg`) | Speed on large repositories |
-| `@file` mentions and drag-and-drop context | UX |
-| Admin-managed policies (allowed endpoints, forced approvals) | Enterprise |
-| Token usage and latency panel per run | Model tuning |
-| Copilot `LanguageModelChatProvider` bridge | Reach |
-| Responses API and Anthropic-native adapters | Multi-protocol |
-| CLI on the shared core | Portability |
+| M0 Blueprint · M1 Foundation · M2 Core engine · M3 Host · M4 UI | ✅ |
+| M5 Hardening | 🟡 Manual compatibility matrix still to run on real servers |
+| M6 Release readiness | 🟡 Blocked on D1 (name check) and D2 (publisher). License decided: MIT |
+
+## Release path
+
+| Step | Owner | Gate |
+|---|---|---|
+| 1. CI green on Linux, Windows and macOS (includes real-VS Code smoke tests) | Automated | `ci.yml` |
+| 2. First F5 session and manual QA checklist | Owner | `IMPLEMENTATION_STATUS.md` |
+| 3. Compatibility matrix: Ollama, LM Studio, vLLM or LiteLLM | Owner | `DEVELOPMENT.md` |
+| 4. Trademark and Marketplace name check (D1) | Owner | — |
+| 5. Publisher, Trusted Publishing, `marketplace` environment (D2) | Owner | `RELEASING.md` |
+| 6. Pre-release `v0.1.x` on the Marketplace and Open VSX | Tag | `release.yml` |
+| 7. Stable `v0.2.0` after feedback | Tag | — |
+
+## Feature roadmap
+
+Effort assumes one engineer with an AI pair. **P** is priority (1 = highest).
+
+### Wave 1 — Trust & recovery · target v0.2 · branch `feat/trust-and-productivity`
+
+| ID | Feature | P | Effort | Why |
+|---|---|---|---|---|
+| F1 | Checkpoints and run rollback ("Undo changes" per response, conflict-aware) | 1 | M | Mistakes become cheap, so users let the agent do more |
+| F2 | Context meter in the composer | 1 | S | Small context windows are the main cause of the agent "forgetting" |
+| F3 | Retry, edit message and rewind (optionally undoing later file changes) | 1 | M | Recover from bad turns without starting over |
+| F4 | Conversation compaction (auto and `/compact`) | 1 | M | Long tasks keep their goal and decisions instead of losing turns |
+| F5 | ripgrep-backed search (VS Code's bundled `rg`) | 2 | S | Speed and `.gitignore` awareness on large repositories |
+
+### Wave 2 — Productivity · target v0.2 · same branch
+
+| ID | Feature | P | Effort | Why |
+|---|---|---|---|---|
+| F6 | `@` file mentions and `/` slash commands (built-in and `.sovran/commands/*.md`) | 2 | M | Faster context and repeatable workflows |
+| F7 | A separate model for Plan and Act | 2 | S | A big model plans and a fast model executes, which makes good use of limited local hardware |
+
+### Wave 3 — Extensibility & enterprise · target v0.3–v0.4
+
+| ID | Feature | P | Effort | Why |
+|---|---|---|---|---|
+| F8 | MCP client (stdio and Streamable HTTP, user-scope config, per-tool approvals) | 2 | L | De facto standard for connecting tools and data |
+| F9 | Admin-managed policies (allowed hosts, forced approvals, no auto-approve) | 2 | M | Required to pass enterprise security reviews |
+| F10 | Native adapters: OpenAI Responses API and Anthropic Messages | 3 | M | Covers gateways that are not Chat Completions |
+| F11 | Usage and latency panel (tokens per second per model) | 3 | S | Helps tune self-hosted deployments |
+
+### Wave 4 — Reach · target v0.5+
+
+| ID | Feature | P | Effort | Why |
+|---|---|---|---|---|
+| F12 | Open VSX publishing | 2 | S | Cursor, Windsurf and VSCodium users cannot use the Microsoft Marketplace |
+| F13 | Copilot Chat bridge (`LanguageModelChatProvider`) | 3 | M | Use SOVRAN providers in Copilot (optional) |
+| F14 | CLI on the shared core | 3 | L | Terminal and CI use. Proves the portable-core architecture |
+| F15 | Image input for vision models | 3 | M | Screenshots of UI bugs and diagrams |
+
+### Deliberately deferred
+
+| Item | Reason |
+|---|---|
+| Embedding index / RAG | Costly to keep fresh. Agentic search with ripgrep covers most needs. Revisit with data |
+| Inline completions (ghost text) | A different product with strict latency requirements. Better served by dedicated FIM tools |
+| Multi-agent orchestration | Adds cost and failure modes before single-agent reliability is proven on local models |

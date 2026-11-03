@@ -2,18 +2,22 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AgentRunner } from '../core/agent/agentRunner';
+import { CheckpointRecorder, planRestore, restoreFiles, type Checkpoint, type FileSnapshot } from '../core/checkpoints/checkpoints';
+import { expandCommand, mergeCommands, parseSlash, type SlashCommand } from '../core/commands/slashCommands';
+import { planCompaction } from '../core/context/compaction';
 import type { AgentEvent } from '../core/agent/events';
 import type { AgentMode, SessionGrants } from '../core/permissions/policy';
 import { isProtectedPath } from '../core/permissions/policy';
-import type { ApprovalPort, ApprovalRequest, ApprovalResponse } from '../core/ports';
+import type { ApprovalPort, ApprovalRequest, ApprovalResponse, WorkspacePort } from '../core/ports';
 import { capabilityKey, type CapabilityStore } from '../core/providers/capabilities';
 import { ProviderError, errorFromException } from '../core/providers/errors';
 import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
-import type { ProviderConfig } from '../core/providers/types';
+import type { ModelConfig, ProviderConfig } from '../core/providers/types';
 import { resolveWorkspacePath } from '../core/security/paths';
 import {
   DEFAULT_TITLE,
   deriveTitle,
+  messagesForModel,
   repairInterruptedSession,
   type ContextAttachment,
   type Session,
@@ -37,9 +41,11 @@ import type {
   WebviewMessage,
 } from '../shared/protocol';
 import type { DiffPresenter } from './adapters/DiffPresenter';
+import { mergeSnapshots, type FsCheckpointRepository } from './adapters/FsCheckpointRepository';
+import type { CommandLoader, FileIndex } from './workspaceServices';
 import type { NodeProcessRunner } from './adapters/NodeProcessRunner';
 import type { VscodeWorkspace } from './adapters/VscodeWorkspace';
-import { readDefaultModel, readProviders, readSettings, writeDefaultModel, writeProviders, type HostSettings } from './config';
+import { readDefaultModel, readPlanModel, readProviders, readSettings, writeDefaultModel, writePlanModel, writeProviders, type HostSettings } from './config';
 import type { HostLogger, ProviderSecrets, SovranStatusBar } from './services';
 
 const MAX_ATTACHMENT_CHARS = 50_000;
@@ -55,6 +61,9 @@ export interface ControllerDeps {
   capabilities: CapabilityStore;
   statusBar: SovranStatusBar;
   repo: SessionRepository;
+  checkpoints: FsCheckpointRepository;
+  fileIndex: FileIndex;
+  commandLoader: CommandLoader;
   reveal: () => Promise<void>;
 }
 
@@ -85,6 +94,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private providers: ProviderConfig[] = [];
   private keyStatus = new Map<string, boolean>();
   private selected: SelectedModel | null = null;
+  private planModel: SelectedModel | null = null;
+  private commands: SlashCommand[] = mergeCommands([]);
   private mode: AgentMode = 'act';
   private view: View = 'chat';
   private sessions: SessionSummary[] = [];
@@ -114,6 +125,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     const def = readDefaultModel();
     const [pid, ...rest] = def.split('/');
     this.selected = this.validSelection(pid && rest.length ? { providerId: pid, modelId: rest.join('/') } : null);
+    this.planModel = this.parseModelRef(readPlanModel());
+    this.commands = await this.deps.commandLoader.load().catch(() => mergeCommands([]));
     if (!vscode.workspace.isTrusted) this.mode = 'plan';
     this.session.mode = this.mode;
     this.loaded.set(this.session.id, this.session);
@@ -124,15 +137,28 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     this.disposables.push(
       vscode.window.onDidChangeActiveTextEditor(() => this.scheduleEditorUpdate()),
       vscode.window.onDidChangeTextEditorSelection(() => this.scheduleEditorUpdate()),
-      vscode.workspace.onDidGrantWorkspaceTrust(() => this.patch({ workspace: this.workspaceView() })),
+      vscode.workspace.onDidGrantWorkspaceTrust(async () => {
+        this.commands = await this.deps.commandLoader.load();
+        this.patch({ workspace: this.workspaceView(), commands: this.commandViews() });
+      }),
+      this.deps.commandLoader.onDidChange(async () => {
+        this.commands = await this.deps.commandLoader.load();
+        this.patch({ commands: this.commandViews() });
+      }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.patch({ workspace: this.workspaceView() })),
       vscode.workspace.onDidChangeConfiguration(async (e) => {
         if (!e.affectsConfiguration('sovran')) return;
         this.settings = readSettings();
         await this.reloadProviders();
         this.selected = this.validSelection(this.selected);
+        this.planModel = this.parseModelRef(readPlanModel());
         this.updateStatusBar();
-        this.patch({ providers: this.providerViews(), selected: this.selected, fileEdits: this.settings.agent.policy.fileEdits });
+        this.patch({
+          providers: this.providerViews(),
+          selected: this.selected,
+          planModel: this.planModel,
+          fileEdits: this.settings.agent.policy.fileEdits,
+        });
       }),
     );
   }
@@ -213,6 +239,18 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         case 'openSettings':
           await vscode.commands.executeCommand('workbench.action.openSettings', 'sovran');
           return;
+        case 'restoreCheckpoint':
+          return await this.restoreCheckpoint(msg.messageId);
+        case 'retry':
+          return await this.retry();
+        case 'editMessage':
+          return await this.editMessage(msg.messageId, msg.text);
+        case 'compact':
+          return await this.compactNow();
+        case 'suggestFiles':
+          return this.send({ type: 'fileSuggestions', requestId: msg.requestId, items: await this.deps.fileIndex.suggest(msg.query) });
+        case 'attachPath':
+          return await this.attachPath(msg.path);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -237,7 +275,28 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       context: this.contextView(),
       grants: { edits: this.grantsFor(this.session.id).edits },
       fileEdits: this.settings.agent.policy.fileEdits,
+      planModel: this.planModel,
+      usage: this.usageView(this.session),
+      compaction: this.compactionView(this.session),
+      commands: this.commandViews(),
     };
+  }
+
+  private usageView(s: Session): AppState['usage'] {
+    return s.usage ? { tokens: s.usage.tokens, contextWindow: s.usage.contextWindow, source: s.usage.source } : null;
+  }
+
+  private compactionView(s: Session): AppState['compaction'] {
+    const c = s.compaction;
+    return c ? { summary: c.summary, firstKeptId: c.firstKeptId, summarizedCount: c.summarizedCount } : null;
+  }
+
+  private commandViews(): AppState['commands'] {
+    return this.commands.map(({ name, description, source }) => ({ name, description, source }));
+  }
+
+  private rel(absPath: string): string {
+    return vscode.workspace.asRelativePath(absPath, (vscode.workspace.workspaceFolders?.length ?? 0) > 1);
   }
 
   private send(m: HostMessage) {
@@ -298,7 +357,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   }
 
   private updateStatusBar() {
-    const model = this.selected ? this.modelLabel(this.selected) : null;
+    const effective = this.effectiveModel();
+    const model = effective ? this.modelLabel(effective) : null;
     this.deps.statusBar.update({ model, mode: this.mode, running: !!this.run });
   }
 
@@ -448,6 +508,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (choice !== 'Delete') return;
     if (this.run?.sessionId === id) this.cancel();
     await this.deps.repo.delete(id);
+    await this.deps.checkpoints.deleteForSession(id).catch(() => undefined);
     this.loaded.delete(id);
     this.grants.delete(id);
     this.sessions = await this.deps.repo.list();
@@ -503,12 +564,35 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     return null;
   }
 
+  private exists(sel: SelectedModel | null): sel is SelectedModel {
+    return !!sel && !!this.providers.find((p) => p.id === sel.providerId)?.models?.some((m) => m.id === sel.modelId);
+  }
+
+  private parseModelRef(ref: string): SelectedModel | null {
+    const [providerId, ...rest] = ref.split('/');
+    const sel = providerId && rest.length ? { providerId, modelId: rest.join('/') } : null;
+    return this.exists(sel) ? sel : null;
+  }
+
+  /** The model used for the next request: the Plan model in Plan mode when one is set, else the Act model. */
+  private effectiveModel(): SelectedModel | null {
+    if (this.mode === 'plan' && this.exists(this.planModel)) return this.planModel;
+    return this.validSelection(this.selected);
+  }
+
+  /** Selects the model for the *current* mode. */
   async selectModel(sel: SelectedModel) {
-    if (!this.validSelection(sel) || this.validSelection(sel)?.modelId !== sel.modelId) return;
-    this.selected = sel;
-    await writeDefaultModel(`${sel.providerId}/${sel.modelId}`);
+    if (!this.exists(sel)) return;
+    if (this.mode === 'plan') {
+      this.planModel = sel;
+      await writePlanModel(`${sel.providerId}/${sel.modelId}`);
+      this.patch({ planModel: sel });
+    } else {
+      this.selected = sel;
+      await writeDefaultModel(`${sel.providerId}/${sel.modelId}`);
+      this.patch({ selected: sel });
+    }
     this.updateStatusBar();
-    this.patch({ selected: sel });
   }
 
   async pickModel() {
@@ -517,12 +601,21 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       await this.deps.reveal();
       return;
     }
-    type Item = vscode.QuickPickItem & { sel?: SelectedModel; action?: 'discover' | 'manage' };
+    type Item = vscode.QuickPickItem & { sel?: SelectedModel; action?: 'discover' | 'manage' | 'same' };
     const items: Item[] = [];
+    const effective = this.effectiveModel();
+    if (this.mode === 'plan') {
+      const act = this.validSelection(this.selected);
+      items.push({
+        label: `${this.planModel ? '' : '$(check) '}$(link) Same as Act model`,
+        description: act ? this.modelLabel(act) : undefined,
+        action: 'same',
+      });
+    }
     for (const p of this.providers) {
       items.push({ label: p.name, kind: vscode.QuickPickItemKind.Separator });
       for (const m of p.models ?? []) {
-        const current = this.selected?.providerId === p.id && this.selected.modelId === m.id;
+        const current = (this.mode !== 'plan' || this.planModel) && effective?.providerId === p.id && effective.modelId === m.id;
         items.push({ label: `${current ? '$(check) ' : ''}${m.name ?? m.id}`, description: m.name ? m.id : undefined, sel: { providerId: p.id, modelId: m.id } });
       }
       if (!p.models?.length) items.push({ label: '$(warning) No models configured', description: 'Use Discover models', action: 'discover' });
@@ -530,9 +623,18 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
     items.push({ label: '$(refresh) Discover models from servers…', action: 'discover' });
     items.push({ label: '$(server-environment) Manage providers…', action: 'manage' });
-    const pick = await vscode.window.showQuickPick(items, { title: 'SOVRAN: Select Model', placeHolder: 'Choose the model for this chat' });
+    const pick = await vscode.window.showQuickPick(items, {
+      title: this.mode === 'plan' ? 'SOVRAN: Select Model for Plan Mode' : 'SOVRAN: Select Model',
+      placeHolder: this.mode === 'plan' ? 'Plan mode can use a different (e.g. larger) model than Act mode' : 'Choose the model for this chat',
+    });
     if (!pick) return;
     if (pick.sel) return this.selectModel(pick.sel);
+    if (pick.action === 'same') {
+      this.planModel = null;
+      await writePlanModel('');
+      this.updateStatusBar();
+      return this.patch({ planModel: null });
+    }
     if (pick.action === 'manage') {
       this.setView('providers');
       return this.deps.reveal();
@@ -717,56 +819,84 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       this.notice('warning', 'SOVRAN is still working. Stop the current run before sending another message.');
       return;
     }
-    const sel = this.validSelection(this.selected);
-    if (!sel) {
-      this.notice('error', 'Add a model provider before chatting.');
-      this.setView('providers');
-      return;
+    const slash = parseSlash(text);
+    const command = slash ? this.commands.find((c) => c.name === slash.name) : undefined;
+    if (command?.kind === 'action') {
+      if (command.name === 'compact') return this.compactNow();
+      if (command.name === 'new') return this.newSession();
     }
-    const provider = this.providers.find((p) => p.id === sel.providerId)!;
-    const model = provider.models!.find((m) => m.id === sel.modelId)!;
-    if (provider.auth?.type !== 'none' && !this.keyStatus.get(provider.id) && provider.auth?.type) {
-      this.notice('warning', `${provider.name} has no API key stored. Requests are sent without credentials.`);
-    }
-
-    const session = this.session;
-    const user: UserMessage = { role: 'user', id: randomUUID(), content: text, createdAt: Date.now() };
+    const user: UserMessage = {
+      role: 'user',
+      id: randomUUID(),
+      content: command && slash ? expandCommand(command, slash.args) : text,
+      ...(command ? { display: text } : {}),
+      createdAt: Date.now(),
+    };
     const attachments = await this.collectAttachments();
     if (attachments.length) user.attachments = attachments;
-    session.messages.push(user);
-    if (session.title === DEFAULT_TITLE) session.title = deriveTitle(text);
-    session.updatedAt = Date.now();
-    session.providerId = sel.providerId;
-    session.modelId = sel.modelId;
     this.attachments = [];
-    this.send({ type: 'messageUpsert', sessionId: session.id, message: user });
-    this.patch({ context: this.contextView(), session: { id: session.id, title: session.title, messages: session.messages } });
-    void this.persist(session);
+    this.patch({ context: this.contextView() });
+    await this.startRun(this.session, user);
+  }
 
-    const mode: AgentMode = vscode.workspace.isTrusted ? this.mode : 'plan';
-    const abort = new AbortController();
-    const runView: RunView = {
-      sessionId: session.id,
-      iteration: 0,
-      maxIterations: this.settings.agent.maxIterations,
-      startedAt: Date.now(),
-      activity: { phase: 'thinking', label: 'Thinking' },
-    };
-    this.run = { sessionId: session.id, abort, view: runView };
-    this.patch({ run: runView });
-    this.updateStatusBar();
+  private resolveModel(): { provider: ProviderConfig; model: ModelConfig } | undefined {
+    const sel = this.effectiveModel();
+    const provider = sel && this.providers.find((p) => p.id === sel.providerId);
+    const model = sel && provider?.models?.find((m) => m.id === sel.modelId);
+    if (!provider || !model) {
+      this.notice('error', 'Add a model provider before chatting.');
+      this.setView('providers');
+      return undefined;
+    }
+    return { provider, model };
+  }
 
-    const secret = await this.deps.secrets.get(provider.id);
-    this.deps.logger.addSecret(secret);
-    const runner = new AgentRunner({
+  private createRunner(provider: ProviderConfig, workspace: WorkspacePort) {
+    return new AgentRunner({
       provider: this.createProvider(provider),
       registry: this.registry,
-      workspace: this.deps.workspace,
+      workspace,
       process: this.deps.process,
       approvals: this,
       capabilities: this.deps.capabilities,
       logger: this.deps.logger,
     });
+  }
+
+  private beginRun(session: Session, activity: RunView['activity']): ActiveRun {
+    const abort = new AbortController();
+    const view: RunView = { sessionId: session.id, iteration: 0, maxIterations: this.settings.agent.maxIterations, startedAt: Date.now(), activity };
+    this.run = { sessionId: session.id, abort, view };
+    this.patch({ run: view });
+    this.updateStatusBar();
+    return this.run;
+  }
+
+  /** Appends `user` (if needed) and runs the agent for it. `mergeInto` keeps an earlier checkpoint when retrying. */
+  private async startRun(session: Session, user: UserMessage, mergeInto?: Checkpoint) {
+    const resolved = this.resolveModel();
+    if (!resolved) return;
+    const { provider, model } = resolved;
+    if (provider.auth?.type !== 'none' && !this.keyStatus.get(provider.id)) {
+      this.notice('warning', `${provider.name} has no API key stored. Requests are sent without credentials.`);
+    }
+
+    if (!session.messages.includes(user)) session.messages.push(user);
+    if (session.title === DEFAULT_TITLE) session.title = deriveTitle(user.display ?? user.content);
+    session.updatedAt = Date.now();
+    session.providerId = provider.id;
+    session.modelId = model.id;
+    this.send({ type: 'messageUpsert', sessionId: session.id, message: user });
+    if (session.id === this.session.id) this.patch({ session: { id: session.id, title: session.title, messages: session.messages } });
+    void this.persist(session);
+
+    const mode: AgentMode = vscode.workspace.isTrusted ? this.mode : 'plan';
+    const run = this.beginRun(session, { phase: 'thinking', label: 'Thinking' });
+    const secret = await this.deps.secrets.get(provider.id);
+    this.deps.logger.addSecret(secret);
+    // Every write in this run goes through the recorder, so the run can be undone as a unit.
+    const recorder = new CheckpointRecorder(this.deps.workspace);
+    const runner = this.createRunner(provider, recorder);
     this.deps.logger.info(`Run started · ${provider.id}/${model.id} · ${mode} mode`);
     try {
       const outcome = await runner.run({
@@ -776,13 +906,13 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         mode,
         settings: this.settings.agent,
         grants: this.grantsFor(session.id),
-        signal: abort.signal,
+        signal: run.abort.signal,
         emit: (e) => this.onAgentEvent(session, e),
         projectInstructions: await this.projectInstructions(),
         secrets: [secret],
+        autoCompact: this.settings.autoCompact,
       });
       this.deps.logger.info(`Run finished · ${outcome.reason}${outcome.error ? ` · ${outcome.error.kind}` : ''}`);
-      if (outcome.reason === 'max_iterations') this.updateTitleIfNeeded(session);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       this.deps.logger.error(`Run crashed: ${message}`);
@@ -794,6 +924,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         this.approvals.delete(id);
       }
       this.run = null;
+      await this.saveCheckpoint(session, user, recorder.changedFiles(), mergeInto);
       session.updatedAt = Date.now();
       clearTimeout(this.persistTimer);
       await this.persist(session);
@@ -804,8 +935,168 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     }
   }
 
-  private updateTitleIfNeeded(session: Session) {
-    if (session.title === DEFAULT_TITLE) session.title = deriveTitle(session.messages.find((m) => m.role === 'user')?.content ?? '');
+  private async saveCheckpoint(session: Session, user: UserMessage, files: FileSnapshot[], mergeInto?: Checkpoint) {
+    const merged = mergeInto ? mergeSnapshots(mergeInto.files, files) : files;
+    if (merged.length === 0) return;
+    const checkpoint: Checkpoint = { id: mergeInto?.id ?? randomUUID(), sessionId: session.id, userMessageId: user.id, createdAt: Date.now(), files: merged };
+    try {
+      await this.deps.checkpoints.save(checkpoint);
+    } catch (e) {
+      this.deps.logger.error(`Saving checkpoint failed: ${e instanceof Error ? e.message : String(e)}`);
+      return;
+    }
+    user.checkpoint = { id: checkpoint.id, files: merged.map((f) => this.rel(f.absolutePath)) };
+    this.send({ type: 'messageUpsert', sessionId: session.id, message: user });
+  }
+
+  // ------------------------------------------------------------------ rollback, retry, rewind
+
+  private async restoreCheckpoint(messageId: string) {
+    if (this.run?.sessionId === this.session.id) return this.notice('warning', 'Stop the current run before undoing changes.');
+    const user = this.session.messages.find((m): m is UserMessage => m.id === messageId && m.role === 'user');
+    if (!user?.checkpoint || user.checkpoint.restoredAt) return;
+    const checkpoint = await this.deps.checkpoints.load(this.session.id, user.checkpoint.id);
+    if (!checkpoint) return this.notice('error', 'The snapshot for these changes is no longer available.');
+    const plan = await planRestore(checkpoint.files, this.deps.workspace);
+    const modified = plan.filter((p) => p.state === 'modified');
+    let includeModified = false;
+    if (modified.length) {
+      const names = modified.slice(0, 6).map((p) => this.rel(p.snapshot.absolutePath)).join('\n');
+      const choice = await vscode.window.showWarningMessage(
+        `${modified.length} file${modified.length === 1 ? ' was' : 's were'} changed after SOVRAN edited ${modified.length === 1 ? 'it' : 'them'}.`,
+        { modal: true, detail: `${names}\n\nRestoring discards those later changes.` },
+        'Restore all',
+        'Skip changed files',
+      );
+      if (!choice) return;
+      includeModified = choice === 'Restore all';
+    }
+    const result = await restoreFiles(plan, this.deps.workspace, includeModified);
+    user.checkpoint.restoredAt = Date.now();
+    this.send({ type: 'messageUpsert', sessionId: this.session.id, message: user });
+    await this.persist(this.session);
+    this.notice(
+      'info',
+      `Undid changes to ${result.restored.length} file${result.restored.length === 1 ? '' : 's'}${result.skipped.length ? `; kept ${result.skipped.length} you changed` : ''}. Use Undo in the editor to reverse this.`,
+    );
+  }
+
+  /** Asks whether discarded responses should also have their file changes undone. */
+  private async confirmRewind(users: readonly UserMessage[]): Promise<'none' | 'undo' | 'keep' | 'cancel'> {
+    const pending = users.filter((u) => u.checkpoint && !u.checkpoint.restoredAt);
+    if (pending.length === 0) return 'none';
+    const files = [...new Set(pending.flatMap((u) => u.checkpoint!.files))];
+    const choice = await vscode.window.showWarningMessage(
+      `Also undo the file changes from the discarded response${pending.length === 1 ? '' : 's'}?`,
+      { modal: true, detail: `${files.length} file${files.length === 1 ? '' : 's'} changed:\n${files.slice(0, 8).join('\n')}${files.length > 8 ? '\n…' : ''}` },
+      'Undo changes',
+      'Keep changes',
+    );
+    return choice === 'Undo changes' ? 'undo' : choice === 'Keep changes' ? 'keep' : 'cancel';
+  }
+
+  private async undoMessages(session: Session, users: readonly UserMessage[]) {
+    let skipped = 0;
+    for (const u of [...users].reverse()) {
+      if (!u.checkpoint || u.checkpoint.restoredAt) continue;
+      const cp = await this.deps.checkpoints.load(session.id, u.checkpoint.id);
+      if (!cp) continue;
+      const result = await restoreFiles(await planRestore(cp.files, this.deps.workspace), this.deps.workspace, false);
+      skipped += result.skipped.length;
+      u.checkpoint.restoredAt = Date.now();
+    }
+    if (skipped) this.notice('warning', `Kept ${skipped} file${skipped === 1 ? '' : 's'} you changed after SOVRAN edited ${skipped === 1 ? 'it' : 'them'}.`);
+  }
+
+  /** Drops the compaction boundary when the message it points to no longer exists. */
+  private fixCompaction(session: Session) {
+    if (session.compaction && !session.messages.some((m) => m.id === session.compaction!.firstKeptId)) delete session.compaction;
+  }
+
+  private async retry() {
+    if (this.run) return this.notice('warning', 'Stop the current run before retrying.');
+    const session = this.session;
+    let i = session.messages.length - 1;
+    while (i >= 0 && session.messages[i]!.role !== 'user') i--;
+    if (i < 0) return;
+    const user = session.messages[i] as UserMessage;
+    const decision = await this.confirmRewind([user]);
+    if (decision === 'cancel') return;
+    let mergeInto: Checkpoint | undefined;
+    if (decision === 'undo') {
+      await this.undoMessages(session, [user]);
+      delete user.checkpoint;
+    } else if (decision === 'keep' && user.checkpoint) {
+      mergeInto = await this.deps.checkpoints.load(session.id, user.checkpoint.id);
+    }
+    session.messages.length = i + 1;
+    this.fixCompaction(session);
+    this.send({ type: 'state', state: this.snapshot() });
+    await this.startRun(session, user, mergeInto);
+  }
+
+  private async editMessage(messageId: string, text: string) {
+    if (this.run) return this.notice('warning', 'Stop the current run before editing a message.');
+    const session = this.session;
+    const i = session.messages.findIndex((m) => m.id === messageId && m.role === 'user');
+    if (i < 0) return;
+    const original = session.messages[i] as UserMessage;
+    const discarded = session.messages.slice(i).filter((m): m is UserMessage => m.role === 'user');
+    const decision = await this.confirmRewind(discarded);
+    if (decision === 'cancel') return;
+    if (decision === 'undo') await this.undoMessages(session, discarded);
+    session.messages.length = i;
+    this.fixCompaction(session);
+    const slash = parseSlash(text);
+    const command = slash ? this.commands.find((c) => c.name === slash.name && c.kind === 'prompt') : undefined;
+    const user: UserMessage = {
+      role: 'user',
+      id: randomUUID(),
+      content: command && slash ? expandCommand(command, slash.args) : text,
+      ...(command ? { display: text } : {}),
+      ...(original.attachments ? { attachments: original.attachments } : {}),
+      createdAt: Date.now(),
+    };
+    this.send({ type: 'state', state: this.snapshot() });
+    await this.startRun(session, user);
+  }
+
+  private async compactNow() {
+    if (this.run) return this.notice('warning', 'Stop the current run before compacting.');
+    const session = this.session;
+    if (!planCompaction(messagesForModel(session), 1)) {
+      return this.notice('info', 'There is not enough conversation to summarize yet.');
+    }
+    const resolved = this.resolveModel();
+    if (!resolved) return;
+    const run = this.beginRun(session, { phase: 'compacting', label: 'Summarizing earlier messages' });
+    const secret = await this.deps.secrets.get(resolved.provider.id);
+    try {
+      await this.createRunner(resolved.provider, this.deps.workspace).compact(
+        { session, model: resolved.model, settings: this.settings.agent, signal: run.abort.signal, emit: (e) => this.onAgentEvent(session, e), secrets: [secret] },
+        1,
+      );
+    } finally {
+      this.run = null;
+      await this.persist(session);
+      this.updateStatusBar();
+      if (session.id === this.session.id) this.patch({ run: null });
+    }
+  }
+
+  private async attachPath(p: string) {
+    let resolved;
+    try {
+      resolved = resolveWorkspacePath(p, this.deps.workspace.roots());
+    } catch {
+      return this.notice('warning', `${p} is not inside the workspace.`);
+    }
+    const stat = await this.deps.workspace.stat(resolved.absolute);
+    if (stat?.type !== 'file') return this.notice('warning', `${resolved.relative} is not a file.`);
+    if (!this.attachments.some((a) => a.absolute === resolved.absolute)) {
+      this.attachments.push({ id: randomUUID(), path: resolved.relative, label: path.basename(resolved.absolute), absolute: resolved.absolute });
+    }
+    this.patch({ context: this.contextView() });
   }
 
   cancel() {
@@ -872,6 +1163,22 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       }
       case 'notice':
         return this.notice(e.level, e.message);
+      case 'context':
+        session.usage = { tokens: e.estimatedTokens, contextWindow: e.contextWindow, source: 'estimate', updatedAt: Date.now() };
+        if (visible) this.patch({ usage: this.usageView(session) });
+        return;
+      case 'usage':
+        if (e.promptTokens && session.usage) {
+          session.usage = { ...session.usage, tokens: e.promptTokens, source: 'server', updatedAt: Date.now() };
+          if (visible) this.patch({ usage: this.usageView(session) });
+        }
+        return;
+      case 'compaction_started':
+        return setActivity({ phase: 'compacting', label: 'Summarizing earlier messages' });
+      case 'compacted':
+        if (visible) this.patch({ compaction: this.compactionView(session) });
+        this.notice('info', `Summarized ${e.compaction.summarizedCount} earlier messages to free context. The full transcript is still shown here.`);
+        return this.schedulePersist(session);
     }
   }
 

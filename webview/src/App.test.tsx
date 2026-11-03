@@ -1,11 +1,11 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppState, HostMessage, WebviewMessage } from '../../src/shared/protocol';
 import { App } from './App';
 import { renderMarkdown } from './lib/markdown';
 import { reducer, initialUiState } from './state/store';
-import { onPost } from './vscode';
+import { onPost, setUiState } from './vscode';
 
 const baseState = (over: Partial<AppState> = {}): AppState => ({
   view: 'chat',
@@ -20,12 +20,20 @@ const baseState = (over: Partial<AppState> = {}): AppState => ({
   context: { editor: { path: 'src/a.ts', label: 'a.ts' }, includeEditor: true, attachments: [] },
   grants: { edits: false },
   fileEdits: 'ask',
+  planModel: null,
+  usage: null,
+  compaction: null,
+  commands: [
+    { name: 'review', description: 'Review code', source: 'builtin' },
+    { name: 'compact', description: 'Summarize older messages', source: 'builtin' },
+  ],
   ...over,
 });
 
 let sent: WebviewMessage[] = [];
 let unsubscribe: () => void;
 beforeEach(() => {
+  setUiState({ draft: '' }); // drafts persist across mounts by design; isolate tests
   sent = [];
   unsubscribe = onPost((m) => sent.push(m));
 });
@@ -142,6 +150,97 @@ describe('App', () => {
     );
     expect(screen.getByRole('alert')).toHaveTextContent('Connection refused');
     expect(screen.getByText('Is the server running?')).toBeInTheDocument();
+  });
+});
+
+describe('v0.2 recovery & productivity', () => {
+  const doneTurn = (over: Partial<Extract<AppState['session'], object>['messages'][number]> = {}) =>
+    baseState({
+      session: {
+        id: 's',
+        title: 't',
+        messages: [
+          { role: 'user', id: 'u1', content: 'expanded prompt', display: '/review a.ts', createdAt: 0, checkpoint: { id: 'cp', files: ['src/a.ts', 'src/b.ts'] }, ...over } as never,
+          { role: 'assistant', id: 'a1', content: 'Done.', createdAt: 0 },
+        ],
+      },
+    });
+
+  it('shows what the user typed, the changed files and an Undo action', async () => {
+    mount(doneTurn());
+    expect(screen.getByText('/review a.ts')).toBeInTheDocument();
+    expect(screen.queryByText('expanded prompt')).not.toBeInTheDocument();
+    expect(screen.getByText(/2 files changed/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Undo changes' }));
+    expect(sent).toContainEqual({ type: 'restoreCheckpoint', messageId: 'u1' });
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(sent).toContainEqual({ type: 'retry' });
+  });
+
+  it('marks undone changes and hides Undo', () => {
+    mount(doneTurn({ checkpoint: { id: 'cp', files: ['src/a.ts'], restoredAt: 1 } } as never));
+    expect(screen.getByText(/Changes to 1 file undone/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
+  });
+
+  it('edits and resends a previous message', async () => {
+    mount(doneTurn());
+    await userEvent.click(screen.getByRole('button', { name: 'Edit and resend' }));
+    const box = screen.getByLabelText('Edit message');
+    expect(box).toHaveValue('/review a.ts');
+    await userEvent.clear(box);
+    await userEvent.type(box, 'review b.ts instead{Enter}');
+    expect(sent).toContainEqual({ type: 'editMessage', messageId: 'u1', text: 'review b.ts instead' });
+  });
+
+  it('shows the context meter with a warning level and compacts on click', async () => {
+    mount(baseState({ usage: { tokens: 26_000, contextWindow: 32_768, source: 'estimate' } }));
+    const meter = screen.getByRole('button', { name: /Context 79% used/ });
+    expect(meter).toHaveAttribute('data-level', 'mid');
+    expect(meter).toHaveTextContent('26k/33k');
+    await userEvent.click(meter);
+    expect(sent).toContainEqual({ type: 'compact' });
+  });
+
+  it('renders the compaction divider with the summary', () => {
+    mount({ ...doneTurn(), compaction: { summary: '## Goal\nShip it', firstKeptId: 'u1', summarizedCount: 6 } });
+    expect(screen.getByText(/6 earlier messages summarized/)).toBeInTheDocument();
+  });
+
+  it('completes slash commands from the popup with the keyboard', async () => {
+    mount(baseState());
+    const box = screen.getByLabelText('Message SOVRAN');
+    await userEvent.type(box, '/re');
+    const list = screen.getByRole('listbox', { name: 'Commands' });
+    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('/review')]);
+    await userEvent.keyboard('{Enter}');
+    expect(box).toHaveValue('/review ');
+    expect(sent.some((m) => m.type === 'send')).toBe(false);
+  });
+
+  it('suggests files for @-mentions and attaches the chosen one', async () => {
+    mount(baseState());
+    const box = screen.getByLabelText('Message SOVRAN');
+    await userEvent.type(box, 'look at @sess');
+    await waitFor(() => expect(sent.some((m) => m.type === 'suggestFiles')).toBe(true));
+    const req = [...sent].reverse().find((m) => m.type === 'suggestFiles') as Extract<WebviewMessage, { type: 'suggestFiles' }>;
+    expect(req.query).toBe('sess');
+    host({ type: 'fileSuggestions', requestId: req.requestId, items: [{ path: 'src/auth/session.ts', label: 'session.ts' }, { path: 'docs/sessions.md', label: 'sessions.md' }] });
+    expect(screen.getAllByRole('option')).toHaveLength(2);
+    await userEvent.keyboard('{ArrowDown}{Enter}');
+    expect(sent).toContainEqual({ type: 'attachPath', path: 'docs/sessions.md' });
+    expect(box).toHaveValue('look at ');
+  });
+
+  it('shows the Plan model in Plan mode', () => {
+    mount(
+      baseState({
+        mode: 'plan',
+        providers: [{ id: 'local', name: 'Local', baseUrl: 'http://x/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] }],
+        planModel: { providerId: 'local', modelId: 'thinker' },
+      }),
+    );
+    expect(screen.getByTitle(/Plan model · Local · thinker/)).toBeInTheDocument();
   });
 });
 

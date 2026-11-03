@@ -39,6 +39,23 @@ export interface EditorContext {
   diagnostics: EditorDiagnostic[];
 }
 
+export interface TextSearchOptions {
+  query: string;
+  isRegex: boolean;
+  caseSensitive: boolean;
+  /** Glob of files to search, relative to the workspace roots. */
+  include: string;
+  /** Globs never to search (protected paths). */
+  excludes: readonly string[];
+  maxResults: number;
+  signal?: AbortSignal;
+}
+
+export interface TextSearchResult {
+  matches: Array<{ path: string; line: number; text: string }>;
+  limitHit: boolean;
+}
+
 export interface WorkspacePort {
   roots(): WorkspaceRoot[];
   isTrusted(): boolean;
@@ -51,6 +68,10 @@ export interface WorkspacePort {
   findFiles(include: string, options: { maxResults: number; signal?: AbortSignal }): Promise<string[]>;
   /** Replaces (or creates) a file. Implementations should make the change undoable. */
   writeFile(absPath: string, content: string): Promise<void>;
+  /** Deletes a file (used by checkpoint rollback). Implementations should make the change undoable. */
+  deleteFile(absPath: string): Promise<void>;
+  /** Optional fast text search (e.g. ripgrep). Callers fall back to scanning files when absent. */
+  searchText?(options: TextSearchOptions): Promise<TextSearchResult>;
   activeEditor(): EditorContext | null;
   openEditors(): string[];
   environment(): { os: string; shell: string };
