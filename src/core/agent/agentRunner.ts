@@ -51,6 +51,11 @@ export interface RunOptions {
   secrets?: readonly (string | undefined)[];
   /** Summarize older turns instead of dropping them when the context window is full. */
   autoCompact?: boolean;
+  /**
+   * The current permission policy, read before every action so that changes made during a run (switching the
+   * approval mode, "always allow" on a command) apply to the next action. Defaults to `settings.policy`.
+   */
+  policy?: () => PolicySettings;
 }
 
 export type CompactOptions = Pick<RunOptions, 'session' | 'model' | 'settings' | 'signal' | 'emit' | 'secrets'>;
@@ -168,7 +173,7 @@ export class AgentRunner {
           this.cancelRemaining(o, turn.calls.slice(i + 1));
           return { reason: 'cancelled' };
         }
-        const signature = `${call.name}:${call.arguments}`;
+        const signature = `${call.name}:${canonicalArguments(call.arguments)}`;
         if (result.status === 'error' || result.status === 'denied') {
           const count = (failures.get(signature) ?? 0) + 1;
           failures.set(signature, count);
@@ -404,23 +409,30 @@ export class AgentRunner {
       return result('error', describeToolFailure(e), { summary: label });
     }
 
+    const policy = o.policy?.() ?? o.settings.policy;
     const decision = decide({
       risk: tool.risk,
       mode: o.mode,
       workspaceTrusted: this.deps.workspace.isTrusted(),
       paths: prepared.paths,
       command: prepared.command,
-      settings: o.settings.policy,
+      risks: prepared.risks,
+      settings: policy,
       grants: o.grants,
     });
     if (decision.action === 'deny') return result('denied', decision.reason, { summary: label });
+    // Changes made without a human decision are labelled, so the transcript shows what ran unattended.
+    const autoApproved = decision.action === 'allow' && tool.risk !== 'read' ? decision.reason : undefined;
 
     if (decision.action === 'ask') {
       o.emit({ type: 'tool_phase', callId: call.id, toolName: tool.name, label, phase: 'awaiting_approval' });
       const detail = prepared.approval ?? { kind: 'read' as const, path: prepared.paths[0] ?? label, reason: decision.reason };
       let response;
       try {
-        response = await this.deps.approvals.request({ id: this.newId(), callId: call.id, toolName: tool.name, title: label, detail }, o.signal);
+        response = await this.deps.approvals.request(
+          { id: this.newId(), callId: call.id, toolName: tool.name, title: label, detail, reason: decision.reason },
+          o.signal,
+        );
       } catch {
         return result('cancelled', 'The run was cancelled while waiting for approval.', { summary: label });
       }
@@ -433,12 +445,13 @@ export class AgentRunner {
     }
 
     o.emit({ type: 'tool_phase', callId: call.id, toolName: tool.name, label, phase: 'running' });
+    const audit = autoApproved ? { autoApproved } : {};
     try {
       const r = await tool.execute(args, ctx, prepared);
       if (o.signal.aborted && tool.risk !== 'write') {
-        return result('cancelled', r.content || 'Cancelled.', { summary: r.summary ?? label, display: r.display });
+        return result('cancelled', r.content || 'Cancelled.', { summary: r.summary ?? label, display: r.display, ...audit });
       }
-      return result(r.isError ? 'error' : 'success', r.content, { summary: r.summary ?? label, display: r.display });
+      return result(r.isError ? 'error' : 'success', r.content, { summary: r.summary ?? label, display: r.display, ...audit });
     } catch (e) {
       if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.', { summary: label });
       this.deps.logger.warn(`Tool ${tool.name} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -478,6 +491,19 @@ export class AgentRunner {
       o.emit({ type: 'message_committed', message: { ...msg } });
     }
   }
+}
+
+/** Stable form of tool arguments, so whitespace or key order cannot slip a repeated failure past the loop guard. */
+export function canonicalArguments(raw: string): string {
+  const parsed = parseJsonLenient(raw);
+  if (!parsed.ok) return raw.trim();
+  const sort = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sort)
+      : v && typeof v === 'object'
+        ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, sort(x)]))
+        : v;
+  return JSON.stringify(sort(parsed.value));
 }
 
 function describeToolFailure(e: unknown): string {

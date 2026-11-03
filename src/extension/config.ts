@@ -1,8 +1,10 @@
 import * as vscode from 'vscode';
 import { z } from 'zod';
 import type { AgentSettings } from '../core/agent/agentRunner';
+import type { ApprovalMode } from '../core/permissions/policy';
 import type { Logger } from '../core/ports';
 import type { ProviderConfig } from '../core/providers/types';
+import type { SettingKey, SettingUpdate, SettingsView } from '../shared/protocol';
 
 const SECTION = 'sovran';
 
@@ -75,6 +77,18 @@ export async function writePlanModel(value: string): Promise<void> {
   await vscode.workspace.getConfiguration(SECTION).update('planModel', value, vscode.ConfigurationTarget.Global);
 }
 
+/**
+ * The approval mode a window starts in. `sovran.approvals.mode` replaces the older `sovran.approvals.fileEdits`
+ * (`auto` there meant "apply edits without asking", which is now the `edits` mode); the old key is still honoured
+ * when the new one has not been set.
+ */
+export function readDefaultApprovalMode(): ApprovalMode {
+  const inspected = vscode.workspace.getConfiguration(SECTION).inspect<string>('approvals.mode');
+  const value = inspected?.globalValue;
+  if (value === 'ask' || value === 'edits' || value === 'auto') return value;
+  return userSetting<string>('approvals.fileEdits', 'ask') === 'auto' ? 'edits' : 'ask';
+}
+
 export interface HostSettings {
   agent: AgentSettings;
   includeActiveEditor: boolean;
@@ -86,12 +100,12 @@ export interface HostSettings {
 }
 
 export function readSettings(): HostSettings {
-  const protectedPaths = userSetting<string[]>('security.protectedPaths', []);
+  const protectedPaths = userSetting<string[]>('security.protectedPaths', []).filter((p) => typeof p === 'string');
   return {
     agent: {
       maxIterations: Math.min(200, Math.max(1, setting('agent.maxIterations', 25))),
       policy: {
-        fileEdits: userSetting<'ask' | 'auto'>('approvals.fileEdits', 'ask') === 'auto' ? 'auto' : 'ask',
+        approvalMode: readDefaultApprovalMode(),
         allowedCommands: userSetting<string[]>('approvals.allowedCommands', []).filter((c) => typeof c === 'string'),
         protectedPaths,
       },
@@ -107,9 +121,66 @@ export function readSettings(): HostSettings {
     projectInstructions: setting('context.projectInstructions', true),
     persistSessions: setting('sessions.persist', true),
     openDiffOnProposal: setting('diff.openOnProposal', true),
-    mirrorToTerminal: setting('terminal.mirrorToTerminal', true),
+    // Command visibility is a safety property: a workspace must not be able to hide the terminal mirror.
+    mirrorToTerminal: userSetting('terminal.mirrorToTerminal', true),
     autoCompact: setting('context.autoCompact', true),
   };
+}
+
+/** Keys that may be overridden per workspace; the others are user-scope only and ignore workspace values. */
+const WORKSPACE_OVERRIDABLE: readonly SettingKey[] = [
+  'agent.maxIterations',
+  'diff.openOnProposal',
+  'context.includeActiveEditor',
+  'context.autoCompact',
+  'context.projectInstructions',
+  'context.maxToolResultChars',
+  'sessions.persist',
+];
+
+/** Snapshot for the Settings view. Values are the effective ones Sovran uses. */
+export function readSettingsView(s: HostSettings = readSettings()): SettingsView {
+  const config = vscode.workspace.getConfiguration(SECTION);
+  const overridden = WORKSPACE_OVERRIDABLE.filter((key) => {
+    const i = config.inspect(key);
+    return i?.workspaceValue !== undefined || i?.workspaceFolderValue !== undefined;
+  });
+  return {
+    defaultApprovalMode: s.agent.policy.approvalMode,
+    allowedCommands: [...s.agent.policy.allowedCommands],
+    protectedPaths: [...s.agent.policy.protectedPaths],
+    defaultProtectedPaths: config.inspect<string[]>('security.protectedPaths')?.defaultValue ?? [],
+    maxIterations: s.agent.maxIterations,
+    terminalTimeoutSeconds: Math.round(s.agent.tools.terminalTimeoutMs / 1000),
+    mirrorToTerminal: s.mirrorToTerminal,
+    openDiffOnProposal: s.openDiffOnProposal,
+    includeActiveEditor: s.includeActiveEditor,
+    autoCompact: s.autoCompact,
+    projectInstructions: s.projectInstructions,
+    maxToolResultChars: s.agent.tools.maxToolResultChars,
+    persistSessions: s.persistSessions,
+    overriddenByWorkspace: overridden,
+  };
+}
+
+/**
+ * Writes one validated setting to the user (global) scope. A value equal to the default removes the user entry
+ * instead, so settings.json stays minimal and future changes to the defaults (e.g. new protected paths) still apply.
+ */
+export async function writeSetting(update: SettingUpdate): Promise<void> {
+  const config = vscode.workspace.getConfiguration(SECTION);
+  const isDefault = JSON.stringify(config.inspect(update.key)?.defaultValue) === JSON.stringify(update.value);
+  await config.update(update.key, isDefault ? undefined : update.value, vscode.ConfigurationTarget.Global);
+  // The new key supersedes the legacy one; clear it so the two can never disagree.
+  if (update.key === 'approvals.mode' && config.inspect('approvals.fileEdits')?.globalValue !== undefined) {
+    await config.update('approvals.fileEdits', undefined, vscode.ConfigurationTarget.Global);
+  }
+}
+
+export async function addAllowedCommand(entry: string): Promise<void> {
+  const current = userSetting<string[]>('approvals.allowedCommands', []).filter((c) => typeof c === 'string');
+  if (current.includes(entry)) return;
+  await vscode.workspace.getConfiguration(SECTION).update('approvals.allowedCommands', [...current, entry], vscode.ConfigurationTarget.Global);
 }
 
 export const affectsSovran = (e: vscode.ConfigurationChangeEvent) => e.affectsConfiguration(SECTION);

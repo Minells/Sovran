@@ -188,16 +188,51 @@ const conversation: SessionMessage[] = [
   },
 ];
 
+const autoConversation: SessionMessage[] = [
+  { role: 'user', id: 'v0', createdAt: now - 45_000, content: 'Rename getUser to fetchUser everywhere, run the tests and push.' },
+  {
+    role: 'assistant',
+    id: 'v1',
+    createdAt: now - 44_000,
+    model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
+    content: 'Renaming in the two files that use it, then running the test suite.',
+    toolCalls: [
+      { id: 'x1', name: 'apply_diff', arguments: JSON.stringify({ path: 'src/users/api.ts', edits: [] }) },
+      { id: 'x2', name: 'execute_terminal', arguments: JSON.stringify({ command: 'npm test' }) },
+    ],
+  },
+  {
+    role: 'tool', id: 'y1', toolCallId: 'x1', toolName: 'apply_diff', createdAt: now - 43_000, status: 'success', summary: '+3 −3', content: '',
+    autoApproved: 'Applied without asking (Auto mode).',
+    display: { kind: 'diff', path: 'src/users/api.ts', diff: '@@ -1,3 +1,3 @@\n-export async function getUser(id: string) {\n+export async function fetchUser(id: string) {', added: 3, removed: 3, isNew: false },
+  },
+  {
+    role: 'tool', id: 'y2', toolCallId: 'x2', toolName: 'execute_terminal', createdAt: now - 42_000, status: 'success', summary: 'exit 0 · 4.2s', content: '',
+    autoApproved: 'Ran without asking (in your allowed commands).',
+    display: { kind: 'command', command: 'npm test', cwd: '.', output: 'Test Files  12 passed (12)\n     Tests  148 passed (148)', exitCode: 0, timedOut: false },
+  },
+  {
+    role: 'assistant',
+    id: 'v2',
+    createdAt: now - 41_000,
+    model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
+    content: 'All 148 tests pass. Pushing the branch.',
+    toolCalls: [{ id: 'x3', name: 'execute_terminal', arguments: JSON.stringify({ command: 'git push origin main' }) }],
+  },
+];
+
 const diff = `--- a/src/auth/session.ts\n+++ b/src/auth/session.ts\n@@ -1,7 +1,7 @@\n import { randomUUID } from 'node:crypto';\n import type { User } from '../users';\n \n-const TTL = 3600;\n+const TTL = Number(process.env.SESSION_TTL ?? 3600);\n \n export interface Session {\n   id: string;`;
 
 function baseState(): AppState {
-  const messages = scenario === 'conversation' ? conversation : [];
+  const messages = scenario === 'conversation' ? conversation : scenario === 'auto' ? autoConversation : [];
+  const approvalParam = (['ask', 'edits', 'auto'] as const).find((m) => m === params.get('approval')) ?? 'ask';
   return {
-    view: scenario === 'providers' ? 'providers' : scenario === 'history' ? 'history' : 'chat',
+    view: scenario === 'providers' ? 'providers' : scenario === 'history' ? 'history' : scenario === 'settings' ? 'settings' : 'chat',
     workspace: { name: 'acme-api', trusted: true, hasFolder: true },
     providers: scenario === 'onboarding' ? [] : providers,
     selected: scenario === 'onboarding' ? null : { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
     mode: params.get('mode') === 'plan' ? 'plan' : 'act',
+    approvalMode: scenario === 'auto' ? 'auto' : approvalParam,
     sessions: [
       { id: 's1', title: 'Make the session TTL configurable', createdAt: now - 60_000, updatedAt: now - 50_000, messageCount: 3 },
       { id: 's2', title: 'Explain the retry logic in http/client.ts', createdAt: now - 3_600_000 * 5, updatedAt: now - 3_600_000 * 5, messageCount: 6 },
@@ -208,14 +243,30 @@ function baseState(): AppState {
     run:
       scenario === 'conversation'
         ? { sessionId: 's1', iteration: 3, maxIterations: 25, startedAt: now - 58_000, activity: { phase: 'awaiting_approval', label: 'src/auth/session.ts', toolName: 'edit_file', callId: 't3' } }
-        : null,
+        : scenario === 'auto'
+          ? { sessionId: 's1', iteration: 4, maxIterations: 25, startedAt: now - 41_000, activity: { phase: 'awaiting_approval', label: 'git push origin main', toolName: 'execute_terminal', callId: 'x3' } }
+          : null,
     approvals:
       scenario === 'conversation'
         ? [{ id: 'ap1', callId: 't3', toolName: 'edit_file', title: 'src/auth/session.ts', detail: { kind: 'edit', path: 'src/auth/session.ts', isNew: false, diff, added: 1, removed: 1 } }]
-        : [],
-    context: { editor: { path: 'src/auth/session.ts', label: 'session.ts' }, includeEditor: true, attachments: [] },
+        : scenario === 'auto'
+          ? [
+              {
+                id: 'ap2',
+                callId: 'x3',
+                toolName: 'execute_terminal',
+                title: 'git push origin main',
+                reason: 'Pushes commits to a remote repository.',
+                detail: { kind: 'command', command: 'git push origin main', cwd: '.', warnings: ['Pushes commits to a remote repository.'], allowPrefix: null },
+              },
+            ]
+          : [],
+    context: {
+      editor: params.get('editor') === 'outside' ? { path: '/home/dev/.aws/credentials', label: 'credentials', blocked: 'outside' } : { path: 'src/auth/session.ts', label: 'session.ts' },
+      includeEditor: true,
+      attachments: [],
+    },
     grants: { edits: false },
-    fileEdits: 'ask',
     planModel: null,
     usage: scenario === 'conversation' ? { tokens: 23_480, contextWindow: 32_768, source: 'server' } : null,
     compaction: null,
@@ -227,6 +278,22 @@ function baseState(): AppState {
       { name: 'release-notes', description: 'Draft release notes since the last tag', source: 'workspace' },
       { name: 'compact', description: 'Summarize older messages to free context', source: 'builtin' },
     ],
+    settings: {
+      defaultApprovalMode: 'ask',
+      allowedCommands: ['npm test', 'git status', 'npm run lint'],
+      protectedPaths: ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/.git/**'],
+      defaultProtectedPaths: ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/id_ed25519*', '**/.git/**', '**/.npmrc', '**/.pypirc', '**/.netrc'],
+      maxIterations: 25,
+      terminalTimeoutSeconds: 120,
+      mirrorToTerminal: true,
+      openDiffOnProposal: true,
+      includeActiveEditor: true,
+      autoCompact: true,
+      projectInstructions: true,
+      maxToolResultChars: 20000,
+      persistSessions: true,
+      overriddenByWorkspace: [],
+    },
   };
 }
 
@@ -240,6 +307,54 @@ onPost((m) => {
     case 'setMode':
       state = { ...state, mode: m.mode };
       return send({ type: 'patch', patch: { mode: m.mode } });
+    case 'setApprovalMode':
+      state = { ...state, approvalMode: m.mode };
+      return send({ type: 'patch', patch: { approvalMode: m.mode } });
+    case 'updateSetting': {
+      const key = m.setting.key;
+      const field = ({
+        'approvals.mode': 'defaultApprovalMode',
+        'approvals.allowedCommands': 'allowedCommands',
+        'security.protectedPaths': 'protectedPaths',
+        'agent.maxIterations': 'maxIterations',
+        'terminal.timeoutSeconds': 'terminalTimeoutSeconds',
+        'terminal.mirrorToTerminal': 'mirrorToTerminal',
+        'diff.openOnProposal': 'openDiffOnProposal',
+        'context.includeActiveEditor': 'includeActiveEditor',
+        'context.autoCompact': 'autoCompact',
+        'context.projectInstructions': 'projectInstructions',
+        'context.maxToolResultChars': 'maxToolResultChars',
+        'sessions.persist': 'persistSessions',
+      } as const)[key];
+      state = { ...state, settings: { ...state.settings, [field]: m.setting.value } };
+      return send({ type: 'patch', patch: { settings: state.settings } });
+    }
+    case 'setModel': {
+      const sel = m.providerId && m.modelId ? { providerId: m.providerId, modelId: m.modelId } : null;
+      state = m.role === 'plan' ? { ...state, planModel: sel } : { ...state, selected: sel ?? state.selected };
+      return send({ type: 'patch', patch: { selected: state.selected, planModel: state.planModel } });
+    }
+    case 'saveProvider': {
+      if (!m.requestId) return;
+      const id = m.provider.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'provider';
+      const view = { id, name: m.provider.name, baseUrl: m.provider.baseUrl, authType: m.provider.authType, hasKey: m.provider.authType !== 'none', models: [] };
+      state = { ...state, providers: [...state.providers.filter((p) => p.id !== id), view] };
+      send({ type: 'patch', patch: { providers: state.providers } });
+      send({ type: 'providerSaved', requestId: m.requestId, providerId: id });
+      const models = ['qwen2.5-coder:14b', 'qwen2.5-coder:32b', 'devstral:24b', 'llama3.1:8b', 'deepseek-r1:14b'];
+      return setTimeout(
+        () => send({ type: 'providerTest', requestId: m.requestId!, providerId: id, result: { ok: true, latencyMs: 38, models, message: `Connected · ${models.length} models available` } }),
+        600,
+      );
+    }
+    case 'addModels': {
+      state = {
+        ...state,
+        providers: state.providers.map((p) => (p.id === m.providerId ? { ...p, models: m.modelIds.map((x) => ({ id: x, toolMode: 'auto' as const })) } : p)),
+        selected: m.select ? { providerId: m.providerId, modelId: m.select } : state.selected,
+      };
+      return send({ type: 'patch', patch: { providers: state.providers, selected: state.selected } });
+    }
     case 'setView':
       state = { ...state, view: m.view };
       return send({ type: 'patch', patch: { view: m.view } });

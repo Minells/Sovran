@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { ProviderInput, ProviderView, SessionSummary, ToolMode } from '../../../src/shared/protocol';
+import { sendsKeyInsecurely } from '../../../src/shared/endpoints';
+import { approvalOption } from '../lib/approvals';
 import { dayGroup, relativeTime } from '../lib/format';
 import { useStore } from '../state/store';
 import { post } from '../vscode';
+import { AuthField, SetupWizard } from './Onboarding';
 import { Button, Icon, IconButton, Logo } from './primitives';
 
 // ------------------------------------------------------------------------------------- brand
@@ -22,11 +25,19 @@ const STARTERS = {
   act: ['Explain the active file', 'Fix the problems reported in the active file', 'Write unit tests for the selected code'],
 };
 
+/** True while the first-run setup should be on screen (no provider yet, or the guided setup is still open). */
+export function useSetupActive(): boolean {
+  const { app, state } = useStore();
+  return app.providers.length === 0 || state.setupActive;
+}
+
 export function EmptyState() {
   const { app } = useStore();
-  if (app.providers.length === 0) return <Onboarding />;
+  const setup = useSetupActive();
+  if (setup) return <SetupWizard />;
   const provider = app.providers.find((p) => p.id === app.selected?.providerId);
   const model = provider?.models.find((m) => m.id === app.selected?.modelId);
+  const approval = approvalOption(app.approvalMode);
   return (
     <div className="sv-empty">
       <Brand />
@@ -47,7 +58,9 @@ export function EmptyState() {
         </div>
       )}
       <div className="sv-starters">
-        <p className="sv-section-label">{app.mode === 'plan' ? 'Plan mode · read-only' : 'Act mode · you approve every change'}</p>
+        <p className="sv-section-label" data-tone={app.mode === 'act' ? approval.tone : undefined}>
+          {app.mode === 'plan' ? 'Plan mode · read-only' : `Act mode · ${approval.summary}`}
+        </p>
         {STARTERS[app.mode].map((s) => (
           <button key={s} type="button" className="sv-starter" disabled={!app.selected} onClick={() => post({ type: 'send', text: s })}>
             <Icon name="arrow-right" />
@@ -55,59 +68,15 @@ export function EmptyState() {
           </button>
         ))}
       </div>
+      <button type="button" className="sv-link" onClick={() => post({ type: 'setView', view: 'settings' })}>
+        <Icon name="settings-gear" /> Models &amp; approvals
+      </button>
       {!app.workspace.hasFolder ? (
         <p className="sv-fineprint">
           <Icon name="folder" />
           Open a folder so Sovran can read and edit your project.
         </p>
       ) : null}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------------------------- onboarding
-
-const PRESETS: Array<{ name: string; baseUrl: string; authType: ProviderInput['authType']; note: string }> = [
-  { name: 'Ollama', baseUrl: 'http://localhost:11434/v1', authType: 'none', note: 'Local' },
-  { name: 'LM Studio', baseUrl: 'http://localhost:1234/v1', authType: 'none', note: 'Local' },
-  { name: 'vLLM', baseUrl: 'http://localhost:8000/v1', authType: 'bearer', note: 'Self-hosted' },
-  { name: 'LiteLLM', baseUrl: 'http://localhost:4000/v1', authType: 'bearer', note: 'Gateway' },
-  { name: 'Enterprise gateway', baseUrl: '', authType: 'bearer', note: 'Any OpenAI-compatible API' },
-];
-
-export function Onboarding() {
-  const [draft, setDraft] = useState<Partial<ProviderInput> | null>(null);
-  if (draft) {
-    return (
-      <div className="sv-empty">
-        <ProviderForm initial={draft} onDone={() => setDraft(null)} />
-      </div>
-    );
-  }
-  return (
-    <div className="sv-empty">
-      <Brand />
-      <div>
-        <h2 style={{ margin: '0 0 4px', fontSize: 'var(--sv-text-md)' }}>Connect a model you control</h2>
-        <p className="sv-tagline" style={{ margin: 0 }}>
-          Sovran talks directly to OpenAI-compatible endpoints on your machine or your network. There is no Sovran server in between.
-        </p>
-      </div>
-      <div className="sv-presets" role="list">
-        {PRESETS.map((p) => (
-          <button key={p.name} type="button" role="listitem" className="sv-preset" onClick={() => setDraft({ name: p.name, baseUrl: p.baseUrl, authType: p.authType, models: [] })}>
-            <span>
-              {p.name} <span className="sv-tagline">· {p.note}</span>
-            </span>
-            <span className="sv-preset__url">{p.baseUrl || 'Your endpoint URL'}</span>
-            <Icon name="chevron-right" />
-          </button>
-        ))}
-      </div>
-      <p className="sv-fineprint">
-        <Icon name="shield" />
-        API keys are stored in VS Code Secret Storage on this machine and are never sent to this panel.
-      </p>
     </div>
   );
 }
@@ -179,28 +148,13 @@ export function ProviderForm({ initial, onDone }: { initial: Partial<ProviderInp
         <input id="sv-p-url" value={baseUrl} placeholder="https://llm.internal.example/v1" onChange={(e) => setBaseUrl(e.target.value)} spellCheck={false} />
         {touched && urlError ? <span className="sv-field__error">{urlError}</span> : <span className="sv-field__help">Usually ends in /v1. Sovran calls /chat/completions and /models.</span>}
       </div>
-      <div className="sv-field">
-        <fieldset>
-          <legend>Authentication</legend>
-          <div className="sv-segment" role="radiogroup" aria-label="Authentication" style={{ marginTop: 4 }}>
-            {(
-              [
-                ['none', 'None'],
-                ['bearer', 'Bearer token'],
-                ['header', 'Custom header'],
-              ] as const
-            ).map(([v, l]) => (
-              <button key={v} type="button" role="radio" aria-checked={authType === v} data-value={authType === v ? 'plan' : undefined} onClick={() => setAuthType(v)}>
-                {l}
-              </button>
-            ))}
-          </div>
-        </fieldset>
-        {authType === 'header' ? (
-          <input aria-label="Header name" value={headerName} onChange={(e) => setHeaderName(e.target.value)} placeholder="api-key" />
-        ) : null}
-        {authType !== 'none' ? <span className="sv-field__help">After saving, VS Code asks for the key in a secure input.</span> : null}
-      </div>
+      <AuthField
+        authType={authType}
+        setAuthType={setAuthType}
+        headerName={headerName}
+        setHeaderName={setHeaderName}
+        insecure={!urlError && sendsKeyInsecurely(baseUrl, authType)}
+      />
       <div className="sv-field">
         <label htmlFor="sv-p-timeout">Timeout (seconds)</label>
         <input id="sv-p-timeout" inputMode="numeric" value={timeout} placeholder="120" onChange={(e) => setTimeoutValue(e.target.value.replace(/\D/g, ''))} />
@@ -309,6 +263,11 @@ function ProviderCard({ p, onEdit }: { p: ProviderView; onEdit: () => void }) {
           {p.models.length} model{p.models.length === 1 ? '' : 's'}
         </span>
         {learnedPrompted ? <span className="sv-badge" title="These models rejected native tool calling; Sovran uses prompted tools">prompted tools ×{learnedPrompted}</span> : null}
+        {sendsKeyInsecurely(p.baseUrl, p.authType) ? (
+          <span className="sv-badge sv-badge--warn" title="The API key is sent over plain http to another machine. Use an https URL.">
+            <Icon name="unlock" /> Key sent over http
+          </span>
+        ) : null}
       </div>
       {test ? (
         <div className={`sv-test ${test.ok ? 'sv-test--ok' : 'sv-test--err'}`} role="status">
@@ -383,7 +342,7 @@ export function ProvidersView() {
           onDone={() => setEditing(null)}
         />
       ) : app.providers.length === 0 ? (
-        <Onboarding />
+        <SetupWizard />
       ) : (
         app.providers.map((p) => <ProviderCard key={p.id} p={p} onEdit={() => setEditing(p.id)} />)
       )}

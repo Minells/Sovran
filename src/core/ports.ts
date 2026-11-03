@@ -121,6 +121,8 @@ export interface ApprovalRequest {
   toolName: string;
   title: string;
   detail: ApprovalDetail;
+  /** Why the policy asks (e.g. "Deletes files and folders recursively."), shown when the approval mode would otherwise allow it. */
+  reason?: string;
 }
 
 export interface ApprovalResponse {

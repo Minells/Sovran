@@ -5,10 +5,12 @@ const vscode = require('vscode');
 const COMMANDS = [
   'sovran.newSession',
   'sovran.showHistory',
+  'sovran.openSettings',
   'sovran.manageProviders',
   'sovran.selectModel',
   'sovran.setApiKey',
   'sovran.toggleMode',
+  'sovran.setApprovalMode',
   'sovran.focus',
   'sovran.askAboutSelection',
   'sovran.attachFiles',
@@ -41,12 +43,19 @@ exports.run = async function run() {
   await test('secure defaults', async () => {
     const cfg = vscode.workspace.getConfiguration('sovran');
     assert.deepStrictEqual(cfg.get('providers'), []);
+    assert.strictEqual(cfg.get('approvals.mode'), 'ask');
     assert.strictEqual(cfg.get('approvals.fileEdits'), 'ask');
     assert.deepStrictEqual(cfg.get('approvals.allowedCommands'), []);
     assert.ok(cfg.get('security.protectedPaths').includes('**/.env'));
+    // Security-relevant settings ignore workspace values.
+    const scope = (key) => ext.packageJSON.contributes.configuration.flatMap((g) => Object.entries(g.properties)).find(([k]) => k === key)?.[1].scope;
+    for (const key of ['sovran.approvals.mode', 'sovran.approvals.allowedCommands', 'sovran.security.protectedPaths', 'sovran.terminal.mirrorToTerminal']) {
+      assert.strictEqual(scope(key), 'application', `${key} must be application-scoped`);
+    }
   });
-  await test('view opens and mode toggles without errors', async () => {
+  await test('view opens, settings open and mode toggles without errors', async () => {
     await vscode.commands.executeCommand('sovran.focus');
+    await vscode.commands.executeCommand('sovran.openSettings');
     await vscode.commands.executeCommand('sovran.toggleMode');
     await vscode.commands.executeCommand('sovran.toggleMode');
     await vscode.commands.executeCommand('sovran.newSession');

@@ -15,11 +15,24 @@ export interface UiState {
   focusToken: number;
   focusText?: string;
   fileSuggestions: { requestId: string; items: Array<{ path: string; label: string }> } | null;
+  /** Provider ids the host assigned to `saveProvider` requests, by request id (guided setup). */
+  savedProviders: Record<string, string>;
+  /** True while the guided setup is open, so it stays on screen after its provider is saved. */
+  setupActive: boolean;
 }
 
-export type UiAction = HostMessage | { type: 'dismissNotice'; id: string };
+export type UiAction = HostMessage | { type: 'dismissNotice'; id: string } | { type: 'setup'; active: boolean };
 
-export const initialUiState: UiState = { app: null, notices: [], toolOutputs: {}, providerTests: {}, focusToken: 0, fileSuggestions: null };
+export const initialUiState: UiState = {
+  app: null,
+  notices: [],
+  toolOutputs: {},
+  providerTests: {},
+  focusToken: 0,
+  fileSuggestions: null,
+  savedProviders: {},
+  setupActive: false,
+};
 
 const MAX_OUTPUT = 60_000;
 
@@ -73,6 +86,10 @@ export function reducer(state: UiState, action: UiAction): UiState {
       return { ...state, notices: state.notices.filter((n) => n.id !== action.id) };
     case 'providerTest':
       return { ...state, providerTests: { ...state.providerTests, [action.providerId]: { ...action.result, requestId: action.requestId } } };
+    case 'providerSaved':
+      return { ...state, savedProviders: { ...state.savedProviders, [action.requestId]: action.providerId } };
+    case 'setup':
+      return state.setupActive === action.active ? state : { ...state, setupActive: action.active };
     case 'focusComposer':
       return { ...state, focusToken: state.focusToken + 1, focusText: action.text };
     case 'fileSuggestions':

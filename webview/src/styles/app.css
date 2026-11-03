@@ -1785,3 +1785,674 @@ body.vscode-high-contrast .sv-code {
     opacity: 0;
   }
 }
+
+/* ---------------------------------------------------------------- approvals, settings and guided setup */
+
+/* Composer controls: compact at sidebar widths, labels drop before anything overflows. */
+.sv-composer__box {
+  container-type: inline-size;
+}
+
+.sv-menu-anchor {
+  position: relative;
+  flex: none;
+}
+
+.sv-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--sv-radius);
+  background: transparent;
+  color: var(--sv-muted);
+  font-size: var(--sv-text-xs);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sv-pill:hover,
+.sv-pill[aria-expanded='true'] {
+  background: var(--sv-hover);
+  color: var(--sv-fg);
+}
+
+.sv-pill .codicon {
+  font-size: 13px;
+}
+
+.sv-pill .sv-pill__chevron {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+/* Auto is the one state that changes what runs unattended: it borrows the theme's warning colour. */
+.sv-pill[data-tone='warn'] {
+  color: var(--sv-warn);
+}
+
+.sv-app[data-approval='auto'] .sv-composer__box {
+  border-color: color-mix(in srgb, var(--sv-warn) 60%, var(--vscode-input-border, var(--sv-border)));
+}
+
+.sv-app[data-approval='auto'] .sv-composer__box:focus-within {
+  border-color: var(--sv-warn);
+}
+
+/* At sidebar widths the model name matters more than the decorative mode icons. */
+@container (max-width: 440px) {
+  .sv-composer__bar .sv-segment .codicon {
+    display: none;
+  }
+}
+
+@container (max-width: 330px) {
+  .sv-pill__label {
+    display: none;
+  }
+
+  .sv-composer__bar .sv-segment button {
+    padding: 0 6px;
+  }
+}
+
+@container (max-width: 270px) {
+  .sv-meter .sv-tabular {
+    display: none;
+  }
+}
+
+.sv-menu {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  width: max-content;
+  min-width: 240px;
+  max-width: min(320px, calc(100vw - 32px));
+  padding: var(--sv-s1);
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--sv-bg)));
+  color: var(--vscode-menu-foreground, var(--sv-fg));
+  border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, var(--sv-border)));
+  border-radius: var(--sv-radius-lg);
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, rgba(0, 0, 0, 0.3));
+  animation: sv-enter 100ms var(--sv-ease);
+}
+
+.sv-menu__heading {
+  padding: 4px var(--sv-s2) 6px;
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-xs);
+  color: var(--sv-muted);
+}
+
+.sv-menu__item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 16px;
+  gap: var(--sv-s2);
+  align-items: start;
+  padding: 6px var(--sv-s2);
+  border-radius: var(--sv-radius);
+  cursor: pointer;
+  outline: none;
+}
+
+.sv-menu__item:hover,
+.sv-menu__item:focus {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-list-activeSelectionBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-list-activeSelectionForeground, var(--sv-fg)));
+}
+
+.sv-menu__item:focus-visible {
+  outline: 1px solid var(--sv-focus);
+  outline-offset: -1px;
+}
+
+.sv-menu__icon {
+  margin-top: 2px;
+}
+
+.sv-menu__item[data-tone='warn'] .sv-menu__icon {
+  color: var(--sv-warn);
+}
+
+.sv-menu__text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sv-menu__label {
+  font-size: var(--sv-text-sm);
+  font-weight: 500;
+}
+
+.sv-menu__description {
+  font-size: var(--sv-text-xs);
+  opacity: 0.75;
+}
+
+.sv-menu__check {
+  visibility: hidden;
+  margin-top: 2px;
+}
+
+.sv-menu__item[aria-checked='true'] .sv-menu__check {
+  visibility: visible;
+}
+
+.sv-menu__item--action {
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+}
+
+.sv-menu__separator {
+  height: 1px;
+  margin: var(--sv-s1) var(--sv-s1);
+  background: var(--vscode-menu-separatorBackground, var(--sv-border));
+}
+
+.sv-chip--blocked {
+  color: var(--sv-muted);
+  border-style: dashed;
+}
+
+.sv-approval__paused {
+  display: flex;
+  gap: var(--sv-s2);
+  align-items: flex-start;
+  padding: 6px var(--sv-s2);
+  border-left: 2px solid var(--sv-warn);
+  border-radius: 0 var(--sv-radius) var(--sv-radius) 0;
+  background: color-mix(in srgb, var(--sv-warn) 9%, transparent);
+  font-size: var(--sv-text-sm);
+}
+
+.sv-approval__paused .codicon {
+  color: var(--sv-warn);
+  margin-top: 2px;
+}
+
+.sv-allow {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sv-allow__label {
+  font-size: var(--sv-text-xs);
+  font-weight: 600;
+}
+
+.sv-allow__input {
+  height: 26px;
+  padding: 0 var(--sv-s2);
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-sm);
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--sv-border));
+  border-radius: var(--sv-radius);
+}
+
+.sv-allow__input:focus {
+  outline: none;
+  border-color: var(--sv-focus);
+}
+
+/* Declared after the base and :focus rules with equal specificity, so the error state wins while typing. */
+.sv-field input[aria-invalid='true'],
+.sv-field input[aria-invalid='true']:focus,
+.sv-allow__input[aria-invalid='true'],
+.sv-allow__input[aria-invalid='true']:focus {
+  border-color: var(--vscode-inputValidation-errorBorder, var(--sv-err));
+}
+
+.sv-tool__meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sv-auto-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--sv-warn) 14%, transparent);
+  color: var(--sv-warn);
+  font-family: var(--sv-mono);
+  font-size: 10px;
+}
+
+.sv-auto-badge .codicon {
+  font-size: 10px;
+}
+
+.sv-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sv-link);
+  font-size: var(--sv-text-xs);
+  cursor: pointer;
+}
+
+.sv-link:hover {
+  text-decoration: underline;
+}
+
+.sv-field__label {
+  font-size: var(--sv-text-xs);
+  font-weight: 600;
+}
+
+.sv-field__note {
+  font-size: var(--sv-text-xs);
+  color: var(--sv-warn);
+}
+
+/* Settings */
+
+.sv-settings {
+  gap: var(--sv-s4);
+}
+
+.sv-settings > * {
+  width: 100%;
+  max-width: 640px;
+  margin-inline: auto;
+}
+
+.sv-settings__nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px var(--sv-s3);
+  margin-top: calc(-1 * var(--sv-s2));
+  font-size: var(--sv-text-xs);
+}
+
+.sv-settings__nav a {
+  color: var(--sv-muted);
+  text-decoration: none;
+}
+
+.sv-settings__nav a:hover {
+  color: var(--sv-fg);
+}
+
+.sv-settings__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-s3);
+  padding-top: var(--sv-s3);
+  border-top: 1px solid var(--sv-border);
+  scroll-margin-top: var(--sv-s3);
+}
+
+.sv-settings__head {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: var(--sv-s2);
+  align-items: start;
+}
+
+.sv-settings__head > .codicon {
+  margin-top: 2px;
+  color: var(--sv-muted);
+}
+
+.sv-settings__head h3 {
+  margin: 0;
+  font-size: var(--sv-text-md);
+  font-weight: 600;
+}
+
+.sv-settings__head p {
+  margin: 2px 0 0;
+}
+
+.sv-settings__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-s4);
+}
+
+.sv-settings .sv-number {
+  width: 120px;
+}
+
+.sv-provider-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--sv-border);
+  border-radius: var(--sv-radius-lg);
+}
+
+.sv-provider-list li {
+  display: grid;
+  grid-template-columns: 7px minmax(0, auto) minmax(0, 1fr);
+  gap: var(--sv-s2);
+  align-items: center;
+  padding: 6px var(--sv-s2);
+  font-size: var(--sv-text-sm);
+}
+
+.sv-provider-list li + li {
+  border-top: 1px solid var(--sv-border);
+}
+
+.sv-provider-list__name {
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-provider-list__meta {
+  color: var(--sv-muted);
+  font-size: var(--sv-text-xs);
+  text-align: right;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-dot[data-state='ok'] {
+  background: var(--sv-ok);
+}
+
+.sv-dot[data-state='warn'] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--sv-warn);
+}
+
+.sv-options {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  gap: var(--sv-s1);
+}
+
+.sv-options legend {
+  margin-bottom: 4px;
+}
+
+.sv-options:disabled {
+  opacity: 0.6;
+}
+
+.sv-option {
+  display: grid;
+  grid-template-columns: auto 16px minmax(0, 1fr);
+  gap: var(--sv-s2);
+  align-items: start;
+  padding: var(--sv-s2);
+  border: 1px solid var(--sv-border);
+  border-radius: var(--sv-radius-lg);
+  cursor: pointer;
+}
+
+.sv-option:hover {
+  background: var(--sv-hover);
+}
+
+.sv-option[data-checked='true'] {
+  border-color: var(--sv-focus);
+  background: color-mix(in srgb, var(--sv-focus) 8%, transparent);
+}
+
+.sv-option[data-tone='warn'][data-checked='true'] {
+  border-color: var(--sv-warn);
+  background: color-mix(in srgb, var(--sv-warn) 8%, transparent);
+}
+
+.sv-option input {
+  margin: 2px 0 0;
+  accent-color: var(--sv-focus);
+}
+
+.sv-option__icon {
+  margin-top: 1px;
+  color: var(--sv-muted);
+}
+
+.sv-option[data-tone='warn'] .sv-option__icon {
+  color: var(--sv-warn);
+}
+
+.sv-option__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sv-option__label {
+  font-weight: 600;
+}
+
+.sv-option__detail {
+  font-size: var(--sv-text-xs);
+  color: var(--sv-muted);
+}
+
+.sv-list-editor {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sv-s1);
+}
+
+.sv-list-editor li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  height: 22px;
+  padding-left: 6px;
+  border: 1px solid var(--sv-border);
+  border-radius: var(--sv-radius);
+  background: var(--sv-surface);
+}
+
+.sv-list-editor code {
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-list-editor .sv-icon-btn {
+  width: 20px;
+  height: 20px;
+}
+
+.sv-checkrow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sv-s2);
+  align-items: start;
+}
+
+.sv-checkrow input {
+  width: 14px;
+  height: 14px;
+  margin: 2px 0 0;
+  accent-color: var(--vscode-checkbox-background, var(--sv-focus));
+}
+
+.sv-checkrow label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+}
+
+.sv-checkrow__label {
+  font-size: var(--sv-text-sm);
+}
+
+/* Guided setup */
+
+.sv-setup__title {
+  margin: 0 0 4px;
+  font-size: var(--sv-text-md);
+  font-weight: 600;
+}
+
+.sv-setup__lead {
+  margin: 0;
+}
+
+.sv-steps {
+  display: flex;
+  gap: var(--sv-s3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--sv-text-xs);
+  color: var(--sv-muted);
+}
+
+.sv-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sv-steps__n {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--sv-border);
+  border-radius: 50%;
+  font-family: var(--sv-mono);
+  font-size: 10px;
+}
+
+.sv-steps__n .codicon {
+  font-size: 10px;
+}
+
+.sv-steps li[data-state='current'] {
+  color: var(--sv-fg);
+  font-weight: 600;
+}
+
+.sv-steps li[data-state='current'] .sv-steps__n {
+  border-color: var(--sv-accent);
+  background: var(--sv-accent);
+  color: var(--sv-on-accent);
+}
+
+.sv-steps li[data-state='done'] .sv-steps__n {
+  border-color: var(--sv-ok);
+  color: var(--sv-ok);
+}
+
+/* Presets are a real list of buttons (ul > li > button), so the separators live on the list items. */
+.sv-presets {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sv-presets li + li {
+  border-top: 1px solid var(--sv-border);
+}
+
+.sv-preset {
+  width: 100%;
+  border-bottom: 0;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 0 var(--sv-s2);
+}
+
+.sv-preset .sv-preset__icon {
+  grid-row: 1 / span 2;
+  grid-column: 1;
+  align-self: center;
+}
+
+.sv-preset .sv-preset__name {
+  grid-column: 2;
+}
+
+.sv-preset .sv-preset__url {
+  grid-column: 2;
+}
+
+.sv-preset .sv-preset__chevron {
+  grid-row: 1 / span 2;
+  grid-column: 3;
+}
+
+.sv-segment--block {
+  display: flex;
+  margin-top: 4px;
+}
+
+.sv-segment--block button {
+  flex: 1;
+  justify-content: center;
+}
+
+.sv-model-picker {
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--sv-border);
+  border-radius: var(--sv-radius-lg);
+}
+
+.sv-model-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-s2);
+  padding: 6px var(--sv-s2);
+  cursor: pointer;
+}
+
+.sv-model-option + .sv-model-option {
+  border-top: 1px solid var(--sv-border);
+}
+
+.sv-model-option:hover {
+  background: var(--sv-hover);
+}
+
+.sv-model-option[data-checked='true'] {
+  background: color-mix(in srgb, var(--sv-focus) 10%, transparent);
+}
+
+.sv-model-option input {
+  margin: 0;
+  accent-color: var(--sv-focus);
+}
+
+.sv-model-option code {
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* Empty state */
+
+.sv-section-label[data-tone='warn'] {
+  color: var(--sv-warn);
+}

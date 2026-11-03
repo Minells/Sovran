@@ -1,6 +1,8 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { ApprovalView, AssistantMessageView, RunViewT, ToolCallView, ToolMessageView } from './types';
 import type { SessionMessage } from '../../../src/shared/protocol';
+import { hasShellMetacharacters } from '../../../src/core/permissions/shell';
+import { approvalOption } from '../lib/approvals';
 import { renderMarkdown } from '../lib/markdown';
 import { toolInfo, toolTarget } from '../lib/format';
 import { post } from '../vscode';
@@ -80,20 +82,43 @@ const HIDDEN =
 export const revealHidden = (s: string) =>
   s.replace(HIDDEN, (c) => `⟨U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}⟩`);
 
+/** Mirrors the host's allow-list rule: the entry, or the entry followed by arguments. The host re-checks it. */
+const coversCommand = (entry: string, command: string) => {
+  const e = entry.trim().replace(/\s+/g, ' ');
+  const c = command.trim().replace(/\s+/g, ' ');
+  return e.length > 0 && (c === e || c.startsWith(`${e} `));
+};
+
 export function ApprovalCard({ approval }: { approval: ApprovalView }) {
   const { app } = useStore();
   const [rejecting, setRejecting] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [grant, setGrant] = useState(false);
   const d = approval.detail;
-  const respond = (approved: boolean) =>
+  const [allowEntry, setAllowEntry] = useState<string | null>(null);
+  const allowError =
+    allowEntry === null || d.kind !== 'command'
+      ? ''
+      : !allowEntry.trim()
+        ? 'Enter the start of the command to allow.'
+        : hasShellMetacharacters(allowEntry)
+          ? 'Shell operators cannot be allowed.'
+          : !coversCommand(allowEntry, d.command)
+            ? 'The entry must be the start of this command.'
+            : '';
+  const respond = (approved: boolean, allowCommand?: string) =>
     post({
       type: 'approval',
       id: approval.id,
       approved,
       grant: approved && grant && d.kind === 'edit' ? 'session-edits' : undefined,
       feedback: !approved && feedback.trim() ? feedback.trim() : undefined,
+      ...(allowCommand ? { allowCommand } : {}),
     });
+  // In an unattended mode the card explains why this action still needs a human, without repeating a warning
+  // that is already listed below.
+  const paused = app.approvalMode !== 'ask' && !!approval.reason;
+  const reasonListed = d.kind === 'command' && !!approval.reason && d.warnings.includes(approval.reason);
 
   const title =
     d.kind === 'edit'
@@ -112,10 +137,19 @@ export function ApprovalCard({ approval }: { approval: ApprovalView }) {
         <Icon name={icon} />
         <span>{title}</span>
       </div>
+      {paused ? (
+        <div className="sv-approval__paused" role="note">
+          <Icon name="shield" />
+          <span>
+            {approvalOption(app.approvalMode).label} mode still asks here
+            {reasonListed ? ', for the reason below.' : `: ${approval.reason}`}
+          </span>
+        </div>
+      ) : null}
       {d.kind === 'command' ? (
         <>
           <pre className="sv-approval__command">{revealHidden(d.command)}</pre>
-          <div className="sv-approval__meta">in {d.cwd}</div>
+          <div className="sv-approval__meta">{d.cwd === '.' ? 'in the workspace folder' : `in ${d.cwd}`}</div>
           {d.warnings.length ? (
             <ul className="sv-approval__warnings">
               {d.warnings.map((w) => (
@@ -152,6 +186,29 @@ export function ApprovalCard({ approval }: { approval: ApprovalView }) {
           }}
         />
       ) : null}
+      {allowEntry !== null && d.kind === 'command' ? (
+        <div className="sv-allow">
+          <label className="sv-allow__label" htmlFor={`allow-${approval.id}`}>
+            Always run commands that start with:
+          </label>
+          <input
+            id={`allow-${approval.id}`}
+            className="sv-allow__input"
+            value={allowEntry}
+            spellCheck={false}
+            autoFocus
+            aria-invalid={!!allowError}
+            onChange={(e) => setAllowEntry(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !allowError) respond(true, allowEntry.trim());
+              if (e.key === 'Escape') setAllowEntry(null);
+            }}
+          />
+          <span className={allowError ? 'sv-field__error' : 'sv-field__help'}>
+            {allowError || 'Saved to your allowed commands. Risky commands and shell operators still ask.'}
+          </span>
+        </div>
+      ) : null}
       <div className="sv-approval__actions">
         {rejecting ? (
           <>
@@ -159,6 +216,15 @@ export function ApprovalCard({ approval }: { approval: ApprovalView }) {
               Send rejection
             </Button>
             <Button variant="ghost" onClick={() => setRejecting(false)}>
+              Back
+            </Button>
+          </>
+        ) : allowEntry !== null ? (
+          <>
+            <Button variant="primary" icon="check" disabled={!!allowError} onClick={() => respond(true, allowEntry.trim())}>
+              Run and always allow
+            </Button>
+            <Button variant="ghost" onClick={() => setAllowEntry(null)}>
               Back
             </Button>
           </>
@@ -172,13 +238,18 @@ export function ApprovalCard({ approval }: { approval: ApprovalView }) {
                 Review diff
               </Button>
             ) : null}
+            {d.kind === 'command' && d.allowPrefix ? (
+              <Button title={`Run now and stop asking for "${d.allowPrefix}" commands`} onClick={() => setAllowEntry(d.allowPrefix)}>
+                Always allow…
+              </Button>
+            ) : null}
             <Button variant="ghost" onClick={() => setRejecting(true)}>
               Reject…
             </Button>
           </>
         )}
       </div>
-      {d.kind === 'edit' && !rejecting && app.fileEdits === 'ask' ? (
+      {d.kind === 'edit' && !rejecting && app.approvalMode === 'ask' ? (
         <label className="sv-check">
           <input type="checkbox" checked={grant} onChange={(e) => setGrant(e.target.checked)} />
           Apply future edits in this chat without asking
@@ -243,6 +314,13 @@ export function ToolRow({
     );
   }
   if (status === 'denied') meta = 'not applied';
+  // Changes that ran without a human decision are marked, so an Auto-mode transcript stays auditable.
+  const auto = result?.autoApproved ? (
+    <span className="sv-auto-badge" title={result.autoApproved} aria-label={result.autoApproved}>
+      <Icon name="zap" />
+      auto
+    </span>
+  ) : null;
 
   return (
     <div className="sv-tool" data-status={status}>
@@ -262,7 +340,10 @@ export function ToolRow({
         <span className="sv-tool__target" title={target}>
           {target}
         </span>
-        <span className="sv-tool__meta">{meta}</span>
+        <span className="sv-tool__meta">
+          {auto}
+          {meta}
+        </span>
         <Icon name="chevron-down" className="sv-tool__chevron" />
       </button>
       {expanded ? (
