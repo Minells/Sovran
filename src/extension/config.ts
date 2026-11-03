@@ -67,6 +67,14 @@ export async function writeDefaultModel(value: string): Promise<void> {
   await vscode.workspace.getConfiguration(SECTION).update('defaultModel', value, vscode.ConfigurationTarget.Global);
 }
 
+export function readPlanModel(): string {
+  return userSetting('planModel', '');
+}
+
+export async function writePlanModel(value: string): Promise<void> {
+  await vscode.workspace.getConfiguration(SECTION).update('planModel', value, vscode.ConfigurationTarget.Global);
+}
+
 export interface HostSettings {
   agent: AgentSettings;
   includeActiveEditor: boolean;
@@ -74,6 +82,7 @@ export interface HostSettings {
   persistSessions: boolean;
   openDiffOnProposal: boolean;
   mirrorToTerminal: boolean;
+  autoCompact: boolean;
 }
 
 export function readSettings(): HostSettings {
@@ -99,6 +108,7 @@ export function readSettings(): HostSettings {
     persistSessions: setting('sessions.persist', true),
     openDiffOnProposal: setting('diff.openOnProposal', true),
     mirrorToTerminal: setting('terminal.mirrorToTerminal', true),
+    autoCompact: setting('context.autoCompact', true),
   };
 }
 

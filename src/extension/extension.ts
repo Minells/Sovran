@@ -1,9 +1,12 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { DiffPresenter } from './adapters/DiffPresenter';
+import { FsCheckpointRepository } from './adapters/FsCheckpointRepository';
 import { FsSessionRepository, MemorySessionRepository } from './adapters/FsSessionRepository';
 import { NodeProcessRunner, TerminalMirror } from './adapters/NodeProcessRunner';
+import { RipgrepSearch } from './adapters/RipgrepSearch';
 import { VscodeWorkspace } from './adapters/VscodeWorkspace';
+import { CommandLoader, FileIndex } from './workspaceServices';
 import { readSettings } from './config';
 import { SovranController } from './SovranController';
 import { SovranViewProvider } from './SovranViewProvider';
@@ -19,6 +22,11 @@ export async function activate(context: vscode.ExtensionContext) {
   const storage = (context.storageUri ?? context.globalStorageUri).fsPath;
   const repo = settings.persistSessions ? new FsSessionRepository(path.join(storage, 'sessions')) : new MemorySessionRepository();
 
+  const ripgrep = RipgrepSearch.locate(vscode.env.appRoot);
+  logger.info(ripgrep ? 'Using VS Code ripgrep for search.' : 'ripgrep not found; using built-in search.');
+  const fileIndex = new FileIndex();
+  const commandLoader = new CommandLoader();
+
   // The view provider needs the controller and the controller needs to reveal the view.
   const ref: { view?: SovranViewProvider } = {};
   const reveal = async () => ref.view?.reveal();
@@ -27,11 +35,14 @@ export async function activate(context: vscode.ExtensionContext) {
     logger,
     secrets: new ProviderSecrets(context.secrets),
     diff,
-    workspace: new VscodeWorkspace(),
+    workspace: new VscodeWorkspace(ripgrep),
     process: new NodeProcessRunner(() => (readSettings().mirrorToTerminal ? mirror : undefined)),
     capabilities: new MementoCapabilityStore(context.globalState),
     statusBar,
     repo,
+    checkpoints: new FsCheckpointRepository(path.join(storage, 'checkpoints')),
+    fileIndex,
+    commandLoader,
     reveal,
   });
   await controller.init();
@@ -43,6 +54,8 @@ export async function activate(context: vscode.ExtensionContext) {
     logger,
     diff,
     mirror,
+    fileIndex,
+    commandLoader,
     statusBar,
     controller,
     vscode.window.registerWebviewViewProvider(SovranViewProvider.viewId, viewProvider),
@@ -72,6 +85,7 @@ export async function activate(context: vscode.ExtensionContext) {
       controller.focusComposer();
     }),
     command('sovran.cancelRun', () => controller.cancel()),
+    command('sovran.compact', () => controller.handle({ type: 'compact' })),
     command('sovran.showLogs', () => logger.show()),
   );
   logger.info(`SOVRAN activated (VS Code ${vscode.version}).`);

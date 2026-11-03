@@ -37,7 +37,7 @@ export interface SelectedModel {
   modelId: string;
 }
 
-export type ActivityPhase = 'thinking' | 'streaming' | 'awaiting_approval' | 'running';
+export type ActivityPhase = 'thinking' | 'streaming' | 'awaiting_approval' | 'running' | 'compacting';
 
 export interface RunView {
   sessionId: string;
@@ -85,11 +85,31 @@ export interface CurrentSessionView {
   messages: SessionMessage[];
 }
 
+export interface ContextUsageView {
+  tokens: number;
+  contextWindow: number;
+  source: 'estimate' | 'server';
+}
+
+export interface CompactionView {
+  summary: string;
+  firstKeptId: string;
+  summarizedCount: number;
+}
+
+export interface SlashCommandView {
+  name: string;
+  description: string;
+  source: 'builtin' | 'workspace';
+}
+
 export interface AppState {
   view: View;
   workspace: { name: string | null; trusted: boolean; hasFolder: boolean };
   providers: ProviderView[];
   selected: SelectedModel | null;
+  /** Model used in Plan mode; null means "same as Act". */
+  planModel: SelectedModel | null;
   mode: AgentMode;
   sessions: SessionSummary[];
   session: CurrentSessionView | null;
@@ -98,6 +118,9 @@ export interface AppState {
   context: ComposerContextView;
   grants: { edits: boolean };
   fileEdits: 'ask' | 'auto';
+  usage: ContextUsageView | null;
+  compaction: CompactionView | null;
+  commands: SlashCommandView[];
 }
 
 export interface ProviderTestResult {
@@ -117,7 +140,8 @@ export type HostMessage =
   | { type: 'toolOutput'; sessionId: string; callId: string; chunk: string }
   | { type: 'notice'; id: string; level: 'info' | 'warning' | 'error'; message: string }
   | { type: 'providerTest'; requestId: string; providerId: string; result: ProviderTestResult }
-  | { type: 'focusComposer'; text?: string };
+  | { type: 'focusComposer'; text?: string }
+  | { type: 'fileSuggestions'; requestId: string; items: Array<{ path: string; label: string }> };
 
 // ---------------------------------------------------------------------------------------------
 // Webview → host (validated)
@@ -187,6 +211,12 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('testProvider'), requestId: id, providerId }),
   z.object({ type: z.literal('setApiKey'), providerId }),
   z.object({ type: z.literal('openSettings') }),
+  z.object({ type: z.literal('restoreCheckpoint'), messageId: id }),
+  z.object({ type: z.literal('retry') }),
+  z.object({ type: z.literal('editMessage'), messageId: id, text: z.string().min(1).max(200_000) }),
+  z.object({ type: z.literal('compact') }),
+  z.object({ type: z.literal('suggestFiles'), requestId: id, query: z.string().max(200) }),
+  z.object({ type: z.literal('attachPath'), path: z.string().min(1).max(2000) }),
 ]);
 
 export type WebviewMessage = z.infer<typeof webviewMessageSchema>;

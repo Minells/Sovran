@@ -138,6 +138,11 @@
         "command": "sovran.showLogs",
         "title": "Show Logs",
         "category": "SOVRAN"
+      },
+      {
+        "command": "sovran.compact",
+        "title": "Compact Conversation",
+        "category": "SOVRAN"
       }
     ],
     "menus": {
@@ -288,6 +293,12 @@
           "default": "",
           "description": "Model used for new chats, as providerId/modelId."
         },
+        "sovran.planModel": {
+          "type": "string",
+          "scope": "application",
+          "default": "",
+          "description": "Model used in Plan mode, as providerId/modelId. Empty means the same model as Act mode."
+        },
         "sovran.agent.maxIterations": {
           "type": "number",
           "default": 25,
@@ -357,6 +368,11 @@
           "minimum": 2000,
           "maximum": 200000,
           "description": "Maximum characters of a single tool result sent to the model."
+        },
+        "sovran.context.autoCompact": {
+          "type": "boolean",
+          "default": true,
+          "description": "When the context window is full, summarize older messages instead of dropping them."
         },
         "sovran.context.includeActiveEditor": {
           "type": "boolean",
