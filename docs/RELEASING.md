@@ -29,7 +29,7 @@
 2. Create the publisher on the Marketplace management page.
 3. Configure Marketplace **Trusted Publishing** for `Minells/sovran`, workflow `release.yml`.
 4. In GitHub, create the environment **`marketplace`** with required reviewers.
-5. Settle the license (decision D3) and the name/trademark check (decision D1).
+5. Complete the name/trademark check (decision D1). The license is settled: MIT (D3).
 
 ## Release checklist
 

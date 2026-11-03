@@ -194,4 +194,4 @@ Documentation: [Architecture](docs/ARCHITECTURE.md) · [Product requirements](do
 
 ## License
 
-See [LICENSE](LICENSE). Third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+SOVRAN is released under the [MIT License](LICENSE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

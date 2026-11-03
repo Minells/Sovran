@@ -15,7 +15,7 @@ _Last updated: 2026-11-03 · version 0.1.0 (preview)_
 | M3 Host integration | ✅ Implemented · ⚠️ not run inside VS Code here | Typecheck, lint and bundle pass. Smoke tests in `tests/extension` run in CI only (see below) |
 | M4 Premium UI | ✅ Done | 13 component tests. Visual QA in dark and light themes through the dev harness |
 | M5 Hardening | 🟡 Partial | Security self-review done (spoofing defense added). Manual compatibility matrix pending |
-| M6 Release readiness | 🟡 Partial | Icon, README, CHANGELOG, CI and release workflows, third-party notices done. Blocked on D1–D3 and the publisher setup |
+| M6 Release readiness | 🟡 Partial | Icon, README, CHANGELOG, CI and release workflows, third-party notices and MIT LICENSE done. Blocked on D1 (name check), D2 (publisher) and the Marketplace setup |
 
 ## What was verified in the development environment
 

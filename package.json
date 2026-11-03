@@ -4,7 +4,7 @@
   "description": "An agentic AI coding assistant for the models you run: local, private, or enterprise OpenAI-compatible endpoints. No backend, no telemetry.",
   "version": "0.1.0",
   "publisher": "minells",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "private": true,
   "homepage": "https://github.com/Minells/sovran#readme",
   "repository": {

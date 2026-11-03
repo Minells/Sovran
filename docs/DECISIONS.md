@@ -20,4 +20,5 @@ Short ADRs. Status values are *Accepted*, *Proposed* (awaiting owner approval) a
 | ADR-014 | Minimum VS Code `^1.95.0` | Proposed (D8) | Stable APIs used, `fetch` proxy support |
 | ADR-015 | Command approval cards reveal invisible and bidi characters, and such commands never match the allow-list | Accepted | Prevents "Trojan Source"-style spoofing of what the user approves |
 | ADR-016 | React state is derived during render instead of synchronized in effects (React 19 lint) | Accepted | Avoids cascading renders and stale UI |
+| ADR-018 | MIT license | Accepted (owner decision D3) | Maximum adoption with minimal friction. All bundled dependencies are permissive. Note: MIT has no explicit patent grant, unlike Apache-2.0 |
 | ADR-017 | Release through GitHub Actions with Marketplace Trusted Publishing (OIDC) behind a protected environment | Accepted | Azure DevOps global PATs retire on 2026-12-01. No long-lived secret in the repository |

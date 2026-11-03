@@ -62,7 +62,7 @@
 - **Manual compatibility matrix:** Ollama, LM Studio, vLLM, LiteLLM and one enterprise gateway, crossed with native tools, prompted tools, streaming, discovery and cancellation.
 - **Acceptance:** no high-severity findings open, and the matrix documented.
 
-## M6 — Release readiness · ~2 d · 🟡 blocked on D1–D3
+## M6 — Release readiness · ~2 d · 🟡 blocked on D1–D2
 - **Tasks:**
   - Icon (PNG) and gallery banner.
   - README with screenshots from the harness, CHANGELOG, CONTRIBUTING and LICENSE (decision D3).

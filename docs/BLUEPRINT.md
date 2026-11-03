@@ -238,11 +238,11 @@ Nothing is published without explicit authorization. See [RELEASING](RELEASING.m
 |---|---|---|---|
 | D1 | Product name and Marketplace extension ID (`sovran`), after a trademark check | Keep "SOVRAN" if the check is clear | Publication |
 | D2 | **Publisher ID** (permanent) | e.g. `sovran` or your personal or company handle | Publication (the manifest uses a placeholder) |
-| D3 | **License**: Apache-2.0 (patent grant, enterprise-friendly), MIT, or source-available/proprietary | Apache-2.0 if open source. Proprietary if you plan a paid tier | LICENSE file, Marketplace |
+| D3 | **License** | ✅ Decided: **MIT** (2026-11-03). Dependency audit: all 17 bundled packages are permissive | — |
 | D4 | Telemetry | None. It is part of the positioning | — |
 | D5 | Default approval policy for file edits | `ask` (with an "allow edits for this session" toggle) | — |
 | D6 | Session persistence default | On, stored in VS Code workspace storage (plaintext JSON) with an opt-out | — |
 | D7 | Milestone reordering (core before UI) | Approve | Already applied |
 | D8 | Minimum VS Code version `^1.95.0` | Approve | — |
 
-Defaults have been applied for D4–D8 so that work can proceed. D1–D3 are needed before publishing.
+Defaults have been applied for D4–D8 so that work can proceed. D3 is decided (MIT). D1 and D2 are needed before publishing.
