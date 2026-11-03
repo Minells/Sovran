@@ -64,7 +64,10 @@ export class TerminalMirror implements vscode.Disposable {
 
   begin(command: string, cwd: string) {
     this.ensure().show(true);
-    this.write(`\r\n\x1b[2m${cwd}\x1b[0m\r\n\x1b[1m$ ${command}\x1b[0m\r\n`);
+    // Never let a model-supplied command inject terminal escape sequences into the header line.
+    // eslint-disable-next-line no-control-regex
+    const safe = command.replace(/[\u0000-\u001F\u007F]/g, ' ');
+    this.write(`\r\n\x1b[2m${cwd}\x1b[0m\r\n\x1b[1m$ ${safe}\x1b[0m\r\n`);
   }
 
   end(result: ProcessResult) {

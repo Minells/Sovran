@@ -75,7 +75,7 @@ md.renderer.rules.code_inline = (tokens, idx) => {
 
 const purifyConfig = {
   ALLOWED_URI_REGEXP: /^(?:https?|mailto):/i,
-  ADD_ATTR: ['data-action', 'data-path', 'data-line', 'target'],
+  ADD_ATTR: ['data-action', 'data-path', 'data-line'],
   FORBID_TAGS: ['style', 'form', 'input', 'img', 'iframe', 'object', 'embed'],
 };
 

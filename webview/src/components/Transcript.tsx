@@ -61,6 +61,11 @@ export function DiffView({ diff, maxLines = 400 }: { diff: string; maxLines?: nu
 
 // ------------------------------------------------------------------------------------- approval
 
+// eslint-disable-next-line no-control-regex
+const HIDDEN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
+/** Makes invisible and direction-changing characters visible so the approved text is the text that runs. */
+export const revealHidden = (s: string) => s.replace(HIDDEN, (c) => `⟨U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}⟩`);
+
 export function ApprovalCard({ approval }: { approval: ApprovalView }) {
   const { app } = useStore();
   const [rejecting, setRejecting] = useState(false);
@@ -88,7 +93,7 @@ export function ApprovalCard({ approval }: { approval: ApprovalView }) {
       </div>
       {d.kind === 'command' ? (
         <>
-          <pre className="sv-approval__command">{d.command}</pre>
+          <pre className="sv-approval__command">{revealHidden(d.command)}</pre>
           <div className="sv-approval__meta">in {d.cwd}</div>
           {d.warnings.length ? (
             <ul className="sv-approval__warnings">

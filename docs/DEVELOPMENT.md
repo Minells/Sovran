@@ -1,0 +1,68 @@
+# Development
+
+## Prerequisites
+
+- Node.js 20 or later (CI uses 22)
+- VS Code 1.95 or later
+
+## Commands
+
+| Command | Purpose |
+|---|---|
+| `npm run build` | Bundle the host (esbuild → `dist/extension.js`) and the webview (Vite → `dist/webview`) |
+| `npm run watch:host` / `npm run watch:webview` | Rebuild on change |
+| `npm run dev:webview` | Webview dev server with a **mocked host** (`webview/src/dev/mockHost.ts`) |
+| `npm run typecheck` | Strict TypeScript for host, core and webview |
+| `npm run lint` | ESLint. Enforces that `src/core` never imports `vscode` |
+| `npm test` | Vitest: core unit tests, provider integration tests, webview component tests |
+| `npm run test:coverage` | The same tests with coverage (core target ≥ 85 % lines) |
+| `npm run test:extension` | Smoke tests in a real VS Code instance (`@vscode/test-electron`; needs network to download VS Code) |
+| `npm run check` | typecheck + lint + test (the CI gate) |
+| `npm run package` | Build a VSIX with `vsce` |
+
+Press **F5** in VS Code ("Run SOVRAN") to build and launch an Extension Development Host.
+
+## UI development harness
+
+`npm run dev:webview` serves the React app with a simulated host and VS Code theme variables. The harness lives in
+`webview/src/dev/` and is only loaded when `import.meta.env.DEV` is true, so production builds never include it.
+
+Query parameters:
+
+| Parameter | Values |
+|---|---|
+| `scenario` | `conversation`, `empty`, `onboarding`, `providers`, `history` |
+| `theme` | `dark`, `light` |
+| `mode` | `plan`, `act` |
+| `width` | Sidebar width in px |
+
+The README screenshots are generated from this harness.
+
+## Testing strategy
+
+| Layer | Where | What is covered |
+|---|---|---|
+| Core unit | `tests/unit/*.test.ts` | Agent loop (multi-step, approvals, plan-mode enforcement, downgrade to prompted tools, loop guard, iteration cap, cancellation, grants), tools, edit engine, path confinement (POSIX and Windows), policy, command analysis, redaction, SSE parser, tagged-stream parser, context budgeting, session repair |
+| Provider integration | `tests/integration/*.test.ts` | A real HTTP server replaying compatibility scenarios: split tool-call deltas, parallel calls, non-streaming JSON, `reasoning_content`, CRLF framing, tool rejection (400), HTTP error mapping, in-stream errors, cancellation, idle timeout, connection refused, custom auth headers, model listing variants |
+| Webview | `webview/src/*.test.tsx` | Handshake, onboarding, composer keys, streaming deltas, approval and rejection flows, mode switching, Restricted Mode, stop and cancel, error rendering, markdown sanitization |
+| Extension | `tests/extension/suite.cjs` | Activation, command registration, secure defaults, opening the view (runs in CI) |
+
+## Architecture rules
+
+- `src/core` is portable. New capabilities reach it through ports in `src/core/ports.ts`.
+- The host is authoritative. The webview sends intents and renders `AppState`, and never holds secrets.
+- Every webview → host message has a zod schema in `src/shared/protocol.ts`.
+- Security-relevant settings must be `application`-scoped and read with `userSetting()` in `src/extension/config.ts`.
+- New tools declare a `risk` (`read`/`write`/`execute`). Write and execute tools must implement `prepare()` so the user sees exactly what will happen before approving.
+
+## Manual compatibility matrix (M5)
+
+Record the results in `docs/IMPLEMENTATION_STATUS.md`:
+
+| Server | Native tools | Prompted tools | Streaming | /models | Cancel |
+|---|---|---|---|---|---|
+| Ollama | | | | | |
+| LM Studio | | | | | |
+| vLLM | | | | | |
+| LiteLLM | | | | | |
+| Enterprise gateway | | | | | |

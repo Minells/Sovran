@@ -2,7 +2,8 @@
  * Characters that let a single "command" chain, substitute, redirect or background other commands.
  * Any of them disqualifies a command from allow-list auto-approval.
  */
-const SHELL_META = /[;&|`$<>(){}\n\r\\!*?[\]~]/;
+// eslint-disable-next-line no-control-regex -- control characters are exactly what this guards against
+const SHELL_META = /[;&|`$<>(){}\n\r\\!*?[\]~]|[\u0000-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
 
 export function hasShellMetacharacters(command: string): boolean {
   return SHELL_META.test(command);
@@ -34,9 +35,17 @@ const RISK_HINTS: Array<[RegExp, string]> = [
   [/(>|>>)\s*\/(etc|usr|bin|System)\b/, 'Writes outside the workspace.'],
 ];
 
+/**
+ * Invisible, control and bidirectional-override characters can make a command look different from
+ * what actually runs ("Trojan Source"-style spoofing of the approval card).
+ */
+// eslint-disable-next-line no-control-regex
+export const DECEPTIVE_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/;
+
 /** Human-readable warnings shown on the approval card. Advisory only; approval is always required. */
 export function commandRiskHints(command: string): string[] {
   const hints = RISK_HINTS.filter(([re]) => re.test(command)).map(([, hint]) => hint);
+  if (DECEPTIVE_CHARS.test(command)) hints.unshift('Contains invisible or text-direction characters that can disguise what runs. Inspect it carefully.');
   if (hasShellMetacharacters(command)) hints.push('Uses shell operators (chaining, pipes, redirection or substitution).');
   return hints;
 }

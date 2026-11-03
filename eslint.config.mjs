@@ -42,4 +42,9 @@ export default tseslint.config(
     files: ['scripts/**', 'tests/**'],
     rules: { 'no-console': 'off' },
   },
+  {
+    files: ['**/*.cjs'],
+    languageOptions: { sourceType: 'commonjs' },
+    rules: { '@typescript-eslint/no-require-imports': 'off' },
+  },
 );

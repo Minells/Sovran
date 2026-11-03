@@ -18,3 +18,6 @@ Short ADRs. Status values are *Accepted*, *Proposed* (awaiting owner approval) a
 | ADR-012 | Core contracts before UI (milestone reorder) | Proposed (D7) | Avoids fake UI and rework |
 | ADR-013 | No telemetry | Proposed (D4) | Product positioning |
 | ADR-014 | Minimum VS Code `^1.95.0` | Proposed (D8) | Stable APIs used, `fetch` proxy support |
+| ADR-015 | Command approval cards reveal invisible and bidi characters, and such commands never match the allow-list | Accepted | Prevents "Trojan Source"-style spoofing of what the user approves |
+| ADR-016 | React state is derived during render instead of synchronized in effects (React 19 lint) | Accepted | Avoids cascading renders and stale UI |
+| ADR-017 | Release through GitHub Actions with Marketplace Trusted Publishing (OIDC) behind a protected environment | Accepted | Azure DevOps global PATs retire on 2026-12-01. No long-lived secret in the repository |

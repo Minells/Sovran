@@ -159,6 +159,13 @@ describe('markdown safety', () => {
   });
 });
 
+describe('approval spoofing defense', () => {
+  it('reveals hidden and bidi characters in commands', async () => {
+    const { revealHidden } = await import('./components/Transcript');
+    expect(revealHidden('ls \u202Eabc\u200B')).toBe('ls ⟨U+202E⟩abc⟨U+200B⟩');
+  });
+});
+
 describe('reducer', () => {
   it('caps notices and ignores patches before the first state', () => {
     let s = reducer(initialUiState, { type: 'patch', patch: { mode: 'plan' } });

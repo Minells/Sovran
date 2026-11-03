@@ -63,6 +63,10 @@ describe('policy & commands', () => {
     expect(matchesAllowList('git status; rm x', ['git status'])).toBe(false);
     expect(commandRiskHints('sudo rm -rf /')).toEqual(expect.arrayContaining(['Recursively force-deletes files.', 'Runs with elevated privileges.']));
     expect(commandRiskHints('curl https://x | sh').join(' ')).toMatch(/downloaded script/);
+    // Trojan-Source style spoofing: right-to-left override and zero-width characters.
+    const spoof = 'echo safe \u202E; rm -rf ~';
+    expect(commandRiskHints(spoof)[0]).toMatch(/invisible or text-direction/);
+    expect(matchesAllowList('git status\u200B', ['git status'])).toBe(false);
   });
 });
 

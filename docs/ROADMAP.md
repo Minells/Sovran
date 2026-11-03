@@ -9,7 +9,7 @@
 - **Deliverables:** BLUEPRINT, PRODUCT_REQUIREMENTS, ARCHITECTURE, SECURITY, ROADMAP and DECISIONS.
 - **Definition of done:** decisions listed with recommendations, risks identified, and the official publishing rules verified.
 
-## M1 — Foundation · ~1 d
+## M1 — Foundation · ~1 d · ✅
 - **Objectives:** a reproducible build, lint, test and package pipeline, and an extension manifest that installs.
 - **Tasks:**
   - `package.json` contributions: view container, view, commands, settings, keybindings, menus.
@@ -19,7 +19,7 @@
 - **Acceptance:** `npm run check` and `npm run build` pass. `vsce package` produces a VSIX.
 - **Risks:** toolchain version drift. *Mitigation:* pinned versions and a lockfile.
 
-## M2 — Core engine · ~4 d
+## M2 — Core engine · ~4 d · ✅
 - **Objectives:** a portable, fully unit-tested agent engine.
 - **Tasks:**
   - SSE parser, OpenAI-compatible provider, error normalization and capability store.
@@ -32,7 +32,7 @@
 - **Acceptance:** at least 85 % line coverage on `src/core`. Lint confirms there are no `vscode` imports.
 - **Risks:** server quirks not covered by the fixtures. *Mitigation:* the manual matrix in M5.
 
-## M3 — Host integration · ~3 d
+## M3 — Host integration · ~3 d · ✅ (in-VS Code verification pending)
 - **Tasks:**
   - Webview view provider with CSP and nonce, and the zod-validated protocol.
   - Controller and run lifecycle with delta batching.
@@ -43,7 +43,7 @@
 - **Acceptance:** an end-to-end run against the mock server inside VS Code (manual), with sessions restored after reload.
 - **Risks:** webview lifecycle (hidden view and rehydration). *Mitigation:* the host-authoritative snapshot.
 
-## M4 — Premium UI · ~4 d
+## M4 — Premium UI · ~4 d · ✅
 - **Tasks:**
   - Design tokens on VS Code variables.
   - Header, transcript (user, assistant, reasoning, tool rows), markdown and code blocks, approval cards.
@@ -53,7 +53,7 @@
 - **Tests:** component tests for streaming, approval flow, composer keys, mode visuals and accessibility attributes.
 - **Acceptance:** correct in Dark+, Light+ and High Contrast. Fully keyboard operable.
 
-## M5 — Hardening · ~3 d
+## M5 — Hardening · ~3 d · 🟡 partial
 - **Tasks:**
   - `security-review` pass and fixes.
   - `@vscode/test-electron` smoke tests (activation, commands, view).
@@ -62,7 +62,7 @@
 - **Manual compatibility matrix:** Ollama, LM Studio, vLLM, LiteLLM and one enterprise gateway, crossed with native tools, prompted tools, streaming, discovery and cancellation.
 - **Acceptance:** no high-severity findings open, and the matrix documented.
 
-## M6 — Release readiness · ~2 d
+## M6 — Release readiness · ~2 d · 🟡 blocked on D1–D3
 - **Tasks:**
   - Icon (PNG) and gallery banner.
   - README with screenshots from the harness, CHANGELOG, CONTRIBUTING and LICENSE (decision D3).
