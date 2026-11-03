@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { planCompaction, renderForSummary, summarize } from '../context/compaction';
 import { buildContext, estimateTokens } from '../context/contextManager';
 import { decide, type AgentMode, type PolicySettings, type SessionGrants } from '../permissions/policy';
 import type { ApprovalPort, Logger, ProcessPort, WorkspacePort } from '../ports';
@@ -7,7 +8,7 @@ import { ProviderError, errorFromException } from '../providers/errors';
 import type { ChatProvider, ModelConfig, ResolvedToolMode } from '../providers/types';
 import { PathError } from '../security/paths';
 import { redact } from '../security/redact';
-import type { AssistantMessage, ErrorInfo, Session, ToolCall, ToolMessage, ToolStatus } from '../sessions/model';
+import { messagesForModel, type AssistantMessage, type ErrorInfo, type Session, type ToolCall, type ToolMessage, type ToolStatus } from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
 import type { ToolRegistry } from '../tools/registry';
 import { ToolError, type ToolContext, type ToolSettings } from '../tools/types';
@@ -48,7 +49,11 @@ export interface RunOptions {
   projectInstructions?: string;
   /** Secrets to scrub from any error text (e.g. the provider API key). */
   secrets?: readonly (string | undefined)[];
+  /** Summarize older turns instead of dropping them when the context window is full. */
+  autoCompact?: boolean;
 }
+
+export type CompactOptions = Pick<RunOptions, 'session' | 'model' | 'settings' | 'signal' | 'emit' | 'secrets'>;
 
 interface TurnResult {
   text: string;
@@ -75,6 +80,7 @@ export class AgentRunner {
     const key = capabilityKey(o.providerId, o.model.id);
     const failures = new Map<string, number>();
     let downgraded = false;
+    let compactedThisRun = false;
     let iteration = 0;
 
     while (iteration < o.settings.maxIterations) {
@@ -94,7 +100,21 @@ export class AgentRunner {
 
       let turn: TurnResult;
       try {
-        const request = this.buildRequest(o, toolMode);
+        let built = this.buildRequest(o, toolMode);
+        if (built.droppedTurns > 0 && o.autoCompact && !compactedThisRun) {
+          compactedThisRun = true;
+          if (await this.compact(o)) built = this.buildRequest(o, toolMode);
+          if (o.signal.aborted) return { reason: 'cancelled' };
+        }
+        if (built.droppedTurns > 0) {
+          o.emit({
+            type: 'notice',
+            level: 'info',
+            message: `Context window is full: ${built.droppedTurns} earlier exchange(s) are no longer sent to the model.`,
+          });
+        }
+        o.emit({ type: 'context', estimatedTokens: built.estimatedTokens, budgetTokens: built.budgetTokens, contextWindow: built.contextWindow });
+        const request = built.request;
         o.session.messages.push(assistant);
         o.emit({ type: 'message_started', message: { ...assistant } });
         turn = await this.streamTurn(assistant, request, toolMode, o);
@@ -190,29 +210,69 @@ export class AgentRunner {
     const contextWindow = o.model.contextWindow ?? o.settings.defaultContextWindow;
     const maxOutput = o.model.maxOutputTokens ?? o.settings.defaultMaxOutputTokens;
     const schemaTokens = toolMode === 'native' ? estimateTokens(JSON.stringify(schemas)) : 0;
+    const budgetTokens = Math.max(1024, contextWindow - maxOutput);
     const ctx = buildContext({
       systemPrompt,
-      messages: o.session.messages,
+      messages: messagesForModel(o.session),
       toolMode,
-      budgetTokens: Math.max(1024, contextWindow - maxOutput),
+      budgetTokens,
       toolSchemaTokens: schemaTokens,
       maxToolResultChars: o.settings.tools.maxToolResultChars,
+      summary: o.session.compaction?.summary,
     });
-    if (ctx.droppedTurns > 0) {
-      o.emit({ type: 'notice', level: 'info', message: `Context window is full: ${ctx.droppedTurns} earlier exchange(s) are no longer sent to the model.` });
-    }
     return {
-      model: o.model.id,
-      messages: ctx.messages,
-      tools: toolMode === 'native' && schemas.length ? schemas : undefined,
-      temperature: o.model.temperature,
-      maxTokens: o.model.maxOutputTokens,
+      request: {
+        model: o.model.id,
+        messages: ctx.messages,
+        tools: toolMode === 'native' && schemas.length ? schemas : undefined,
+        temperature: o.model.temperature,
+        maxTokens: o.model.maxOutputTokens,
+      },
+      droppedTurns: ctx.droppedTurns,
+      estimatedTokens: ctx.estimatedTokens,
+      budgetTokens,
+      contextWindow,
     };
+  }
+
+  /**
+   * Summarizes everything before the last `keepTurns` user turns into `session.compaction`.
+   * The transcript keeps every message for the user; only what the model receives changes.
+   * Returns false when there is nothing to compact or summarization failed (the caller then falls back to dropping turns).
+   */
+  async compact(o: CompactOptions, keepTurns = 2): Promise<boolean> {
+    const visible = messagesForModel(o.session);
+    const plan = planCompaction(visible, keepTurns);
+    const firstKept = plan ? visible[plan.firstKeptIndex] : undefined;
+    if (!plan || !firstKept) return false;
+    o.emit({ type: 'compaction_started' });
+    const contextWindow = o.model.contextWindow ?? o.settings.defaultContextWindow;
+    const maxChars = Math.floor(Math.max(2048, contextWindow - 1500) * 3.5 * 0.85);
+    const previous = o.session.compaction;
+    try {
+      const transcript = renderForSummary(visible.slice(0, plan.firstKeptIndex), previous?.summary, maxChars);
+      const summary = await summarize(this.deps.provider, o.model, transcript, o.signal);
+      const compaction = {
+        summary: redact(summary, o.secrets ?? []),
+        firstKeptId: firstKept.id,
+        summarizedCount: (previous?.summarizedCount ?? 0) + plan.firstKeptIndex,
+        createdAt: this.now(),
+      };
+      o.session.compaction = compaction;
+      o.emit({ type: 'compacted', compaction: { ...compaction } });
+      return true;
+    } catch (e) {
+      if (o.signal.aborted) return false;
+      const message = e instanceof Error ? redact(e.message, o.secrets ?? []) : String(e);
+      this.deps.logger.warn(`Compaction failed: ${message}`);
+      o.emit({ type: 'notice', level: 'warning', message: `Could not summarize earlier messages (${message}). Older messages will be dropped instead.` });
+      return false;
+    }
   }
 
   private async streamTurn(
     assistant: AssistantMessage,
-    request: ReturnType<AgentRunner['buildRequest']>,
+    request: ReturnType<AgentRunner['buildRequest']>['request'],
     toolMode: ResolvedToolMode,
     o: RunOptions,
   ): Promise<TurnResult> {
@@ -262,6 +322,9 @@ export class AgentRunner {
           if (ev.argumentsDelta) p.args += ev.argumentsDelta;
           break;
         }
+        case 'usage':
+          o.emit({ type: 'usage', promptTokens: ev.promptTokens, completionTokens: ev.completionTokens });
+          break;
         default:
           break;
       }

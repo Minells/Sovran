@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { DirEntry, EditorContext, EditorDiagnostic, FileStat, WorkspacePort, WorkspaceRoot } from '../../core/ports';
+import type { DirEntry, EditorContext, EditorDiagnostic, FileStat, TextSearchOptions, TextSearchResult, WorkspacePort, WorkspaceRoot } from '../../core/ports';
+import type { RipgrepSearch } from './RipgrepSearch';
 
 const DEFAULT_EXCLUDES = ['**/node_modules/**', '**/.git/**', '**/.hg/**', '**/.svn/**', '**/__pycache__/**', '**/.venv/**', '**/venv/**'];
 const SEVERITY: Record<vscode.DiagnosticSeverity, EditorDiagnostic['severity']> = {
@@ -23,6 +24,12 @@ function platformName(): string {
 
 /** WorkspacePort backed by the VS Code workspace: buffer-aware reads, undoable writes. */
 export class VscodeWorkspace implements WorkspacePort {
+  readonly searchText?: (o: TextSearchOptions) => Promise<TextSearchResult>;
+
+  constructor(ripgrep?: RipgrepSearch) {
+    if (ripgrep) this.searchText = (o) => ripgrep.search(o, this.roots().map((r) => r.path));
+  }
+
   roots(): WorkspaceRoot[] {
     return (vscode.workspace.workspaceFolders ?? []).filter((f) => f.uri.scheme === 'file').map((f) => ({ name: f.name, path: f.uri.fsPath }));
   }
@@ -99,6 +106,12 @@ export class VscodeWorkspace implements WorkspacePort {
     edit.replace(uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), content);
     if (!(await vscode.workspace.applyEdit(edit))) throw new Error(`VS Code refused the edit to ${vscode.workspace.asRelativePath(uri)}.`);
     await doc.save();
+  }
+
+  async deleteFile(absPath: string): Promise<void> {
+    const edit = new vscode.WorkspaceEdit();
+    edit.deleteFile(vscode.Uri.file(absPath), { ignoreIfNotExists: true });
+    if (!(await vscode.workspace.applyEdit(edit))) throw new Error(`VS Code refused to delete ${vscode.workspace.asRelativePath(absPath)}.`);
   }
 
   activeEditor(): EditorContext | null {

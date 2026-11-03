@@ -1,4 +1,4 @@
-import type { ErrorInfo, SessionMessage } from '../sessions/model';
+import type { CompactionState, ErrorInfo, SessionMessage } from '../sessions/model';
 
 export type ToolPhase = 'awaiting_approval' | 'running';
 
@@ -12,7 +12,11 @@ export type AgentEvent =
   | { type: 'message_removed'; messageId: string }
   | { type: 'tool_phase'; callId: string; toolName: string; label: string; phase: ToolPhase }
   | { type: 'tool_output'; callId: string; chunk: string }
-  | { type: 'notice'; level: 'info' | 'warning' | 'error'; message: string };
+  | { type: 'notice'; level: 'info' | 'warning' | 'error'; message: string }
+  | { type: 'context'; estimatedTokens: number; budgetTokens: number; contextWindow: number }
+  | { type: 'usage'; promptTokens?: number; completionTokens?: number }
+  | { type: 'compaction_started' }
+  | { type: 'compacted'; compaction: CompactionState };
 
 export type RunEndReason = 'completed' | 'cancelled' | 'max_iterations' | 'error';
 

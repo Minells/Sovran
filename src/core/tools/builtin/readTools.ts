@@ -144,31 +144,53 @@ export const searchFilesTool = defineTool({
     } catch (e) {
       throw new ToolError(`Invalid regular expression: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const files = await ctx.workspace.findFiles(a.glob, { maxResults: 5000, signal: ctx.signal });
     const matches: string[] = [];
     let scanned = 0;
     let skippedProtected = 0;
-    for (const file of files) {
-      if (ctx.signal.aborted || matches.length >= a.max_results) break;
-      const stat = await ctx.workspace.stat(file);
-      if (!stat || stat.type !== 'file' || stat.size > MAX_SEARCH_FILE_BYTES) continue;
-      const rel = relativeOf(ctx, file);
-      if (isProtectedPath(rel, ctx.settings.protectedPaths)) {
-        skippedProtected++;
-        continue;
+    if (ctx.workspace.searchText) {
+      // Fast path (ripgrep in VS Code). Protected paths are excluded by the searcher *and* filtered here.
+      const r = await ctx.workspace.searchText({
+        query: a.query,
+        isRegex: a.is_regex,
+        caseSensitive: a.case_sensitive,
+        include: a.glob,
+        excludes: ctx.settings.protectedPaths,
+        maxResults: a.max_results,
+        signal: ctx.signal,
+      });
+      for (const m of r.matches) {
+        const rel = relativeOf(ctx, m.path);
+        if (isProtectedPath(rel, ctx.settings.protectedPaths)) {
+          skippedProtected++;
+          continue;
+        }
+        if (matches.length < a.max_results) matches.push(`${rel}:${m.line}: ${m.text.trim().slice(0, 200)}`);
       }
-      let text: string;
-      try {
-        text = await ctx.workspace.readFile(file);
-      } catch {
-        continue;
-      }
-      if (isProbablyBinary(text)) continue;
-      scanned++;
-      const lines = text.split(/\r?\n/);
-      for (let i = 0; i < lines.length && matches.length < a.max_results; i++) {
-        const line = lines[i] ?? '';
-        if (re.test(line)) matches.push(`${rel}:${i + 1}: ${line.trim().slice(0, 200)}`);
+      scanned = new Set(r.matches.map((m) => m.path)).size;
+    } else {
+      const files = await ctx.workspace.findFiles(a.glob, { maxResults: 5000, signal: ctx.signal });
+      for (const file of files) {
+        if (ctx.signal.aborted || matches.length >= a.max_results) break;
+        const stat = await ctx.workspace.stat(file);
+        if (!stat || stat.type !== 'file' || stat.size > MAX_SEARCH_FILE_BYTES) continue;
+        const rel = relativeOf(ctx, file);
+        if (isProtectedPath(rel, ctx.settings.protectedPaths)) {
+          skippedProtected++;
+          continue;
+        }
+        let text: string;
+        try {
+          text = await ctx.workspace.readFile(file);
+        } catch {
+          continue;
+        }
+        if (isProbablyBinary(text)) continue;
+        scanned++;
+        const lines = text.split(/\r?\n/);
+        for (let i = 0; i < lines.length && matches.length < a.max_results; i++) {
+          const line = lines[i] ?? '';
+          if (re.test(line)) matches.push(`${rel}:${i + 1}: ${line.trim().slice(0, 200)}`);
+        }
       }
     }
     const capped = matches.length >= a.max_results ? `\n[Stopped at ${a.max_results} matches. Refine the query or glob.]` : '';

@@ -24,6 +24,8 @@ export class MemoryWorkspace implements WorkspacePort {
   trusted = true;
   active: EditorContext | null = null;
   writes: string[] = [];
+  /** Tests may install a fake fast-search implementation. */
+  searchText?: WorkspacePort['searchText'];
 
   constructor(files: Record<string, string> = {}) {
     for (const [rel, content] of Object.entries(files)) this.set(rel, content);
@@ -87,6 +89,9 @@ export class MemoryWorkspace implements WorkspacePort {
   async writeFile(abs: string, content: string) {
     this.writes.push(abs);
     this.set(path.relative(this.root, abs), content);
+  }
+  async deleteFile(abs: string) {
+    this.files.delete(abs);
   }
   activeEditor() {
     return this.active;
