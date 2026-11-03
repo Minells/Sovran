@@ -21,7 +21,8 @@ export default defineConfig(({ mode }) => ({
       output: {
         entryFileNames: 'assets/index.js',
         chunkFileNames: 'assets/[name].js',
-        assetFileNames: 'assets/[name][extname]',
+        // The host references assets/index.css explicitly; keep other assets (fonts) by name.
+        assetFileNames: (info) => (info.names?.some((n) => n.endsWith('.css')) ? 'assets/index.css' : 'assets/[name][extname]'),
       },
     },
   },
