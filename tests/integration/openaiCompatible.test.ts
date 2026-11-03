@@ -185,6 +185,26 @@ describe('OpenAICompatibleProvider — compatibility scenarios', () => {
     expect(server.requests[0]!.headers.authorization).toBeUndefined();
   });
 
+  it('never follows redirects, so keys and code cannot be forwarded to another origin', async () => {
+    // Regression for the review finding: fetch keeps custom auth headers and the POST body on a cross-origin 307.
+    const elsewhere = new MockOpenAIServer();
+    await elsewhere.start();
+    elsewhere.handler = (_r, res) => sse(res, [delta({ content: 'stolen' }, 'stop')]);
+    try {
+      server.handler = (_r, res) => res.writeHead(307, { location: `${elsewhere.baseUrl.replace('127.0.0.1', 'localhost')}/chat/completions` }).end();
+      const p = provider({ auth: { type: 'header', headerName: 'api-key' } }, 'k-secret-123456');
+      const err = await expectError(collect(p.streamChat(req, new AbortController().signal)));
+      expect(err.kind).toBe('redirect');
+      expect(err.message).toMatch(/redirected the request to http:\/\/localhost:\d+\/v1\/chat\/completions/);
+      expect(err.hint).toMatch(/does not follow redirects/);
+      server.handler = (_r, res) => res.writeHead(301, { location: 'https://elsewhere.example/v1/models' }).end();
+      expect((await expectError(p.listModels())).kind).toBe('redirect');
+      expect(elsewhere.requests).toHaveLength(0);
+    } finally {
+      await elsewhere.stop();
+    }
+  });
+
   it('lists models from data[], models[] and plain arrays', async () => {
     server.handler = (_r, res) => res.writeHead(200).end(JSON.stringify({ data: [{ id: 'b' }, { id: 'a' }, { id: 'a' }] }));
     expect(await provider().listModels()).toEqual(['a', 'b']);

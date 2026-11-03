@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { spawn } from 'node:child_process';
 import type { ProcessPort, ProcessResult } from '../../core/ports';
+import { agentCommandEnv } from './commandEnv';
 import { shellPath } from './VscodeWorkspace';
 
 // eslint-disable-next-line no-control-regex
@@ -109,7 +110,7 @@ export class NodeProcessRunner implements ProcessPort {
         detached: !isWin,
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, GIT_PAGER: 'cat', PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', CI: process.env.CI ?? '1' },
+        env: agentCommandEnv(process.env),
       });
 
       const killTree = () => {

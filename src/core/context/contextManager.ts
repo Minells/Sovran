@@ -1,4 +1,4 @@
-import { formatToolResult, serializeToolCall } from '../agent/promptedTools';
+import { escapeAttribute, formatToolResult, neutralizeClosingTags, serializeToolCall } from '../agent/promptedTools';
 import type { ResolvedToolMode, WireMessage } from '../providers/types';
 import type { ContextAttachment, SessionMessage, ToolMessage } from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
@@ -19,7 +19,7 @@ export function renderAttachments(attachments: readonly ContextAttachment[] | un
   const blocks = attachments.map((a) => {
     const lines = a.startLine ? ` lines="${a.startLine}-${a.endLine ?? a.startLine}"` : '';
     const note = a.truncated ? ' truncated="true"' : '';
-    return `<file path="${a.path}"${lines}${note}>\n${a.content}\n</file>`;
+    return `<file path="${escapeAttribute(a.path)}"${lines}${note}>\n${neutralizeClosingTags(a.content, ['file', 'context'])}\n</file>`;
   });
   return `<context>\n${blocks.join('\n')}\n</context>\n\n`;
 }
