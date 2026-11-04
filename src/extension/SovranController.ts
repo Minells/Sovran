@@ -1212,6 +1212,15 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
     file.setProblems([]);
     const text = read.kind === 'text' ? read.text : '';
+    if (this.syncing && trigger !== 'enable' && !file.isNewContent(text)) {
+      // The file holds what was already synced (a repeated or late watcher event, Sovran's own write, Reload): it did
+      // not change, so it must not undo a Settings change made since. Settings go to the file instead (a no-op when
+      // they agree). Decided by content, not by event, so "the side that changed wins" holds whatever the watcher does.
+      this.configFileView = view('ok');
+      await this.pushSettingsToFile();
+      await this.refreshProviders();
+      return;
+    }
     const ownWrite = file.isOwnWrite(text);
     const previous = new Map(this.fileProviders.map((p) => [p.id, JSON.stringify(p)]));
     let providers = result.config.providers;
