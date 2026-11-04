@@ -535,8 +535,10 @@ const CONFIG_FILE_EXAMPLES = `  # Examples (uncomment and adapt):
   #   auth: none
   #   models: [your-loaded-model]
   #
-  # Company gateway with an API key (asked for once, kept in Secret Storage). Models that always
-  # reason share maxOutputTokens with their reasoning: keep it generous.
+  # Company gateway with an API key (asked for once, kept in Secret Storage).
+  # contextWindow and maxOutputTokens are optional: without them Sovran uses what the server
+  # reports, else 32768 and 4096. Models that always reason share maxOutputTokens with their
+  # reasoning: keep it generous.
   # - id: gateway
   #   name: Company AI Gateway
   #   baseUrl: https://ai-gateway.example.com/v1

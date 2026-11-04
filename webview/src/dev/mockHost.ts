@@ -125,7 +125,10 @@ const providers: AppState['providers'] = [
     authType: 'header',
     headerName: 'api-key',
     hasKey: true,
-    models: [{ id: 'coder-large', contextWindow: 131072, toolMode: 'native' }],
+    models: [
+      { id: 'coder-large', contextWindow: 131072, toolMode: 'native' },
+      { id: 'glm-5.3-flash', toolMode: 'auto', maxOutputTokens: 8192, serverLimits: { contextWindow: 131072, maxOutputTokens: 32768 } },
+    ],
   },
 ];
 

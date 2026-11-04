@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import type { ProviderInput, ProviderView, SessionSummary, ToolMode } from '../../../src/shared/protocol';
 import { sendsKeyInsecurely } from '../../../src/shared/endpoints';
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  effectiveLimits,
+  type LimitSource,
+  type ServerLimits,
+} from '../../../src/core/providers/limits';
 import { dayGroup, relativeTime } from '../lib/format';
 import { useStore } from '../state/store';
 import { post } from '../vscode';
@@ -20,11 +27,28 @@ export function useSetupActive(): boolean {
 interface ModelDraft {
   id: string;
   contextWindow?: number;
+  maxOutputTokens?: number;
   toolMode?: ToolMode;
 }
 
+const digits = (v: string) => {
+  const d = v.replace(/\D/g, '');
+  return d ? Number(d) : undefined;
+};
+
+/** What an empty limit field means: the value Sovran will use (placeholder) and where it comes from (label). */
+function limitHints(m: ModelDraft, server: ServerLimits | undefined) {
+  const e = effectiveLimits({ contextWindow: m.contextWindow }, server);
+  const from = (s: LimitSource) => (s === 'server' ? 'server' : 'default');
+  return {
+    context: { value: String(server?.contextWindow ?? DEFAULT_CONTEXT_WINDOW), source: server?.contextWindow ? 'server' : 'default' },
+    output: { value: String(e.reserveTokens), source: from(e.reserveSource) },
+  };
+}
+
 export function ProviderForm({ initial, onDone }: { initial: Partial<ProviderInput> & { id?: string }; onDone: () => void }) {
-  const { state } = useStore();
+  const { state, app } = useStore();
+  const serverLimits = (modelId: string) => app.providers.find((p) => p.id === initial.id)?.models.find((m) => m.id === modelId)?.serverLimits;
   const [name, setName] = useState(initial.name ?? '');
   const [baseUrl, setBaseUrl] = useState(initial.baseUrl ?? '');
   const [authType, setAuthType] = useState<ProviderInput['authType']>(initial.authType ?? 'bearer');
@@ -64,7 +88,7 @@ export function ProviderForm({ initial, onDone }: { initial: Partial<ProviderInp
         authType,
         headerName: authType === 'header' ? headerName.trim() : undefined,
         timeoutSeconds: timeout ? Math.min(1800, Math.max(5, Number(timeout))) : undefined,
-        models: models.map((m) => ({ id: m.id, contextWindow: m.contextWindow, toolMode: m.toolMode })),
+        models: models.map((m) => ({ id: m.id, contextWindow: m.contextWindow, maxOutputTokens: m.maxOutputTokens, toolMode: m.toolMode })),
       },
     });
     onDone();
@@ -96,32 +120,58 @@ export function ProviderForm({ initial, onDone }: { initial: Partial<ProviderInp
       </div>
       <div className="sv-field">
         <label htmlFor="sv-p-model">Models</label>
-        {models.map((m, i) => (
-          <div key={m.id} className="sv-model-row">
-            <code title={m.id}>{m.id}</code>
-            <input
-              aria-label={`Context window for ${m.id}`}
-              inputMode="numeric"
-              placeholder="ctx 32768"
-              value={m.contextWindow ?? ''}
-              onChange={(e) => {
-                const v = e.target.value.replace(/\D/g, '');
-                setModels(models.map((x, j) => (j === i ? { ...x, contextWindow: v ? Number(v) : undefined } : x)));
-              }}
-            />
-            <select
-              aria-label={`Tool calling for ${m.id}`}
-              value={m.toolMode ?? 'auto'}
-              onChange={(e) => setModels(models.map((x, j) => (j === i ? { ...x, toolMode: e.target.value as ToolMode } : x)))}
-            >
-              <option value="auto">Tools: auto</option>
-              <option value="native">native</option>
-              <option value="prompted">prompted</option>
-              <option value="none">none</option>
-            </select>
-            <IconButton icon="trash" label={`Remove ${m.id}`} onClick={() => setModels(models.filter((_, j) => j !== i))} />
-          </div>
-        ))}
+        {models.map((m, i) => {
+          const update = (patch: Partial<ModelDraft>) => setModels(models.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+          const hint = limitHints(m, serverLimits(m.id));
+          return (
+            <div key={m.id} className="sv-model-row">
+              <code className="sv-model-row__id" title={m.id}>
+                {m.id}
+              </code>
+              <span className="sv-model-row__remove">
+                <IconButton icon="trash" label={`Remove ${m.id}`} onClick={() => setModels(models.filter((_, j) => j !== i))} />
+              </span>
+              <label className="sv-model-row__field">
+                <span>Context{m.contextWindow ? null : <em> · {hint.context.source}</em>}</span>
+                <input
+                  aria-label={`Context window for ${m.id}`}
+                  inputMode="numeric"
+                  placeholder={hint.context.value}
+                  title={m.contextWindow ? undefined : `Empty: ${hint.context.value} tokens (${hint.context.source})`}
+                  value={m.contextWindow ?? ''}
+                  onChange={(e) => update({ contextWindow: digits(e.target.value) })}
+                />
+              </label>
+              <label className="sv-model-row__field">
+                <span>Max output{m.maxOutputTokens ? null : <em> · {hint.output.source}</em>}</span>
+                <input
+                  aria-label={`Max output tokens for ${m.id}`}
+                  inputMode="numeric"
+                  placeholder={hint.output.value}
+                  title={m.maxOutputTokens ? undefined : `Empty: ${hint.output.value} tokens kept for the reply (${hint.output.source})`}
+                  value={m.maxOutputTokens ?? ''}
+                  onChange={(e) => update({ maxOutputTokens: digits(e.target.value) })}
+                />
+              </label>
+              <label className="sv-model-row__field">
+                <span>Tools</span>
+                <select aria-label={`Tool calling for ${m.id}`} value={m.toolMode ?? 'auto'} onChange={(e) => update({ toolMode: e.target.value as ToolMode })}>
+                  <option value="auto">auto</option>
+                  <option value="native">native</option>
+                  <option value="prompted">prompted</option>
+                  <option value="none">none</option>
+                </select>
+              </label>
+            </div>
+          );
+        })}
+        {models.length ? (
+          <span className="sv-field__help">
+            Leave a limit empty to use what the server reports (vLLM, SGLang, LiteLLM, OpenRouter) or the default: {DEFAULT_CONTEXT_WINDOW.toLocaleString('en-US')}{' '}
+            tokens of context, {DEFAULT_MAX_OUTPUT_TOKENS.toLocaleString('en-US')} kept for the reply. A value you type always wins, and Max output is also
+            sent as max_tokens.
+          </span>
+        ) : null}
         <div className="sv-inline">
           <input
             id="sv-p-model"
@@ -274,7 +324,7 @@ export function ProvidersView() {
                   authType: current.authType,
                   headerName: current.headerName,
                   timeoutSeconds: current.timeoutSeconds,
-                  models: current.models.map((m) => ({ id: m.id, contextWindow: m.contextWindow, toolMode: m.toolMode })),
+                  models: current.models.map((m) => ({ id: m.id, contextWindow: m.contextWindow, maxOutputTokens: m.maxOutputTokens, toolMode: m.toolMode })),
                 }
               : { authType: 'bearer', models: [] }
           }

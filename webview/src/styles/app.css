@@ -1323,9 +1323,64 @@ kbd {
 
 .sv-model-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 92px 84px 24px;
-  gap: var(--sv-s1);
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr) 24px;
+  grid-template-areas:
+    'id id id remove'
+    'context output tools tools';
+  gap: 2px var(--sv-s1);
+  /* Labels may wrap at narrow widths; the inputs stay on one line. */
+  align-items: end;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--sv-border);
+}
+
+.sv-model-row__id {
+  grid-area: id;
+}
+
+.sv-model-row__remove {
+  grid-area: remove;
+}
+
+.sv-model-row__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.sv-model-row__field:nth-of-type(1) {
+  grid-area: context;
+}
+
+.sv-model-row__field:nth-of-type(2) {
+  grid-area: output;
+}
+
+.sv-model-row__field:nth-of-type(3) {
+  grid-area: tools;
+}
+
+.sv-field .sv-model-row__field > span {
+  color: var(--sv-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.sv-model-row__field em {
+  font-style: normal;
+  opacity: 0.8;
+}
+
+.sv-model-row__id,
+.sv-model-row__remove {
+  align-self: center;
+}
+
+.sv-model-row__field input,
+.sv-model-row__field select {
+  width: 100%;
+  min-width: 0;
 }
 
 .sv-model-row code {
