@@ -38,6 +38,8 @@ pre-releases and even minor versions are stable releases.
 - Agent commands no longer inherit `ELECTRON_RUN_AS_NODE` from the extension host.
 
 ### Fixed
+- `config.yaml` saved with another program is applied within about two seconds on every system: file watching misses or delays changes to a file outside the workspace that no editor has open (Linux, macOS), so Sovran also checks the file's date and size.
+- A repeated or late file event, Sovran's own write or Reload no longer undoes a provider just changed in Settings: the sync now decides by content whether the file changed. If both change at the same moment, the file's hand edit wins and Sovran says so.
 - Emptying a limit in the provider form now removes it (it used to keep the old value).
 - Learning that a model needs prompted tools no longer drops what else Sovran learned about it.
 

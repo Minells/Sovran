@@ -295,8 +295,10 @@ How the sync works:
 - **Never from a repository.** The file lives in your home folder, not in the workspace, so a cloned repository cannot
   ship one (the same reason `sovran.providers` is user scope only). `sovran.configFile.enabled` turns the file off.
 
-Changes saved in VS Code apply immediately. If you edit the file with another program and the folder did not exist
-when VS Code started, use **Reload** in Settings.
+Changes saved in VS Code apply immediately; changes saved with another program (or through a symbolic link) within
+about two seconds, since Sovran also checks the file's date and size besides watching it. A file event for content that
+is already in sync changes nothing, and a hand edit is never overwritten: if the file and Settings change at the same
+moment, the file wins and Sovran says so.
 
 ## Settings
 

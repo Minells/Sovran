@@ -9,6 +9,7 @@ export type ConfigFileRead =
   { kind: 'missing' } | { kind: 'text'; text: string } | { kind: 'error'; message: string };
 
 const LAST_APPLIED_KEY = 'sovran.configFile.lastApplied';
+const POLL_MS = 2000;
 const SYNCED_KEY = 'sovran.configFile.synced';
 
 /** The file is open in an editor with unsaved changes: writing it would fight with what the user is typing. */
@@ -32,6 +33,9 @@ export class ConfigFileHost implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   /** Hash of the last content Sovran wrote, to tell its own writes from the user's when the watcher fires. */
   private lastWritten: string | undefined;
+  /** Modification time and size seen by the last poll (`missing` when there is no file). */
+  private lastStat: string | undefined;
+  private readonly poller: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly memento: vscode.Memento,
@@ -39,6 +43,11 @@ export class ConfigFileHost implements vscode.Disposable {
   ) {
     this.uri = vscode.Uri.file(file);
     this.watch();
+    // File watching is not reliable for a file outside the workspace that no editor has open (events can be late on
+    // macOS and missing on Linux), nor through symbolic links from a dotfiles repository. A cheap stat every 2 s makes
+    // a save in any editor reach Sovran; duplicate notifications are harmless, since the controller compares content.
+    void this.pollStat();
+    this.poller = setInterval(() => void this.pollStat(), POLL_MS);
     this.disposables.push(
       this.diagnostics,
       this.changed,
@@ -174,7 +183,20 @@ export class ConfigFileHost implements vscode.Disposable {
     this.timer = setTimeout(() => this.changed.fire(), 200);
   }
 
+  private async pollStat() {
+    let stat: string;
+    try {
+      const s = await fs.stat(this.uri.fsPath);
+      stat = `${s.mtimeMs}:${s.size}`;
+    } catch {
+      stat = 'missing';
+    }
+    if (this.lastStat !== undefined && stat !== this.lastStat) this.fire();
+    this.lastStat = stat;
+  }
+
   dispose() {
+    clearInterval(this.poller);
     clearTimeout(this.timer);
     this.watcher?.dispose();
     for (const d of this.disposables) d.dispose();

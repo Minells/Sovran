@@ -1151,6 +1151,16 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       }
       return;
     }
+    if (this.deps.configFile.isNewContent(read.text)) {
+      // The file changed too and Sovran has not applied it yet (its notification is still on the way). A hand edit is
+      // never overwritten: apply the file first; it wins over the Settings change made in the same moment.
+      const discarded = !sameProviders(this.settingsProviders, this.fileProviders);
+      await this.loadConfigFile('change');
+      if (discarded) {
+        this.notice('warning', `${this.deps.configFile.displayPath} changed at the same time and its version was applied. Repeat your change if you still need it.`);
+      }
+      return;
+    }
     // Model choices made in the UI go into the file too (only the ones it declares).
     if (await this.writeConfigText(read.text, this.settingsProviders, 'Your change is', this.modelRefs())) {
       this.fileProviders = this.settingsProviders;
