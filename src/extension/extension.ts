@@ -51,7 +51,7 @@ export async function activate(context: vscode.ExtensionContext) {
     commandLoader,
     configFile,
     reveal,
-    openPanel: async (sessionId) => ref.panels?.open(sessionId),
+    openPanel: async (sessionId, title) => ref.panels?.open(sessionId, title),
   });
   await controller.init();
   const viewProvider = new SovranViewProvider(context.extensionUri, controller, logger);

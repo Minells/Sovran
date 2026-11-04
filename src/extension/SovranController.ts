@@ -119,8 +119,11 @@ export interface ControllerDeps {
   configFile: ConfigFileHost;
   /** Shows the Activity Bar view. */
   reveal: () => Promise<void>;
-  /** Opens an editor tab showing `sessionId` (a new chat when undefined). It registers itself with `addPanel`. */
-  openPanel?: (sessionId?: string) => Promise<void>;
+  /**
+   * Opens an editor tab showing `sessionId` (a new chat when undefined), titled `title` from the start so the tab never
+   * shows a placeholder. It registers itself with `addPanel`.
+   */
+  openPanel?: (sessionId: string | undefined, title: string) => Promise<void>;
 }
 
 interface PendingApproval {
@@ -407,7 +410,10 @@ export class SovranController implements vscode.Disposable {
   }
 
   private tabTitle(session: Session): string {
-    const t = session.title;
+    return this.titleForTab(session.title);
+  }
+
+  private titleForTab(t: string): string {
     return t.length > MAX_TAB_TITLE ? `${t.slice(0, MAX_TAB_TITLE - 1).trimEnd()}…` : t;
   }
 
@@ -424,7 +430,9 @@ export class SovranController implements vscode.Disposable {
     if (!this.deps.openPanel) return;
     const shown = sessionId ? this.surfaceFor(sessionId) : undefined;
     if (shown?.panel) return shown.panel.reveal();
-    await this.deps.openPanel(sessionId);
+    // The chat may not be loaded yet (opened from the list): its summary has the title.
+    const title = (sessionId && (this.loaded.get(sessionId)?.title ?? this.sessions.find((s) => s.id === sessionId)?.title)) || DEFAULT_TITLE;
+    await this.deps.openPanel(sessionId, this.titleForTab(title));
   }
 
   /**

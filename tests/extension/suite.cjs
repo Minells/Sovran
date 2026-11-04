@@ -183,7 +183,8 @@ exports.run = async function run() {
     await vscode.commands.executeCommand('sovran.openInEditor');
     await until(() => chatTabs().length === 2, 'Open Chat in Editor did not open a second tab');
     assert.strictEqual(new Set(vscode.window.tabGroups.all.filter((g) => g.tabs.some((t) => chatTabs().includes(t))).map((g) => g.viewColumn)).size, 1);
-    assert.ok(chatTabs().every((t) => t.label === 'New chat'), `unexpected tab titles: ${chatTabs().map((t) => t.label)}`);
+    // Tab labels reach the extension host asynchronously (a renderer round trip), so wait for them as for the tabs.
+    await until(() => chatTabs().every((t) => t.label === 'New chat'), `unexpected tab titles: ${chatTabs().map((t) => t.label)}`);
     await vscode.window.tabGroups.close(chatTabs());
     await until(() => chatTabs().length === 0, 'chat tabs did not close');
   });

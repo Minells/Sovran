@@ -88,6 +88,8 @@ let sidebar: HostMessage[];
 let tabs: Record<string, { messages: HostMessage[]; panel: Panel }>;
 let revealSidebar: ReturnType<typeof vi.fn>;
 let opened: Array<string | undefined>;
+/** The title each tab was created with: it must be the chat's from the start, never a placeholder. */
+let openedTitles: string[];
 
 /** The latest value of a state field a surface received, from its snapshots and patches. */
 function latest<K extends keyof AppState>(messages: HostMessage[], key: K): AppState[K] | undefined {
@@ -119,6 +121,7 @@ beforeEach(async () => {
   sidebar = [];
   tabs = {};
   opened = [];
+  openedTitles = [];
   revealSidebar = vi.fn(async () => undefined);
   let seq = 0;
   const noop = () => ({ dispose() {} });
@@ -136,8 +139,9 @@ beforeEach(async () => {
     commandLoader: { load: async () => mergeCommands([]), onDidChange: noop },
     configFile: { displayPath: '~/.sovran/config.yaml', read: async () => ({ kind: 'missing' }), setProblems() {}, setSynced: async () => undefined, onDidChange: noop },
     reveal: revealSidebar,
-    openPanel: async (sessionId?: string) => {
+    openPanel: async (sessionId: string | undefined, title: string) => {
       opened.push(sessionId);
+      openedTitles.push(title);
       const id = `tab${++seq}`;
       const panel: Panel = { reveal: vi.fn(), setTitle: vi.fn(), active: true, visible: true, viewColumn: 2 };
       tabs[id] = { messages: [], panel };
@@ -157,6 +161,7 @@ describe('surfaces', () => {
     await controller.openInEditor();
     const tab = tabs.tab1!;
     expect(opened).toEqual([undefined]);
+    expect(openedTitles).toEqual(['New chat']);
     expect(latest(sidebar, 'surface')).toBe('sidebar');
     expect(latest(tab.messages, 'surface')).toBe('panel');
     expect(sessionOf(tab.messages)).not.toBe(sessionOf(sidebar));
@@ -229,6 +234,7 @@ describe('surfaces', () => {
     await controller.moveSidebarToEditor();
     const tab = tabs.tab1!;
     expect(opened).toEqual([chat]);
+    expect(openedTitles).toEqual(['edit a']);
     expect(sessionOf(tab.messages)).toBe(chat);
     // The pending approval moves with the chat; the view starts a new chat.
     expect(approvalsOf(tab.messages)).toEqual([approval]);

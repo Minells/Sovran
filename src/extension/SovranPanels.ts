@@ -28,9 +28,9 @@ export class SovranPanels implements vscode.WebviewPanelSerializer, vscode.Dispo
     this.registration = vscode.window.registerWebviewPanelSerializer(SovranPanels.viewType, this);
   }
 
-  /** Opens a chat (a new one when `sessionId` is undefined) in a new editor tab and focuses it. */
-  async open(sessionId?: string) {
-    const panel = vscode.window.createWebviewPanel(SovranPanels.viewType, 'Sovran', { viewColumn: this.column(), preserveFocus: false }, webviewOptions(this.extensionUri));
+  /** Opens a chat (a new one when `sessionId` is undefined) in a new editor tab titled `title`, and focuses it. */
+  async open(sessionId: string | undefined, title: string) {
+    const panel = vscode.window.createWebviewPanel(SovranPanels.viewType, title, { viewColumn: this.column(), preserveFocus: false }, webviewOptions(this.extensionUri));
     await this.connect(panel, sessionId);
   }
 
