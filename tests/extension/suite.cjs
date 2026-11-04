@@ -70,18 +70,46 @@ exports.run = async function run() {
     // scripts/test-extension.mjs points HOME at a temporary folder.
     assert.ok(os.homedir().includes('sovran-home-'), `refusing to touch a real home folder: ${os.homedir()}`);
     const uri = vscode.Uri.file(path.join(os.homedir(), '.sovran', 'config.yaml'));
-    await vscode.commands.executeCommand('sovran.openConfigFile');
-    assert.ok(fs.readFileSync(uri.fsPath, 'utf8').includes('providers:'), 'the template was not created');
+    const BAD = 'providers:\n  - id: lab\n    base_url: http://localhost:8000/v1\n';
+    const GOOD = 'providers:\n  - id: lab\n    baseUrl: http://localhost:8000/v1\n    auth: none\n    models: [m]\n';
     const diagnostics = () => vscode.languages.getDiagnostics(uri);
-    const until = async (check, what) => {
-      for (let i = 0; i < 50 && !check(); i++) await new Promise((r) => setTimeout(r, 100));
+    const hinted = () => diagnostics().some((d) => /Did you mean "baseUrl"/.test(d.message) && d.range.start.line === 2);
+    const cleared = () => diagnostics().length === 0;
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const until = async (check, what, ms = 5000) => {
+      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(100);
       assert.ok(check(), what);
     };
-    fs.writeFileSync(uri.fsPath, 'providers:\n  - id: lab\n    base_url: http://localhost:8000/v1\n');
+
     await vscode.commands.executeCommand('sovran.openConfigFile');
-    await until(() => diagnostics().some((d) => /Did you mean "baseUrl"/.test(d.message) && d.range.start.line === 2), 'no diagnostic for base_url');
-    fs.writeFileSync(uri.fsPath, 'providers:\n  - id: lab\n    baseUrl: http://localhost:8000/v1\n    auth: none\n    models: [m]\n');
-    await until(() => diagnostics().length === 0, 'diagnostics were not cleared');
+    assert.ok(fs.readFileSync(uri.fsPath, 'utf8').includes('providers:'), 'the template was not created');
+    const doc = await vscode.workspace.openTextDocument(uri);
+
+    // The usual flow: edit the file in VS Code and save it.
+    const saveInEditor = async (text) => {
+      const edit = new vscode.WorkspaceEdit();
+      edit.replace(uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), text);
+      assert.ok(await vscode.workspace.applyEdit(edit), 'the edit was not applied');
+      assert.ok(await doc.save(), 'the file was not saved');
+    };
+    await saveInEditor(BAD);
+    await until(hinted, 'saving in the editor: no diagnostic for base_url');
+    await saveInEditor(GOOD);
+    await until(cleared, 'saving in the editor: diagnostics were not cleared');
+
+    // Another program changes the file: the file watcher reports it. A watcher registers asynchronously (on Linux
+    // it can miss a write made right after it starts), so the write is repeated, as a later save would be, and the
+    // number of writes it took is logged.
+    const writeOutside = async (text, check, what) => {
+      for (let attempt = 1; attempt <= 10; attempt++) {
+        fs.writeFileSync(uri.fsPath, text);
+        for (let i = 0; i < 10 && !check(); i++) await sleep(100);
+        if (check()) return console.log(`    (watcher saw the change after ${attempt} write${attempt === 1 ? '' : 's'})`);
+      }
+      assert.fail(what);
+    };
+    await writeOutside(BAD, hinted, 'changed outside VS Code: no diagnostic for base_url');
+    await writeOutside(GOOD, cleared, 'changed outside VS Code: diagnostics were not cleared');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
   await test('view opens, settings open and mode toggles without errors', async () => {
