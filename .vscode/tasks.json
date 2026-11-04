@@ -4,7 +4,7 @@
     {
       "label": "build-dev",
       "type": "shell",
-      "command": "node scripts/build-host.mjs && npx vite build --config webview/vite.config.ts --mode development",
+      "command": "node scripts/build-host.mjs && npx vite build --config webview/vite.config.mts --mode development",
       "group": { "kind": "build", "isDefault": true },
       "problemMatcher": []
     }
