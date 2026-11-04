@@ -8,7 +8,7 @@ import { AgentRunner } from '../core/agent/agentRunner';
 import { CheckpointRecorder, planRestore, restoreFiles, type Checkpoint, type FileSnapshot } from '../core/checkpoints/checkpoints';
 import { expandCommand, mergeCommands, parseSlash, type SlashCommand } from '../core/commands/slashCommands';
 import { planCompaction } from '../core/context/compaction';
-import { mergeProviders, parseConfigFile, type FileConfig } from '../core/config/configFile';
+import { configFileTemplate, mergeProviders, parseConfigFile, sameProviders, updateConfigText, type FileConfig, type ModelChoiceKey } from '../core/config/configFile';
 import type { AgentEvent } from '../core/agent/events';
 import { matchesAllowList, suggestAllowPrefix } from '../core/permissions/commands';
 import type { AgentMode, ApprovalMode, SessionGrants } from '../core/permissions/policy';
@@ -17,6 +17,7 @@ import type { ApprovalPort, ApprovalRequest, ApprovalResponse, DirEntry, Workspa
 import { capabilityKey, type CapabilityStore } from '../core/providers/capabilities';
 import { ProviderError, errorFromException } from '../core/providers/errors';
 import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
+import { normalizeApiKey, probeConnection } from '../core/providers/connection';
 import type { ModelConfig, ProviderConfig } from '../core/providers/types';
 import { PathError, resolveAndVerify, resolveWorkspacePath, type ResolvedPath } from '../core/security/paths';
 import { compareEntries, displayPath, looksBinary } from '../core/util/files';
@@ -62,10 +63,12 @@ import {
   addAllowedCommand,
   readDefaultModel,
   readPlanModel,
+  readConfigFileEnabled,
   readProviders,
   readSettings,
   readSettingsView,
   readTitleModel,
+  writeConfigFileEnabled,
   writeDefaultModel,
   writePlanModel,
   writeProviders,
@@ -73,7 +76,7 @@ import {
   writeTitleModel,
   type HostSettings,
 } from './config';
-import type { ConfigFileHost } from './configFileHost';
+import { ConfigFileBusyError, type ConfigFileHost } from './configFileHost';
 import type { HostLogger, ProviderSecrets, SovranStatusBar } from './services';
 
 const MAX_ATTACHMENT_CHARS = 50_000;
@@ -140,18 +143,21 @@ const newSession = (mode: AgentMode): Session => {
 export class SovranController implements ApprovalPort, vscode.Disposable {
   private post: ((m: HostMessage) => void) | undefined;
   private settings: HostSettings = readSettings();
-  /** Every provider in use: Settings and config file merged (a file entry replaces the Settings one with its id). */
+  /** Providers in use: Settings' (which mirror the config file while it is synced). */
   private providers: ProviderConfig[] = [];
-  /** Providers from `sovran.providers`; the only ones the UI writes back. */
+  /** Providers from `sovran.providers`, the store the UI writes to. */
   private settingsProviders: ProviderConfig[] = [];
   /** Providers from the last valid version of the config file. */
   private fileProviders: ProviderConfig[] = [];
-  private overridden = new Set<string>();
+  /** The config file is enabled, exists and was valid once: it and Settings mirror each other. */
+  private syncing = false;
+  /** Settings could not be updated from the file (for example settings.json has errors): use the file's providers. */
+  private settingsStale = false;
   private configFileView: ConfigFileView = { path: '', state: 'missing', providers: 0, problems: [] };
   /** In-flight title requests, aborted on dispose. */
   private readonly titleRequests = new Set<AbortController>();
-  /** Config file loads run one after the other (a save and a Reload click must not interleave). */
-  private configLoads: Promise<void> = Promise.resolve();
+  /** Config file loads and writes run one after the other (a save and a Settings change must not interleave). */
+  private configQueue: Promise<void> = Promise.resolve();
   private keyStatus = new Map<string, boolean>();
   private selected: SelectedModel | null = null;
   private planModel: SelectedModel | null = null;
@@ -222,6 +228,9 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         if (!e.affectsConfiguration('sovran')) return;
         this.settings = readSettings();
         await this.reloadProviders();
+        if (e.affectsConfiguration('sovran.configFile.enabled')) void this.reloadConfigFile(readConfigFileEnabled() ? 'enable' : 'startup');
+        // Providers or model choices changed in Settings (the panel, the composer or settings.json): mirror them.
+        else if (this.syncing) void this.queueConfig(() => this.pushSettingsToFile());
         this.selected = this.validSelection(this.selected);
         this.planModel = this.parseModelRef(readPlanModel());
         this.titleModel = this.parseModelRef(readTitleModel());
@@ -294,9 +303,13 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         case 'setModel':
           return await this.setModel(msg.role, msg.providerId && msg.modelId ? { providerId: msg.providerId, modelId: msg.modelId } : null);
         case 'openConfigFile':
-          return await this.deps.configFile.open();
+          return await this.openConfigFile();
         case 'reloadConfigFile':
           return await this.reloadConfigFile('change');
+        case 'stopConfigFile':
+          return await this.stopConfigFile();
+        case 'useConfigFile':
+          return await writeConfigFileEnabled(true); // onDidChangeConfiguration syncs, Settings winning the merge
         case 'addModels':
           return await this.addModels(msg.providerId, msg.modelIds, msg.select);
         case 'discoverModels':
@@ -425,8 +438,6 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       headerName: p.auth?.headerName,
       timeoutSeconds: p.timeoutSeconds,
       hasKey: this.keyStatus.get(p.id) ?? false,
-      source: this.isFileProvider(p.id) ? 'file' : 'settings',
-      ...(this.overridden.has(p.id) ? { overridesSettings: true } : {}),
       models: (p.models ?? []).map((m) => ({
         id: m.id,
         name: m.name,
@@ -886,7 +897,6 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   /** Adds discovered or typed models to a provider (onboarding), optionally selecting one as the Act model. */
   private async addModels(providerId: string, modelIds: string[], select?: string) {
-    if (this.isFileProvider(providerId)) return this.editInConfigFile(providerId, 'add models to');
     const provider = this.settingsProviders.find((p) => p.id === providerId);
     if (!provider) return;
     const known = new Set((provider.models ?? []).map((m) => m.id));
@@ -894,7 +904,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (added.length) {
       provider.models = [...(provider.models ?? []), ...added.map((id) => ({ id }))];
       await writeProviders(this.settingsProviders);
-      this.mergeProviders();
+      this.useProviders();
     }
     if (select && provider.models?.some((m) => m.id === select)) await this.setModel('act', { providerId, modelId: select });
     this.patch({ providers: this.providerViews(), selected: this.selected });
@@ -1032,13 +1042,11 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     const provider = this.providers.find((p) => p.id === pick.providerId);
     if (!provider) return;
     if (!provider.models?.some((m) => m.id === pick.modelId)) {
-      // A provider from the config file is changed by editing the file, never behind the user's back.
-      if (this.isFileProvider(provider.id)) return this.editInConfigFile(provider.id, `add "${pick.modelId}" to`);
       const target = this.settingsProviders.find((p) => p.id === provider.id);
       if (!target) return;
       target.models = [...(target.models ?? []), { id: pick.modelId }];
       await writeProviders(this.settingsProviders);
-      this.mergeProviders();
+      this.useProviders();
     }
     await this.selectModel({ providerId: provider.id, modelId: pick.modelId });
     this.patch({ providers: this.providerViews() });
@@ -1048,74 +1056,140 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   private async reloadProviders() {
     this.settingsProviders = readProviders(this.deps.logger);
-    this.mergeProviders();
+    this.useProviders();
     await Promise.all(this.providers.map(async (p) => this.keyStatus.set(p.id, await this.deps.secrets.has(p.id))));
   }
 
-  private mergeProviders() {
-    const merged = mergeProviders(this.settingsProviders, this.fileProviders);
-    this.providers = merged.providers;
-    this.overridden = new Set(merged.overridden);
+  private useProviders() {
+    this.providers = this.syncing && this.settingsStale ? this.fileProviders : this.settingsProviders;
   }
 
-  private isFileProvider(id: string): boolean {
-    return this.fileProviders.some((p) => p.id === id);
-  }
+  // ------------------------------------------------------------------ config file (synced with Settings)
 
-  /** Providers from the config file are edited in the file: say so and open it. */
-  private async editInConfigFile(providerId: string, action: string) {
-    const name = this.providers.find((p) => p.id === providerId)?.name ?? providerId;
-    this.notice('info', `${name} comes from ${this.configFileView.path}. To ${action} it, edit the file and save.`);
-    await this.deps.configFile.open();
-  }
-
-  // ------------------------------------------------------------------ config file
-
-  private reloadConfigFile(trigger: 'startup' | 'change'): Promise<void> {
-    this.configLoads = this.configLoads.then(() =>
-      this.loadConfigFile(trigger).catch((e) => this.deps.logger.error(`Loading config.yaml failed: ${e instanceof Error ? e.message : String(e)}`)),
+  private queueConfig(task: () => Promise<void>): Promise<void> {
+    this.configQueue = this.configQueue.then(() =>
+      task().catch((e) => this.deps.logger.error(`config.yaml sync failed: ${e instanceof Error ? e.message : String(e)}`)),
     );
-    return this.configLoads;
+    return this.configQueue;
+  }
+
+  /** `startup`/`change`: read the file; `enable`: the user turned the file back on, so Settings win the first merge. */
+  private reloadConfigFile(trigger: 'startup' | 'change' | 'enable'): Promise<void> {
+    return this.queueConfig(() => this.loadConfigFile(trigger));
+  }
+
+  private modelRefs(): Record<ModelChoiceKey, string> {
+    const ref = (s: SelectedModel | null) => (s ? `${s.providerId}/${s.modelId}` : '');
+    return { defaultModel: ref(this.selected), planModel: ref(this.planModel), titleModel: ref(this.titleModel) };
+  }
+
+  private settingsModelRefs(): Set<string> {
+    return new Set(this.settingsProviders.flatMap((p) => (p.models ?? []).map((m) => `${p.id}/${m.id}`)));
   }
 
   /**
-   * Reads `config.yaml` and applies it when it is valid: its providers join the Settings ones, model choices in it are
-   * selected (once per content change) and, after a save, Sovran connects to every provider that is new or changed.
-   * When the file has problems they are shown in the editor and the last valid version stays in use.
+   * Writes `providers` into the file, keeping its comments. Never writes text the file would reject, and never over
+   * unsaved edits in the editor; returns false (after telling the user) when it did not write.
    */
-  private async loadConfigFile(trigger: 'startup' | 'change') {
+  private async writeConfigText(
+    current: string,
+    providers: readonly ProviderConfig[],
+    what: string,
+    choices: Partial<Record<ModelChoiceKey, string>> = {},
+  ): Promise<boolean> {
+    const file = this.deps.configFile;
+    let next: string;
+    try {
+      next = updateConfigText(current, providers, choices);
+    } catch (e) {
+      this.notice('warning', `${what} saved in Settings but not in ${file.displayPath}: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+    if (next === current) return true;
+    const known = new Set([...this.settingsModelRefs(), ...providers.flatMap((p) => (p.models ?? []).map((m) => `${p.id}/${m.id}`))]);
+    const check = parseConfigFile(next, { otherModels: known });
+    if (!check.ok) {
+      this.notice('warning', `${what} saved in Settings but cannot be written to ${file.displayPath}: ${check.problems[0]!.message}`);
+      return false;
+    }
+    try {
+      await file.write(next);
+    } catch (e) {
+      const why =
+        e instanceof ConfigFileBusyError
+          ? `${e.message} Save or revert it; when you save it, its version wins.`
+          : e instanceof Error
+            ? e.message
+            : String(e);
+      this.notice('warning', `${what} saved in Settings but not in ${file.displayPath}. ${why}`);
+      return false;
+    }
+    await file.markApplied(next);
+    return true;
+  }
+
+  /** Settings changed while synced: write the difference into the file. A no-op when both already agree. */
+  private async pushSettingsToFile() {
+    if (!this.syncing) return;
+    const read = await this.deps.configFile.read();
+    if (read.kind !== 'text') return;
+    if (!parseConfigFile(read.text, { otherModels: this.settingsModelRefs() }).ok) {
+      if (!sameProviders(this.settingsProviders, this.fileProviders)) {
+        this.notice(
+          'warning',
+          `Your change is saved in Settings. ${this.deps.configFile.displayPath} has problems, so it was not updated; when you fix it, its version wins.`,
+        );
+      }
+      return;
+    }
+    // Model choices made in the UI go into the file too (only the ones it declares).
+    if (await this.writeConfigText(read.text, this.settingsProviders, 'Your change is', this.modelRefs())) {
+      this.fileProviders = this.settingsProviders;
+    }
+  }
+
+  /**
+   * Reads `config.yaml` and syncs it with Settings. While the file is enabled and valid the two mirror each other: a
+   * saved file updates Settings, a Settings change updates the file (pushSettingsToFile). The first sync joins both
+   * sides so nothing is lost. A file with problems is underlined and its last valid version stays in use.
+   */
+  private async loadConfigFile(trigger: 'startup' | 'change' | 'enable') {
     const file = this.deps.configFile;
     const read = await file.read();
     const view = (state: ConfigFileView['state'], problems: ConfigFileView['problems'] = []): ConfigFileView => ({
       path: file.displayPath,
       state,
-      providers: this.fileProviders.length,
+      providers: this.syncing ? this.fileProviders.length : 0,
       problems,
     });
-
-    if (read.kind === 'missing') {
+    const stopSyncing = async (state: ConfigFileView['state']) => {
       file.setProblems([]);
-      const had = this.fileProviders.length > 0;
+      // Settings already mirror the file, so nothing is lost; the next sync starts by joining both sides again.
+      this.syncing = false;
+      this.settingsStale = false;
       this.fileProviders = [];
-      this.configFileView = view('missing');
-      this.mergeProviders();
-      if (had) await this.refreshProviders();
-      else this.patch({ configFile: this.configFileView });
-      return;
-    }
+      await file.setSynced(false);
+      this.useProviders();
+      this.configFileView = view(state);
+      await this.refreshProviders();
+    };
 
-    // Model choices may point at providers configured in Settings.
-    const otherModels = new Set(this.settingsProviders.flatMap((p) => (p.models ?? []).map((m) => `${p.id}/${m.id}`)));
+    if (!readConfigFileEnabled()) return stopSyncing(read.kind === 'missing' ? 'missing' : 'ignored');
+    if (read.kind === 'missing') return stopSyncing('missing');
+
     const result =
       read.kind === 'text'
-        ? parseConfigFile(read.text, { otherModels })
+        ? parseConfigFile(read.text, { otherModels: this.settingsModelRefs() })
         : { ok: false as const, problems: [{ message: read.message, line: 0, column: 0, endLine: 0, endColumn: 0 }] };
     if (!result.ok) {
       file.setProblems(result.problems);
-      this.configFileView = view('error', result.problems.slice(0, 5).map((p) => ({ line: p.line + 1, message: p.message })));
+      this.configFileView = view(
+        'error',
+        result.problems.slice(0, 5).map((p) => ({ line: p.line + 1, message: p.message })),
+      );
       this.patch({ configFile: this.configFileView });
       this.deps.logger.warn(`config.yaml has ${result.problems.length} problem(s); keeping the last valid version.`);
-      if (trigger === 'change') {
+      if (trigger !== 'startup') {
         const count = result.problems.length;
         void vscode.window
           .showWarningMessage(
@@ -1128,21 +1202,79 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     }
 
     file.setProblems([]);
-    const previous = new Map(this.fileProviders.map((p) => [p.id, JSON.stringify(p)]));
-    this.fileProviders = result.config.providers;
-    await this.reloadProviders();
     const text = read.kind === 'text' ? read.text : '';
+    const ownWrite = file.isOwnWrite(text);
+    const previous = new Map(this.fileProviders.map((p) => [p.id, JSON.stringify(p)]));
+    let providers = result.config.providers;
+    if (!file.isSynced() || trigger === 'enable') {
+      // First sync: join both sides. A file turned back on is stale, so Settings win there; otherwise the file does.
+      providers =
+        trigger === 'enable'
+          ? mergeProviders(providers, this.settingsProviders).providers
+          : mergeProviders(this.settingsProviders, providers).providers;
+      if (!sameProviders(providers, result.config.providers)) await this.writeConfigText(text, providers, 'The providers from Settings are');
+      await file.setSynced(true);
+      if (trigger === 'enable') this.notice('info', `Using ${file.displayPath} again, in sync with Settings.`);
+    }
+    this.syncing = true;
+    this.fileProviders = providers;
+    this.settingsStale = false;
+    if (!sameProviders(this.settingsProviders, providers)) {
+      try {
+        await writeProviders(providers);
+      } catch (e) {
+        // Sovran keeps working from the file; only the Settings copy is behind.
+        this.settingsStale = true;
+        this.notice('warning', `Could not update Settings from ${file.displayPath}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    await this.reloadProviders();
     if (file.isNewContent(text)) {
       await this.applyModelChoices(result.config);
       await file.markApplied(text);
     }
     this.configFileView = view('ok');
     await this.refreshProviders();
-    this.deps.logger.info(`config.yaml applied · ${this.fileProviders.length} provider(s)`);
-    if (trigger === 'change') {
+    this.deps.logger.info(`config.yaml synced · ${providers.length} provider(s)`);
+    if (trigger === 'change' && !ownWrite) {
       vscode.window.setStatusBarMessage(`$(check) Sovran: applied ${file.displayPath}`, 4000);
-      const changed = this.fileProviders.filter((p) => previous.get(p.id) !== JSON.stringify(p));
+      const changed = providers.filter((p) => previous.get(p.id) !== JSON.stringify(p));
       for (const p of changed) void this.connectFileProvider(p);
+    }
+  }
+
+  /** Opens the file, creating it from the providers in Settings when it does not exist yet. */
+  private async openConfigFile() {
+    if (!readConfigFileEnabled()) await writeConfigFileEnabled(true);
+    const file = this.deps.configFile;
+    if (await file.create(configFileTemplate(this.settingsProviders))) await this.reloadConfigFile('change');
+    await file.open(() => configFileTemplate(this.settingsProviders));
+  }
+
+  /** Back to Settings only: keep the file but ignore it, or move it to the trash. Providers stay in Settings either way. */
+  private async stopConfigFile() {
+    const file = this.deps.configFile;
+    const choice = await vscode.window.showWarningMessage(
+      `Stop using ${file.displayPath}?`,
+      {
+        modal: true,
+        detail:
+          'Your providers stay in Sovran Settings, which already match the file, and you keep editing them there.\n\n' +
+          'Keep the File: it stays on disk and is ignored. You can use it again later from Settings.\n' +
+          'Move to Trash: it goes to the system trash, where you can still restore it.',
+      },
+      'Keep the File',
+      'Move to Trash',
+    );
+    if (choice === 'Keep the File') {
+      await writeConfigFileEnabled(false); // onDidChangeConfiguration stops the sync
+    } else if (choice === 'Move to Trash') {
+      await this.queueConfig(async () => {
+        await file.trash();
+        await file.setSynced(false);
+      });
+      await this.reloadConfigFile('startup');
+      this.notice('info', `Moved ${file.displayPath} to the trash. Your providers stay in Settings.`);
     }
   }
 
@@ -1184,7 +1316,10 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private async connectFileProvider(p: ProviderConfig) {
     const needsKey = (p.auth?.type ?? 'bearer') !== 'none';
     if (needsKey && !this.keyStatus.get(p.id)) {
-      const choice = await vscode.window.showInformationMessage(`Sovran: ${p.name} needs an API key. Keys are kept in VS Code Secret Storage, not in the file.`, 'Set Key');
+      const choice = await vscode.window.showInformationMessage(
+        `Sovran: ${p.name} needs an API key. Keys are kept in VS Code Secret Storage, not in the file.`,
+        'Set Key',
+      );
       if (choice !== 'Set Key') return;
       await this.promptApiKey(p.id);
       if (!this.keyStatus.get(p.id)) return;
@@ -1197,7 +1332,9 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       const noModels = !current.models?.length && result.models?.length ? ' Add the models you want under "models:".' : '';
       void vscode.window.showInformationMessage(`Sovran: ${p.name}: ${result.message}.${noModels}`);
     } else {
-      void vscode.window.showWarningMessage(`Sovran: could not connect to ${p.name}. ${result.message}${result.hint ? ` ${result.hint}` : ''}`);
+      void vscode.window.showWarningMessage(
+        `Sovran: could not connect to ${p.name}. ${result.message}${result.hint ? ` ${result.hint}` : ''}`,
+      );
     }
   }
 
@@ -1220,7 +1357,6 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   }
 
   private async saveProvider(input: ProviderInput, requestId?: string) {
-    if (input.id && this.isFileProvider(input.id)) return this.editInConfigFile(input.id, 'change');
     const existing = input.id ? this.settingsProviders.find((p) => p.id === input.id) : undefined;
     const id = existing?.id ?? this.slug(input.name);
     const config: ProviderConfig = {
@@ -1245,7 +1381,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     }
     this.settingsProviders = existing ? this.settingsProviders.map((p) => (p.id === id ? config : p)) : [...this.settingsProviders, config];
     await writeProviders(this.settingsProviders);
-    this.mergeProviders();
+    this.useProviders();
     if (config.auth?.type !== 'none' && !(await this.deps.secrets.has(id))) await this.promptApiKey(id);
     if (!this.selected) this.selected = this.validSelection(null);
     if (this.selected) await writeDefaultModel(`${this.selected.providerId}/${this.selected.modelId}`);
@@ -1261,14 +1397,13 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   }
 
   private async deleteProvider(id: string) {
-    if (this.isFileProvider(id)) return this.editInConfigFile(id, 'remove');
     const p = this.settingsProviders.find((x) => x.id === id);
     if (!p) return;
     const choice = await vscode.window.showWarningMessage(`Remove provider "${p.name}"?`, { modal: true, detail: 'Its stored API key is deleted too.' }, 'Remove');
     if (choice !== 'Remove') return;
     this.settingsProviders = this.settingsProviders.filter((x) => x.id !== id);
     await writeProviders(this.settingsProviders);
-    this.mergeProviders();
+    this.useProviders();
     await this.deps.secrets.delete(id);
     this.keyStatus.delete(id);
     this.selected = this.validSelection(this.selected);
@@ -1289,14 +1424,16 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (!provider || !id) return;
     const value = await vscode.window.showInputBox({
       title: `API key for ${provider.name}`,
-      prompt: 'Stored in VS Code Secret Storage, never in settings. Leave empty and press Enter to remove the key.',
+      prompt: 'Paste the key only, without "Bearer ". Stored in VS Code Secret Storage, never in settings. Leave empty and press Enter to remove the key.',
       password: true,
       ignoreFocusOut: true,
     });
     if (value === undefined) return;
-    if (value.trim()) await this.deps.secrets.set(id, value.trim());
+    const { key, notes } = normalizeApiKey(value);
+    if (key) await this.deps.secrets.set(id, key);
     else await this.deps.secrets.delete(id);
-    this.keyStatus.set(id, !!value.trim());
+    this.keyStatus.set(id, !!key);
+    if (key && notes.length) this.notice('info', `Saved the key for ${provider.name} without ${notes.join(', ')}.`);
     this.patch({ providers: this.providerViews() });
   }
 
@@ -1307,34 +1444,9 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   }
 
   /** Lists the server's models, or (for gateways without /models) sends a one-token completion. */
+  /** Lists the server's models, or (for gateways without /models, or that refuse it to the key) pings the chat. */
   private async checkConnection(config: ProviderConfig): Promise<ProviderTestResult> {
-    const provider = this.createProvider(config);
-    const started = Date.now();
-    let result: ProviderTestResult;
-    try {
-      const models = await provider.listModels();
-      result = { ok: true, latencyMs: Date.now() - started, models, message: `Connected · ${models.length} model${models.length === 1 ? '' : 's'} available` };
-    } catch (e) {
-      const err = e instanceof ProviderError ? e : errorFromException(e, { url: config.baseUrl });
-      const firstModel = config.models?.[0]?.id;
-      if (err.kind === 'not_found' && firstModel) {
-        // Some gateways do not implement /models; fall back to a one-token completion.
-        try {
-          const ac = new AbortController();
-          for await (const ev of provider.streamChat({ model: firstModel, messages: [{ role: 'user', content: 'ping' }], maxTokens: 1 }, ac.signal)) {
-            if (ev.type === 'text') break;
-          }
-          ac.abort();
-          result = { ok: true, latencyMs: Date.now() - started, message: 'Connected · this server does not list models' };
-        } catch (e2) {
-          const err2 = e2 instanceof ProviderError ? e2 : errorFromException(e2, { url: config.baseUrl });
-          result = { ok: false, message: err2.message, hint: err2.hint };
-        }
-      } else {
-        result = { ok: false, message: err.message, hint: err.hint };
-      }
-    }
-    return result;
+    return probeConnection(this.createProvider(config), config.models?.[0]?.id, config.baseUrl);
   }
 
   // ------------------------------------------------------------------ runs

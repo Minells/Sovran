@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CONFIG_FILE_TEMPLATE,
+  canonicalProvider,
+  configFileTemplate,
   mergeProviders,
+  sameProviders,
+  updateConfigText,
   parseConfigFile,
   type ConfigProblem,
 } from '../../src/core/config/configFile';
@@ -60,7 +63,7 @@ planModel: corp/coder-large
   });
 
   it('treats an empty file and the commented template as valid and empty', () => {
-    for (const text of ['', '# nothing yet\n', 'providers:\n', CONFIG_FILE_TEMPLATE]) {
+    for (const text of ['', '# nothing yet\n', 'providers:\n', configFileTemplate()]) {
       expect(parseConfigFile(text)).toEqual({ ok: true, config: { providers: [] } });
     }
   });
@@ -200,5 +203,130 @@ describe('merging providers', () => {
   it('is the Settings list when there is no file', () => {
     const settings = [p('a')];
     expect(mergeProviders(settings, []).providers).toEqual(settings);
+  });
+});
+
+describe('sync with Settings', () => {
+  const p = (over: Partial<ProviderConfig> & { id: string }): ProviderConfig => ({
+    name: over.id,
+    baseUrl: `http://${over.id}/v1`,
+    ...over,
+  });
+
+  it('compares providers by meaning, not by how each side writes them', () => {
+    const fromSettings = p({
+      id: 'lab',
+      name: 'lab',
+      baseUrl: 'http://lab/v1/',
+      auth: { type: 'bearer' },
+      models: [{ id: 'm', toolMode: 'auto' }],
+    });
+    const fromFile = p({ id: 'lab', baseUrl: 'http://lab/v1', models: [{ id: 'm' }] });
+    expect(sameProviders([fromSettings], [fromFile])).toBe(true);
+    expect(sameProviders([fromSettings], [{ ...fromFile, timeoutSeconds: 300 }])).toBe(false);
+    expect(sameProviders([p({ id: 'a' }), p({ id: 'b' })], [p({ id: 'b' }), p({ id: 'a' })])).toBe(false);
+    expect(canonicalProvider(p({ id: 'x', auth: { type: 'header' } })).auth).toEqual({
+      type: 'header',
+      headerName: 'api-key',
+    });
+  });
+
+  it('starts a new file from the providers in Settings, and the file reads back the same', () => {
+    const settings = [
+      p({
+        id: 'ollama',
+        name: 'Ollama',
+        auth: { type: 'none' },
+        models: [{ id: 'qwen2.5-coder:14b', contextWindow: 32768 }],
+      }),
+      p({
+        id: 'corp',
+        name: 'Corp',
+        auth: { type: 'header', headerName: 'api-key' },
+        headers: { 'X-Team': 'core' },
+        timeoutSeconds: 300,
+        models: [{ id: 'big' }],
+      }),
+    ];
+    const text = configFileTemplate(settings);
+    expect(text).toContain('# Examples (uncomment and adapt):');
+    const r = parseConfigFile(text);
+    expect(r.ok && sameProviders(r.config.providers, settings)).toBe(true);
+  });
+
+  it('writes Settings changes into the file without touching comments or unchanged entries', () => {
+    const file = [
+      '# my notes',
+      'providers:',
+      '  # the GPU box',
+      '  - id: gpu # inline',
+      '    name: GPU',
+      '    baseUrl: https://gpu/v1',
+      '    timeoutSeconds: 300 # slow',
+      '    models: [big]',
+      '  - id: old',
+      '    baseUrl: http://old/v1',
+      '  - id: keep',
+      '    baseUrl: http://keep/v1',
+      '    auth: { type: none } # written by hand',
+      'defaultModel: gpu/big',
+      '',
+    ].join('\n');
+    const out = updateConfigText(
+      file,
+      [
+        p({
+          id: 'gpu',
+          name: 'GPU',
+          baseUrl: 'https://gpu/v1',
+          timeoutSeconds: 300,
+          models: [{ id: 'big' }, { id: 'small', contextWindow: 32768 }],
+        }),
+        p({ id: 'keep', name: 'keep', baseUrl: 'http://keep/v1', auth: { type: 'none' } }),
+        p({ id: 'new', name: 'New' }),
+      ],
+      { defaultModel: 'gpu/small', planModel: 'gpu/big' },
+    );
+    for (const kept of [
+      '# my notes',
+      '# the GPU box',
+      '- id: gpu # inline',
+      'timeoutSeconds: 300 # slow',
+      'auth: { type: none } # written by hand',
+    ]) {
+      expect(out).toContain(kept);
+    }
+    expect(out).not.toContain('id: old');
+    expect(out).toContain('defaultModel: gpu/small');
+    expect(out).not.toContain('planModel'); // only choices the file already declares are written
+    const r = parseConfigFile(out);
+    expect(r.ok && r.config.providers.map((x) => x.id)).toEqual(['gpu', 'keep', 'new']);
+    expect(r.ok && r.config.providers[0]!.models).toEqual([
+      { id: 'big' },
+      { id: 'small', contextWindow: 32768 },
+    ]);
+  });
+
+  it('fills the empty template and keeps its examples as comments', () => {
+    const out = updateConfigText(configFileTemplate(), [
+      p({ id: 'lab', auth: { type: 'none' }, models: [{ id: 'm' }] }),
+    ]);
+    const r = parseConfigFile(out);
+    expect(r.ok && r.config.providers.map((x) => x.id)).toEqual(['lab']);
+    expect(out).toContain('# Examples (uncomment and adapt):');
+    expect(out.indexOf('- id: lab')).toBeLessThan(out.indexOf('# Examples'));
+  });
+
+  it('removes a model choice the UI clears, and never edits a file with syntax errors', () => {
+    expect(updateConfigText('providers: []\nplanModel: a/b\n', [], { planModel: '' })).not.toContain(
+      'planModel',
+    );
+    expect(() => updateConfigText('providers: [\n', [])).toThrow(/syntax errors/);
+  });
+
+  it('is stable: writing the same providers again changes nothing', () => {
+    const settings = [p({ id: 'a', models: [{ id: 'm' }] })];
+    const once = updateConfigText(configFileTemplate(), settings);
+    expect(updateConfigText(once, settings)).toBe(once);
   });
 });

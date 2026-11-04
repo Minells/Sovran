@@ -3,12 +3,16 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { createHash } from 'node:crypto';
-import { CONFIG_FILE_MAX_BYTES, CONFIG_FILE_TEMPLATE, type ConfigProblem } from '../core/config/configFile';
+import { CONFIG_FILE_MAX_BYTES, type ConfigProblem } from '../core/config/configFile';
 
 export type ConfigFileRead =
   { kind: 'missing' } | { kind: 'text'; text: string } | { kind: 'error'; message: string };
 
 const LAST_APPLIED_KEY = 'sovran.configFile.lastApplied';
+const SYNCED_KEY = 'sovran.configFile.synced';
+
+/** The file is open in an editor with unsaved changes: writing it would fight with what the user is typing. */
+export class ConfigFileBusyError extends Error {}
 
 /** `~/.sovran/config.yaml`: in the user's home, never in the workspace, so a cloned repository cannot ship one. */
 export const defaultConfigPath = () => path.join(os.homedir(), '.sovran', 'config.yaml');
@@ -26,6 +30,8 @@ export class ConfigFileHost implements vscode.Disposable {
   private watcher: vscode.FileSystemWatcher | undefined;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
+  /** Hash of the last content Sovran wrote, to tell its own writes from the user's when the watcher fires. */
+  private lastWritten: string | undefined;
 
   constructor(
     private readonly memento: vscode.Memento,
@@ -63,25 +69,64 @@ export class ConfigFileHost implements vscode.Disposable {
     }
   }
 
-  /** Opens the file in an editor, creating it (and its folder) from the commented template first when missing. */
-  async open(): Promise<void> {
-    const dir = path.dirname(this.uri.fsPath);
-    let created = false;
+  /**
+   * Creates the file (and its folder) with `initial` content when it does not exist. Returns whether it was created.
+   * Never overwrites a file that appeared in the meantime.
+   */
+  async create(initial: string): Promise<boolean> {
     try {
       await fs.access(this.uri.fsPath);
+      return false;
     } catch {
-      await fs.mkdir(dir, { recursive: true });
-      // 'wx' never overwrites a file created in the meantime.
-      await fs
-        .writeFile(this.uri.fsPath, CONFIG_FILE_TEMPLATE, { encoding: 'utf8', flag: 'wx' })
-        .catch((e: NodeJS.ErrnoException) => {
-          if (e.code !== 'EEXIST') throw e;
-        });
-      created = true;
+      await fs.mkdir(path.dirname(this.uri.fsPath), { recursive: true });
+      try {
+        this.lastWritten = hash(initial);
+        await fs.writeFile(this.uri.fsPath, initial, { encoding: 'utf8', flag: 'wx' });
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'EEXIST') return false;
+        throw e;
+      }
+      // A watcher created before the folder existed may never fire; start it again now that the folder is there.
+      this.watch();
+      return true;
     }
-    // A watcher created before the folder existed may never fire; start it again now that the folder is there.
-    if (created) this.watch();
+  }
+
+  /** Opens the file in an editor, creating it with `initial()` first when it does not exist. */
+  async open(initial: () => string): Promise<void> {
+    await this.create(initial());
     await vscode.window.showTextDocument(this.uri, { preview: false });
+  }
+
+  /**
+   * Replaces the file content (in place, so a symbolic link from a dotfiles repository keeps working). Refuses while
+   * the file has unsaved changes in an editor; an open, saved editor reloads by itself.
+   */
+  async write(text: string): Promise<void> {
+    if (vscode.workspace.textDocuments.some((d) => d.uri.fsPath === this.uri.fsPath && d.isDirty)) {
+      throw new ConfigFileBusyError(`${this.displayPath} has unsaved changes in the editor.`);
+    }
+    this.lastWritten = hash(text);
+    await fs.writeFile(this.uri.fsPath, text, 'utf8');
+  }
+
+  /** Whether `text` is what Sovran itself last wrote (a change the user did not make). */
+  isOwnWrite(text: string): boolean {
+    return this.lastWritten === hash(text);
+  }
+
+  /** Moves the file to the system trash, so the user can still get it back. */
+  async trash(): Promise<void> {
+    await vscode.workspace.fs.delete(this.uri, { useTrash: true });
+  }
+
+  /** Whether Settings and the file have been merged once; until then the first sync joins both sides. */
+  isSynced(): boolean {
+    return this.memento.get<boolean>(SYNCED_KEY) === true;
+  }
+
+  async setSynced(value: boolean): Promise<void> {
+    await this.memento.update(SYNCED_KEY, value);
   }
 
   /** Shows problems where they are in the file (squiggles) and in the Problems panel. Empty clears them. */

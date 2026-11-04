@@ -1,5 +1,5 @@
 import { parseSSE } from './sse';
-import { ProviderError, errorFromException, errorFromResponse, isRedirect, redirectError } from './errors';
+import { ProviderError, errorFromException, errorFromResponse, isRedirect, redirectError, type AuthSent } from './errors';
 import type { ChatProvider, ChatRequest, ProviderConfig, ProviderEvent } from './types';
 
 export interface OpenAICompatibleOptions {
@@ -66,20 +66,18 @@ export class OpenAICompatibleProvider implements ChatProvider {
     return Math.max(5, this.options.config.timeoutSeconds ?? 120) * 1000;
   }
 
-  private async headers(json: boolean): Promise<{ headers: Record<string, string>; secret?: string }> {
+  private async headers(json: boolean): Promise<{ headers: Record<string, string>; secret?: string; auth: AuthSent }> {
     const headers: Record<string, string> = {
       Accept: 'application/json, text/event-stream',
       ...(this.options.config.headers ?? {}),
     };
     if (json) headers['Content-Type'] = 'application/json';
     const auth = this.options.config.auth ?? { type: 'bearer' };
-    if (auth.type === 'none') return { headers };
+    if (auth.type === 'none') return { headers, auth: { type: 'none', keySent: false } };
     const secret = await this.options.getApiKey();
-    if (secret) {
-      if (auth.type === 'header') headers[auth.headerName?.trim() || 'api-key'] = secret;
-      else headers.Authorization = `Bearer ${secret}`;
-    }
-    return { headers, secret };
+    const header = auth.type === 'header' ? auth.headerName?.trim() || 'api-key' : 'Authorization';
+    if (secret) headers[header] = auth.type === 'header' ? secret : `Bearer ${secret}`;
+    return { headers, secret, auth: { type: auth.type, header, keySent: !!secret } };
   }
 
   async listModels(signal?: AbortSignal): Promise<string[]> {
@@ -92,7 +90,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
       const res = await this.fetchImpl(url, { headers: h.headers, signal: watchdog.signal, redirect: 'manual' });
       if (isRedirect(res.status)) throw redirectError(res.status, res.headers.get('location'), url);
       const text = await res.text();
-      if (!res.ok) throw errorFromResponse(res.status, text, { url, secrets: [secret] });
+      if (!res.ok) throw errorFromResponse(res.status, text, { url, secrets: [secret], auth: h.auth });
       let json: unknown;
       try {
         json = JSON.parse(text);
@@ -136,7 +134,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
         redirect: 'manual',
       });
       if (isRedirect(res.status)) throw redirectError(res.status, res.headers.get('location'), url);
-      if (!res.ok) throw errorFromResponse(res.status, await res.text(), { url, toolsSent, secrets: [secret] });
+      if (!res.ok) throw errorFromResponse(res.status, await res.text(), { url, toolsSent, secrets: [secret], auth: h.auth });
       watchdog.reset();
 
       const contentType = res.headers.get('content-type') ?? '';

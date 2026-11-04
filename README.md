@@ -124,9 +124,10 @@ Errors tell you what went wrong and how to fix it.
 
 **A model for each mode.** Plan can use a larger reasoning model while Act uses a fast coder. In Plan mode, pick the model from the composer, or choose *Same as Act model*.
 
-**Chat titles written by the model (optional).** Turn on *Settings → Models → Name chats with the model* and Sovran
-asks the model for a short title in the language you wrote in, while the answer streams. A small, fast *Title model*
-is enough. When it is off (the default), the title is the first words of your first message.
+**Chat titles written by the model.** Sovran asks the model for a short title in the language you wrote in, while the
+answer streams; the first words of your message are shown until it arrives. A small, fast *Title model* is enough, and
+models that always reason (such as GLM or DeepSeek-R1) get room to think before they answer. Turn it off in
+*Settings → Models → Name chats with the model* to keep the first words.
 
 ## Installation
 
@@ -189,14 +190,40 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
   "models": [{ "id": "coder-large", "contextWindow": 128000 }] }
 ```
 
+### Authentication and "HTTP 401"
+
+**API key** (the default) sends the key as `Authorization: Bearer <key>`, the OpenAI standard that gateways, LiteLLM,
+vLLM and SDKs such as Continue use. Choose **Custom header** only when your gateway documents another header (for example
+Azure's `api-key`). When a server answers 401 or 403, Sovran says what the request carried: no key stored, the key in
+the `Authorization` header, or the key in a custom header. Paste the key alone: a `Bearer ` prefix or quotes copied with
+it are removed. Some gateways let a key chat but not list models; the connection test then checks chat directly and
+says so. To see what your gateway accepts, try from the same machine:
+
+```bash
+curl -sS https://your-gateway.example/v1/chat/completions -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" -d '{"model":"your-model","messages":[{"role":"user","content":"ping"}],"max_tokens":16}'
+```
+
+### Model options
+
+| Field | Meaning |
+|---|---|
+| `contextWindow` | Tokens the model accepts. Sovran never guesses; the default is 32 768 |
+| `maxOutputTokens` | Reserved for the reply (default 4 096) |
+| `toolMode` | `auto` (detect, the default), `native`, `prompted` or `none` |
+| `temperature` | Sent only when set |
+
 ## Configuration file (`config.yaml`)
 
-You can configure providers in two ways, and use both at once:
+You can configure providers in the panel, in a YAML file, or both: the two stay in sync.
 
 - **In the panel:** the guided setup and **Settings → Models → Manage providers** (stored in `sovran.providers`).
-- **In a YAML file:** **Settings → Models → Create config.yaml** (or `Sovran: Open Model Config File`) opens
-  `~/.sovran/config.yaml`, created from a commented template. Write your providers and save: Sovran applies the file
-  right away and connects to every provider that is new or changed, asking for a key when one is needed.
+- **In a YAML file:** **Settings → Models → Create config.yaml** (or `Sovran: Open Model Config File`) creates
+  `~/.sovran/config.yaml` with the providers you already have, followed by commented examples.
+
+From then on, saving the file updates Settings (and Sovran connects to new or changed providers, asking for a key when
+one is needed), and changing providers in the panel, or the model you pick, updates the file, keeping your comments and
+formatting. To go back to the panel only, choose **Stop using config.yaml…**: keep the file (it is ignored) or move it
+to the trash. Your providers stay in Settings either way, and **Use config.yaml again** brings the file back.
 
 ```yaml
 providers:
@@ -238,31 +265,26 @@ titleModel: ollama/qwen2.5-coder:14b
 The fields are the same as in `sovran.providers` (see the examples above and [Model options](#model-options)); `name`
 defaults to the `id`.
 
-How Sovran applies it:
+How the sync works:
 
+- **The side you changed wins.** Save the file and Settings follow; change Settings and the file follows. Each side is
+  written only when it differs, so the two never bounce changes back and forth.
+- **Nothing is lost when syncing starts.** The first time (and when you use an ignored file again) both sides are
+  joined: a provider on one side only is added to the other. Where both define the same `id`, a new file wins and a
+  file you turn back on loses to Settings, since it was not in use.
 - **All or nothing.** The file is applied only when it is entirely valid. Mistakes are underlined in the editor and
   listed in the Problems panel and in Settings, with hints such as *Unknown field "base_url". Did you mean "baseUrl"?*;
-  meanwhile Sovran keeps using the last valid version.
-- **Alongside Settings.** Providers from the file are added to the ones in Settings. An entry with the same `id`
-  replaces the Settings one. Providers from the file are marked *config.yaml* and are edited in the file.
-- **Model choices** (`defaultModel`, `planModel`, `titleModel`) are applied when the file content changes, so a model
-  you pick later in the composer is not reverted at the next start.
+  meanwhile Settings keep the last valid version. Sovran never writes into a file that has problems or unsaved edits in
+  the editor; it tells you, and keeps your change in Settings.
+- **Model choices** (`defaultModel`, `planModel`, `titleModel`) are applied when the file content changes, and the model
+  you pick in Sovran is written back, but only to the keys the file already declares.
 - **No secrets.** API keys are never read from the file: a field such as `apiKey`, or a header such as `Authorization`,
   is reported as a problem. Keys stay in VS Code Secret Storage.
 - **Never from a repository.** The file lives in your home folder, not in the workspace, so a cloned repository cannot
-  ship one (the same reason `sovran.providers` is user scope only).
+  ship one (the same reason `sovran.providers` is user scope only). `sovran.configFile.enabled` turns the file off.
 
 Changes saved in VS Code apply immediately. If you edit the file with another program and the folder did not exist
 when VS Code started, use **Reload** in Settings.
-
-### Model options
-
-| Field | Meaning |
-|---|---|
-| `contextWindow` | Tokens the model accepts. Sovran never guesses; the default is 32 768 |
-| `maxOutputTokens` | Reserved for the reply (default 4 096) |
-| `toolMode` | `auto` (detect, the default), `native`, `prompted` or `none` |
-| `temperature` | Sent only when set |
 
 ## Settings
 
@@ -271,6 +293,7 @@ when VS Code started, use **Reload** in Settings.
 | `sovran.providers` | `[]` | Model endpoints. User scope only |
 | `sovran.defaultModel` | `""` | `providerId/modelId` for new chats (the Act model) |
 | `sovran.planModel` | `""` | Model for Plan mode. Empty means the same as Act |
+| `sovran.configFile.enabled` | `true` | Use `~/.sovran/config.yaml` when it exists, kept in sync with `sovran.providers`. User scope only |
 | `sovran.agent.maxIterations` | `25` | Maximum model round-trips per request |
 | `sovran.approvals.mode` | `ask` | Approval mode a new window starts in: `ask`, `edits` (Auto-edit) or `auto`. User scope only |
 | `sovran.approvals.allowedCommands` | `[]` | Commands that run without asking, for example `npm test`. Never applies to commands that contain shell operators or trip a guardrail |
@@ -282,7 +305,7 @@ when VS Code started, use **Reload** in Settings.
 | `sovran.context.autoCompact` | `true` | Summarize older messages when the context window is full |
 | `sovran.context.projectInstructions` | `true` | Use `AGENTS.md` from the workspace root (trusted workspaces only) |
 | `sovran.sessions.persist` | `true` | Save chats in VS Code workspace storage |
-| `sovran.sessions.generateTitles` | `false` | Name new chats with the model (one short extra request with the first message) instead of using its first words. User scope only |
+| `sovran.sessions.generateTitles` | `true` | Name new chats with the model (one short extra request with the first message) instead of using its first words. User scope only |
 | `sovran.sessions.titleModel` | `""` | `providerId/modelId` that writes the titles, for example a small fast model. Empty means the chat's model |
 | `sovran.diff.openOnProposal` | `true` | Open the diff editor automatically for proposed edits |
 | `sovran.approvals.fileEdits` | `ask` | *Deprecated*: use `sovran.approvals.mode`. `auto` here still starts windows in Auto-edit |

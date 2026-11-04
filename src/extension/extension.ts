@@ -83,7 +83,7 @@ export async function activate(context: vscode.ExtensionContext) {
       controller.showView('settings');
       await reveal();
     }),
-    command('sovran.openConfigFile', () => configFile.open()),
+    command('sovran.openConfigFile', () => controller.handle({ type: 'openConfigFile' })),
     command('sovran.setApprovalMode', () => controller.pickApprovalMode()),
     command('sovran.selectModel', () => controller.pickModel()),
     command('sovran.setApiKey', () => controller.promptApiKey()),
