@@ -56,10 +56,11 @@ src/
     permissions/             policy, command analysis
     security/                path confinement, secret redaction, globs
     context/                 token estimation, context budget & truncation
-    sessions/                session model, repository interface
+    config/                  config.yaml parsing and validation (positions for diagnostics), provider merging
+    sessions/                session model, repository interface, generated titles
   shared/protocol.ts         host ⇄ webview message contracts (types + zod schemas)
   extension/                 VS Code integration (composition root)
-    extension.ts · SovranViewProvider.ts · SovranController.ts · config.ts · statusBar.ts · logger.ts
+    extension.ts · SovranViewProvider.ts · SovranController.ts · config.ts · configFileHost.ts · statusBar.ts · logger.ts
     adapters/                VscodeWorkspace · NodeProcessRunner · DiffPresenter · FsSessionRepository · MementoCapabilityStore
 webview/                     React app (Vite) → dist/webview
 tests/                       unit · integration (mock OpenAI server) · fixtures · extension (test-electron)

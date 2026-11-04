@@ -97,6 +97,20 @@ Manual checks for this branch (first F5 session):
 - [ ] Opening `~/.aws/credentials` shows a locked chip, and sending a message does not attach it.
 - [ ] A provider that answers with a redirect shows the redirect error and its hint.
 
+## Settings tabs, config.yaml and chat titles (branch `feat/settings-yaml-autotitle`)
+
+| Feature | Status | Evidence |
+|---|---|---|
+| Settings areas as persistent tabs | ✅ Implemented | UI tests for selection, one visible area, keyboard (arrows, Home, End, one tab stop) and reopening the last area; visual QA at 280–420 px in dark and light |
+| `~/.sovran/config.yaml` | ✅ Implemented | Unit tests for parsing, shorthands, positions of every problem, spelling hints, rejected secrets, model references, alias bombs and merging; UI tests for the Settings card and file providers; extension smoke test for diagnostics (runs in CI) |
+| Model-generated chat titles | ✅ Implemented | Unit tests for the request, first-line cut-off, truncation of long messages, cleanup of model output and errors; UI tests for the toggle and the title model |
+
+Manual checks for this branch:
+- [ ] Create config.yaml from Settings, uncomment Ollama and save: the provider appears with the *config.yaml* badge and a "connected" notification.
+- [ ] Save a typo (`base_url`): the squiggle and the Problems entry show the hint; Settings shows the problem; chatting still works with the last valid version.
+- [ ] A bearer provider in the file asks for the key once; nothing is written to `settings.json`.
+- [ ] With titles on, a new chat first shows the first words, then the generated title; renaming during generation keeps the user's title.
+
 ## Manual QA checklist (first F5 session)
 
 - [ ] Onboarding: add Ollama from the preset, test the connection, add a discovered model, chat.

@@ -77,6 +77,15 @@ export async function writePlanModel(value: string): Promise<void> {
   await vscode.workspace.getConfiguration(SECTION).update('planModel', value, vscode.ConfigurationTarget.Global);
 }
 
+/** The model that names chats, as providerId/modelId. Empty means the chat's own model. */
+export function readTitleModel(): string {
+  return userSetting('sessions.titleModel', '');
+}
+
+export async function writeTitleModel(value: string): Promise<void> {
+  await vscode.workspace.getConfiguration(SECTION).update('sessions.titleModel', value || undefined, vscode.ConfigurationTarget.Global);
+}
+
 /**
  * The approval mode a window starts in. `sovran.approvals.mode` replaces the older `sovran.approvals.fileEdits`
  * (`auto` there meant "apply edits without asking", which is now the `edits` mode); the old key is still honoured
@@ -97,6 +106,8 @@ export interface HostSettings {
   openDiffOnProposal: boolean;
   mirrorToTerminal: boolean;
   autoCompact: boolean;
+  /** Name new chats with the model (an extra short request) instead of the first words of the first message. */
+  generateTitles: boolean;
 }
 
 export function readSettings(): HostSettings {
@@ -124,6 +135,8 @@ export function readSettings(): HostSettings {
     // Command visibility is a safety property: a workspace must not be able to hide the terminal mirror.
     mirrorToTerminal: userSetting('terminal.mirrorToTerminal', true),
     autoCompact: setting('context.autoCompact', true),
+    // User scope only: it decides whether the first message goes out in an extra request.
+    generateTitles: userSetting('sessions.generateTitles', false),
   };
 }
 
@@ -159,6 +172,7 @@ export function readSettingsView(s: HostSettings = readSettings()): SettingsView
     projectInstructions: s.projectInstructions,
     maxToolResultChars: s.agent.tools.maxToolResultChars,
     persistSessions: s.persistSessions,
+    generateTitles: s.generateTitles,
     overriddenByWorkspace: overridden,
   };
 }

@@ -113,6 +113,7 @@ const providers: AppState['providers'] = [
     baseUrl: 'http://localhost:11434/v1',
     authType: 'none',
     hasKey: false,
+    source: 'settings',
     models: [
       { id: 'qwen2.5-coder:14b', toolMode: 'auto' },
       { id: 'devstral:24b', toolMode: 'auto', learnedToolMode: 'prompted' },
@@ -125,9 +126,27 @@ const providers: AppState['providers'] = [
     authType: 'header',
     headerName: 'api-key',
     hasKey: true,
+    source: 'file',
     models: [{ id: 'coder-large', contextWindow: 131072, toolMode: 'native' }],
   },
 ];
+
+/** `?config=missing|error` previews the other states of the config file card. */
+const configParam = params.get('config');
+const configFile: AppState['configFile'] =
+  configParam === 'missing'
+    ? { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] }
+    : configParam === 'error'
+      ? {
+          path: '~/.sovran/config.yaml',
+          state: 'error',
+          providers: 1,
+          problems: [
+            { line: 7, message: 'Unknown field "base_url". Did you mean "baseUrl"?' },
+            { line: 12, message: 'API keys are never read from config.yaml. Use "Set key" in Sovran: keys are kept in VS Code Secret Storage.' },
+          ],
+        }
+      : { path: '~/.sovran/config.yaml', state: 'ok', providers: 1, problems: [] };
 
 const editArgs = JSON.stringify({
   path: 'src/auth/session.ts',
@@ -292,6 +311,7 @@ function baseState(): AppState {
     },
     grants: { edits: false },
     planModel: null,
+    titleModel: null,
     usage: scenario === 'conversation' ? { tokens: 23_480, contextWindow: 32_768, source: 'server' } : null,
     compaction: null,
     commands: [
@@ -316,8 +336,10 @@ function baseState(): AppState {
       projectInstructions: true,
       maxToolResultChars: 20000,
       persistSessions: true,
+      generateTitles: params.get('titles') === 'on',
       overriddenByWorkspace: [],
     },
+    configFile: scenario === 'onboarding' ? { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] } : configFile,
   };
 }
 
@@ -388,19 +410,24 @@ onPost((m) => {
         'context.projectInstructions': 'projectInstructions',
         'context.maxToolResultChars': 'maxToolResultChars',
         'sessions.persist': 'persistSessions',
+        'sessions.generateTitles': 'generateTitles',
       } as const)[key];
       state = { ...state, settings: { ...state.settings, [field]: m.setting.value } };
       return send({ type: 'patch', patch: { settings: state.settings } });
     }
     case 'setModel': {
       const sel = m.providerId && m.modelId ? { providerId: m.providerId, modelId: m.modelId } : null;
-      state = m.role === 'plan' ? { ...state, planModel: sel } : { ...state, selected: sel ?? state.selected };
-      return send({ type: 'patch', patch: { selected: state.selected, planModel: state.planModel } });
+      state =
+        m.role === 'plan' ? { ...state, planModel: sel } : m.role === 'title' ? { ...state, titleModel: sel } : { ...state, selected: sel ?? state.selected };
+      return send({ type: 'patch', patch: { selected: state.selected, planModel: state.planModel, titleModel: state.titleModel } });
     }
+    case 'openConfigFile':
+    case 'reloadConfigFile':
+      return send({ type: 'notice', id: `n-${Date.now()}`, level: 'info', message: `${m.type === 'openConfigFile' ? 'Opens' : 'Reloads'} ~/.sovran/config.yaml in VS Code.` });
     case 'saveProvider': {
       if (!m.requestId) return;
       const id = m.provider.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'provider';
-      const view = { id, name: m.provider.name, baseUrl: m.provider.baseUrl, authType: m.provider.authType, hasKey: m.provider.authType !== 'none', models: [] };
+      const view = { id, name: m.provider.name, baseUrl: m.provider.baseUrl, authType: m.provider.authType, hasKey: m.provider.authType !== 'none', source: 'settings' as const, models: [] };
       state = { ...state, providers: [...state.providers.filter((p) => p.id !== id), view] };
       send({ type: 'patch', patch: { providers: state.providers } });
       send({ type: 'providerSaved', requestId: m.requestId, providerId: id });

@@ -173,15 +173,29 @@ function ProviderCard({ p, onEdit }: { p: ProviderView; onEdit: () => void }) {
   // Derived, not synchronized: the test is running until a result for our request id arrives.
   const testing = pendingRequest !== null && test?.requestId !== pendingRequest;
   const learnedPrompted = p.models.filter((m) => m.learnedToolMode === 'prompted' && m.toolMode === 'auto').length;
+  // A provider from the config file is edited in the file: the file stays the single source of truth.
+  const fromFile = p.source === 'file';
+  const openFile = () => post({ type: 'openConfigFile' });
   return (
     <section className="sv-card" aria-label={p.name}>
       <div className="sv-card__head">
         <span className="sv-card__title">{p.name}</span>
-        <IconButton icon="edit" label={`Edit ${p.name}`} onClick={onEdit} />
-        <IconButton icon="trash" label={`Remove ${p.name}`} onClick={() => post({ type: 'deleteProvider', id: p.id })} />
+        {fromFile ? (
+          <IconButton icon="file-code" label={`Edit ${p.name} in config.yaml`} onClick={openFile} />
+        ) : (
+          <>
+            <IconButton icon="edit" label={`Edit ${p.name}`} onClick={onEdit} />
+            <IconButton icon="trash" label={`Remove ${p.name}`} onClick={() => post({ type: 'deleteProvider', id: p.id })} />
+          </>
+        )}
       </div>
       <div className="sv-card__url">{p.baseUrl}</div>
       <div className="sv-badges">
+        {fromFile ? (
+          <span className="sv-badge" title={p.overridesSettings ? 'Replaces the provider with the same id in Settings' : 'Configured in config.yaml'}>
+            <Icon name="file-code" /> config.yaml{p.overridesSettings ? ' · overrides Settings' : ''}
+          </span>
+        ) : null}
         {p.authType === 'none' ? (
           <span className="sv-badge">No auth</span>
         ) : p.hasKey ? (
@@ -233,8 +247,8 @@ function ProviderCard({ p, onEdit }: { p: ProviderView; onEdit: () => void }) {
           </Button>
         ) : null}
         {test?.models?.some((m) => !p.models.some((x) => x.id === m)) ? (
-          <Button variant="ghost" icon="add" onClick={onEdit}>
-            Add discovered models
+          <Button variant="ghost" icon="add" onClick={fromFile ? openFile : onEdit}>
+            {fromFile ? 'Add models in config.yaml' : 'Add discovered models'}
           </Button>
         ) : null}
       </div>
@@ -293,6 +307,16 @@ export function ProvidersView() {
               }}
             >
               settings
+            </a>{' '}
+            or in{' '}
+            <a
+              href="#"
+              onClick={(e) => {
+                e.preventDefault();
+                post({ type: 'openConfigFile' });
+              }}
+            >
+              config.yaml
             </a>
             .
           </span>
