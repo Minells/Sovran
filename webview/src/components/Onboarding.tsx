@@ -329,10 +329,12 @@ export function AuthField({
   setHeaderName: (v: string) => void;
   insecure: boolean;
 }) {
+  // "API key" is the OpenAI standard (Authorization: Bearer <key>) that gateways and SDKs such as Continue use, so it
+  // comes first. A custom header is for gateways that document one (for example Azure's api-key).
   const options: Array<[ProviderInput['authType'], string]> = [
-    ['none', 'None'],
-    ['bearer', 'Bearer token'],
+    ['bearer', 'API key'],
     ['header', 'Custom header'],
+    ['none', 'None'],
   ];
   return (
     <div className="sv-field">
@@ -347,7 +349,14 @@ export function AuthField({
         </div>
       </fieldset>
       {authType === 'header' ? <input aria-label="Header name" value={headerName} onChange={(e) => setHeaderName(e.target.value)} placeholder="api-key" /> : null}
-      {authType !== 'none' ? <span className="sv-field__help">VS Code asks for the key in a secure input and stores it in Secret Storage.</span> : null}
+      <span className="sv-field__help">
+        {authType === 'bearer'
+          ? 'Sent as "Authorization: Bearer <key>", the OpenAI standard most servers and gateways expect. '
+          : authType === 'header'
+            ? `Sent as "${headerName.trim() || 'api-key'}: <key>". Use it only if your gateway documents this header. `
+            : 'For local servers that need no key. '}
+        {authType !== 'none' ? 'VS Code asks for the key in a secure input and stores it in Secret Storage.' : null}
+      </span>
       {insecure ? (
         <span className="sv-field__note" role="note">
           This URL uses http, so the key would travel unencrypted. Use https for anything that is not on this machine.

@@ -77,6 +77,15 @@ export async function writePlanModel(value: string): Promise<void> {
   await vscode.workspace.getConfiguration(SECTION).update('planModel', value, vscode.ConfigurationTarget.Global);
 }
 
+/** Whether `~/.sovran/config.yaml` is used (and kept in sync with Settings) when it exists. */
+export function readConfigFileEnabled(): boolean {
+  return userSetting('configFile.enabled', true);
+}
+
+export async function writeConfigFileEnabled(value: boolean): Promise<void> {
+  await vscode.workspace.getConfiguration(SECTION).update('configFile.enabled', value ? undefined : false, vscode.ConfigurationTarget.Global);
+}
+
 /** The model that names chats, as providerId/modelId. Empty means the chat's own model. */
 export function readTitleModel(): string {
   return userSetting('sessions.titleModel', '');
@@ -136,7 +145,7 @@ export function readSettings(): HostSettings {
     mirrorToTerminal: userSetting('terminal.mirrorToTerminal', true),
     autoCompact: setting('context.autoCompact', true),
     // User scope only: it decides whether the first message goes out in an extra request.
-    generateTitles: userSetting('sessions.generateTitles', false),
+    generateTitles: userSetting('sessions.generateTitles', true),
   };
 }
 

@@ -111,6 +111,21 @@ Manual checks for this branch:
 - [ ] A bearer provider in the file asks for the key once; nothing is written to `settings.json`.
 - [ ] With titles on, a new chat first shows the first words, then the generated title; renaming during generation keeps the user's title.
 
+## Config sync, gateway auth and titles on by default (branch `feat/config-sync-auth`)
+
+| Feature | Status | Evidence |
+|---|---|---|
+| Two-way sync Settings ⇄ `config.yaml`, stop (keep/trash), use again | ✅ Implemented | Unit tests for canonical comparison, in-place YAML edits that keep comments, the seeded template and stability; UI tests for every file state; extension smoke test for file → Settings, Settings → file (comment kept), ignored file, and joining on re-enable (runs in CI) |
+| Auth diagnostics, key normalization, `/models` 401 fallback | ✅ Implemented | Integration tests against an APISIX-style mock gateway (Bearer only, custom message, `/models` refused) |
+| "API key" default label, header badge | ✅ Implemented | UI tests |
+| Titles on by default, reasoning-model budget | ✅ Implemented | Unit tests (always-reasoning stream, early stop) |
+
+Manual checks for this branch:
+- [ ] Create config.yaml from Settings with providers already configured: the file lists them; add a provider in the panel and it appears in the file with your comments intact.
+- [ ] Open the file, make an unsaved edit, change a provider in the panel: Sovran warns and does not touch the file.
+- [ ] Stop using config.yaml → Keep the File: Settings keep working; Use config.yaml again joins both sides.
+- [ ] A company gateway: a wrong auth type or a missing key shows the matching hint.
+
 ## Manual QA checklist (first F5 session)
 
 - [ ] Onboarding: add Ollama from the preset, test the connection, add a discovered model, chat.

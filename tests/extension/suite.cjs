@@ -48,8 +48,8 @@ exports.run = async function run() {
     assert.strictEqual(cfg.get('approvals.fileEdits'), 'ask');
     assert.deepStrictEqual(cfg.get('approvals.allowedCommands'), []);
     assert.ok(cfg.get('security.protectedPaths').includes('**/.env'));
-    // Naming chats with the model sends the first message in an extra request: off unless the user turns it on.
-    assert.strictEqual(cfg.get('sessions.generateTitles'), false);
+    // Chats are named by the model by default (owner decision, ADR-023); the first-words title shows until it arrives.
+    assert.strictEqual(cfg.get('sessions.generateTitles'), true);
     // Security-relevant settings ignore workspace values.
     const scope = (key) => ext.packageJSON.contributes.configuration.flatMap((g) => Object.entries(g.properties)).find(([k]) => k === key)?.[1].scope;
     for (const key of [
@@ -110,6 +110,44 @@ exports.run = async function run() {
     await writeOutside(BAD, hinted, 'changed outside VS Code: no diagnostic for base_url');
     await writeOutside(GOOD, cleared, 'changed outside VS Code: diagnostics were not cleared');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+  });
+  await test('config.yaml and Settings stay in sync both ways, and the file can be ignored', async () => {
+    const fs = require('node:fs');
+    const file = process.env.SOVRAN_TEST_CONFIG_FILE ?? '';
+    assert.ok(file.includes('sovran-test-'), `refusing to touch a real config file: "${file}"`);
+    const G = vscode.ConfigurationTarget.Global;
+    const cfg = () => vscode.workspace.getConfiguration('sovran');
+    const ids = () => (cfg().get('providers') ?? []).map((p) => p.id).sort().join(',');
+    const text = () => fs.readFileSync(file, 'utf8');
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const until = async (check, what, ms = 6000) => {
+      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(100);
+      assert.ok(check(), what);
+    };
+    const local = (id) => ({ id, name: id, baseUrl: 'http://127.0.0.1:9/v1', auth: { type: 'none' }, models: [{ id: 'm' }] });
+
+    // The file wins when it is saved: Settings follow.
+    fs.writeFileSync(file, 'providers:\n  # my note\n  - id: lab\n    baseUrl: http://127.0.0.1:9/v1\n    auth: none\n    models: [m]\n');
+    await until(() => ids() === 'lab', `Settings did not follow the file (Settings: "${ids()}")`);
+
+    // Settings change (the panel writes sovran.providers): the file follows and keeps its comments.
+    await cfg().update('providers', [...cfg().get('providers'), local('extra')], G);
+    await until(() => /id: extra/.test(text()), 'the file did not follow Settings');
+    assert.ok(text().includes('# my note'), 'the comment in the file was lost');
+
+    // Stop using the file: edits to it no longer reach Settings.
+    await cfg().update('configFile.enabled', false, G);
+    await sleep(500);
+    fs.writeFileSync(file, `${text()}  - id: ghost\n    baseUrl: http://127.0.0.1:9/v1\n    auth: none\n`);
+    await sleep(1500);
+    assert.strictEqual(ids(), 'extra,lab', 'an ignored file changed Settings');
+
+    // Use it again: both sides are joined (Settings win where both define a provider).
+    await cfg().update('configFile.enabled', undefined, G);
+    await until(() => ids() === 'extra,ghost,lab', `the sides were not joined (Settings: "${ids()}")`);
+    await until(() => /id: extra/.test(text()) && /id: ghost/.test(text()), 'the file was not joined with Settings');
+
+    await cfg().update('providers', undefined, G);
   });
   await test('view opens, settings open and mode toggles without errors', async () => {
     await vscode.commands.executeCommand('sovran.focus');

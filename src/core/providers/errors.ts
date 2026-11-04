@@ -27,11 +27,42 @@ export class ProviderError extends Error {
   }
 }
 
+/** How a request carried the API key, so an authentication error can say what the server actually received. */
+export interface AuthSent {
+  type: 'none' | 'bearer' | 'header';
+  /** Header that carried the key (`Authorization` for bearer). */
+  header?: string;
+  /** False when a key is expected but none is stored: the request went out without credentials. */
+  keySent: boolean;
+}
+
 interface ErrorContext {
   url: string;
   toolsSent?: boolean;
   secrets?: readonly (string | undefined)[];
+  auth?: AuthSent;
 }
+
+const GENERIC_AUTH_HINT = 'Check the API key (Sovran: Set Provider API Key…) and the auth type.';
+
+/**
+ * Explains a 401/403 from what the request carried. A gateway's own message ("invalid key") rarely says whether the
+ * key was missing, sent in a header it does not read, or simply wrong, and those need different fixes.
+ */
+export function authHint(auth: AuthSent | undefined): string {
+  if (!auth) return GENERIC_AUTH_HINT;
+  if (auth.type === 'none') {
+    return 'The request carried no credentials because Authentication is set to None. If the server needs a key, choose API key and set the key.';
+  }
+  if (!auth.keySent) {
+    return 'No API key is stored for this provider, so the request carried no credentials. Set it with "Set key" (Sovran: Set Provider API Key…).';
+  }
+  if (auth.type === 'bearer') {
+    return 'Sovran sent the stored key as "Authorization: Bearer <key>", the OpenAI standard. Check that the key is right. If the gateway reads the key from another header (for example api-key or x-api-key), set Authentication to Custom header.';
+  }
+  return `Sovran sent the stored key in the "${auth.header ?? 'api-key'}" header. Most OpenAI-compatible gateways expect "Authorization: Bearer <key>": set Authentication to API key, unless the gateway documents this header.`;
+}
+
 
 const CONTEXT_RE =
   /context[ _]length|maximum context|context window|too many tokens|prompt is too long|exceeds? the (?:model'?s? )?(?:maximum )?context|max_tokens.*exceed/i;
@@ -65,7 +96,7 @@ export function errorFromResponse(status: number, body: string, ctx: ErrorContex
   const message = redact(extractErrorMessage(body), ctx.secrets);
   const detail = `HTTP ${status}: ${message}`;
   if (status === 401 || status === 403) {
-    return new ProviderError('auth', detail, 'Check the API key (Sovran: Set Provider API Key…) and the auth type.', status);
+    return new ProviderError('auth', detail, authHint(ctx.auth), status);
   }
   if (status === 404) {
     const hint = /\/models$/.test(ctx.url)

@@ -31,19 +31,18 @@ export interface ProviderView {
   /** Whether a key is stored. The key itself never reaches the webview. */
   hasKey: boolean;
   models: ModelView[];
-  /** Where the provider is configured: Sovran Settings (editable in the panel) or the config file (edited as text). */
-  source: 'settings' | 'file';
-  /** A config file entry that replaces the Settings provider with the same id. */
-  overridesSettings?: boolean;
 }
 
-/** The optional config file (`~/.sovran/config.yaml`). */
+/** The optional config file (`~/.sovran/config.yaml`), kept in sync with Settings while it is used. */
 export interface ConfigFileView {
   /** Where the file lives, for display (`~/.sovran/config.yaml`). */
   path: string;
-  /** `error`: the file has problems and Sovran keeps using its last valid version (if any). */
-  state: 'missing' | 'ok' | 'error';
-  /** Providers the file contributes right now. */
+  /**
+   * `ok`: in sync with Settings. `error`: the file has problems and its last valid version stays in use.
+   * `ignored`: the file exists but the user stopped using it (`sovran.configFile.enabled` is off).
+   */
+  state: 'missing' | 'ok' | 'error' | 'ignored';
+  /** Providers in the file while it is in sync. */
   providers: number;
   /** The first problems, with one-based line numbers. The editor shows all of them. */
   problems: Array<{ line: number; message: string }>;
@@ -349,6 +348,10 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openConfigFile') }),
   /** Reads the config file again (it is also reloaded automatically when saved). */
   z.object({ type: z.literal('reloadConfigFile') }),
+  /** Back to Settings only. The host asks whether to keep the file (ignored) or move it to the trash. */
+  z.object({ type: z.literal('stopConfigFile') }),
+  /** Uses an ignored config file again; Settings win where both define the same provider. */
+  z.object({ type: z.literal('useConfigFile') }),
   z.object({ type: z.literal('restoreCheckpoint'), messageId: id }),
   z.object({ type: z.literal('retry') }),
   z.object({ type: z.literal('editMessage'), messageId: id, text: z.string().min(1).max(200_000) }),

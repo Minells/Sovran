@@ -7,6 +7,14 @@ Reply with a short title, 2 to 6 words, that says what the user wants. Write it 
 Reply with the title only: no quotes, no markdown, no trailing punctuation, no explanation.`;
 
 const MAX_TITLE = 60;
+/**
+ * A cap, not a cost: a plain model writes a few words and stops, and reading stops at the first line anyway. Models that
+ * always reason (GLM, DeepSeek-R1, Qwen3 in thinking mode) spend this same budget on reasoning before they answer, so
+ * a tight cap (a few dozen tokens) leaves them no room for the title.
+ */
+export const TITLE_MAX_TOKENS = 1024;
+/** A reply this long without a line break is not a title; stop reading and keep what is there. */
+const MAX_REPLY_CHARS = 200;
 /** The first message is enough to name a chat; a pasted log would only cost time on a slow local model. */
 const MAX_INPUT_CHARS = 2000;
 
@@ -65,14 +73,14 @@ export async function generateTitle(
           content: `Name the chat that starts with this message:\n\n${truncateMiddle(firstMessage, MAX_INPUT_CHARS)}`,
         },
       ],
-      maxTokens: 32,
+      maxTokens: TITLE_MAX_TOKENS,
       temperature: 0.2,
     },
     signal,
   )) {
     if (ev.type === 'text') take(parser.push(ev.text));
     // One line is all we need; leaving the loop closes the stream.
-    if (/\S[^\n]*\n/.test(text)) break;
+    if (/\S[^\n]*\n/.test(text) || text.length > MAX_REPLY_CHARS) break;
   }
   take(parser.flush());
   return cleanTitle(text);

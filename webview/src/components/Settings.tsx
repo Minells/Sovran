@@ -150,14 +150,7 @@ function ProvidersSummary() {
             return (
               <li key={p.id}>
                 <span className="sv-dot" data-state={insecure || needsKey ? 'warn' : 'ok'} aria-hidden="true" />
-                <span className="sv-provider-list__name">
-                  {p.name}
-                  {p.source === 'file' ? (
-                    <span className="sv-tag" title={`Configured in ${app.configFile.path}`}>
-                      config.yaml
-                    </span>
-                  ) : null}
-                </span>
+                <span className="sv-provider-list__name">{p.name}</span>
                 <span className="sv-provider-list__meta">
                   {p.models.length} model{p.models.length === 1 ? '' : 's'}
                   {needsKey ? ' · no key' : ''}
@@ -184,27 +177,31 @@ function ProvidersSummary() {
   );
 }
 
-/** The second way to configure providers: a YAML file the user edits as text, applied on every save. */
+/** The second way to configure providers: a YAML file kept in sync with Settings, or ignored, or not there. */
 function ConfigFileField() {
   const { app } = useStore();
   const f = app.configFile;
   const n = f.providers;
   const providers = `${n} provider${n === 1 ? '' : 's'}`;
-  const status =
-    f.state === 'missing'
-      ? 'Not created yet.'
-      : f.state === 'ok'
-        ? n
-          ? `Applied · ${providers}`
-          : 'Applied · no providers yet'
-        : n
-          ? `Has problems · still using the last valid version (${providers})`
-          : 'Has problems · not applied';
+  const status = {
+    missing: 'Not created. Providers live in Settings only.',
+    ok: `In sync with Settings · ${n ? providers : 'no providers yet'}`,
+    error: n ? `Has problems · Settings keep the last valid version (${providers})` : 'Has problems · not applied',
+    ignored: 'Ignored · Settings are used alone',
+  }[f.state];
+  const icon = { missing: 'file-code', ok: 'sync', error: 'error', ignored: 'circle-slash' }[f.state];
+  const help = {
+    missing:
+      'Prefer text? Create the file: it starts with the providers you have in Settings, and from then on the two stay in sync. Save the file and Settings follow; change providers here and the file follows, keeping your comments.',
+    ok: 'Save the file and Settings follow; change providers here and the file follows, keeping your comments. API keys stay in Secret Storage, never in the file.',
+    error: 'Fix the problems and save: the file then wins. Changes made here meanwhile are kept in Settings only.',
+    ignored: 'Use it again to sync once more: providers missing on either side are added, and where both define one, Settings win.',
+  }[f.state];
   return (
     <div className="sv-field">
       <span className="sv-field__label">Configuration file</span>
       <div className="sv-config-file" data-state={f.state}>
-        <Icon name={f.state === 'ok' ? 'pass' : f.state === 'error' ? 'error' : 'file-code'} />
+        <Icon name={icon} />
         <div className="sv-config-file__text">
           <code>{f.path}</code>
           <span role="status">{status}</span>
@@ -219,18 +216,26 @@ function ConfigFileField() {
           ))}
         </ul>
       ) : null}
-      <span className="sv-field__help">
-        Prefer text? Describe providers and models in YAML. Sovran applies the file every time you save it and connects to new providers. API keys stay in
-        Secret Storage, never in the file.
-      </span>
+      <span className="sv-field__help">{help}</span>
       <div className="sv-approval__actions">
-        <Button icon="file-code" onClick={() => post({ type: 'openConfigFile' })}>
-          {f.state === 'missing' ? 'Create config.yaml' : 'Open config.yaml'}
-        </Button>
-        {f.state !== 'missing' ? (
-          <Button variant="ghost" icon="refresh" onClick={() => post({ type: 'reloadConfigFile' })}>
-            Reload
+        {f.state === 'ignored' ? (
+          <Button icon="sync" onClick={() => post({ type: 'useConfigFile' })}>
+            Use config.yaml again
           </Button>
+        ) : (
+          <Button icon="file-code" onClick={() => post({ type: 'openConfigFile' })}>
+            {f.state === 'missing' ? 'Create config.yaml' : 'Open config.yaml'}
+          </Button>
+        )}
+        {f.state === 'ok' || f.state === 'error' ? (
+          <>
+            <Button variant="ghost" icon="refresh" onClick={() => post({ type: 'reloadConfigFile' })}>
+              Reload
+            </Button>
+            <Button variant="ghost" icon="circle-slash" onClick={() => post({ type: 'stopConfigFile' })}>
+              Stop using config.yaml…
+            </Button>
+          </>
         ) : null}
       </div>
     </div>

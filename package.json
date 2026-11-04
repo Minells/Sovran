@@ -337,6 +337,13 @@
             },
             "order": 1
           },
+          "sovran.configFile.enabled": {
+            "type": "boolean",
+            "scope": "application",
+            "default": true,
+            "markdownDescription": "Use `~/.sovran/config.yaml` when it exists and keep it in sync with `#sovran.providers#`: saving the file updates Settings, changing providers in Settings updates the file (comments are kept). Off: the file is ignored and Settings are used alone.",
+            "order": 4
+          },
           "sovran.defaultModel": {
             "type": "string",
             "scope": "application",
@@ -513,8 +520,8 @@
           "sovran.sessions.generateTitles": {
             "type": "boolean",
             "scope": "application",
-            "default": false,
-            "markdownDescription": "Name new chats with the model: Sovran sends the first message in one extra short request and uses the reply as the title. When off, the title is the first words of the first message. Uses `#sovran.sessions.titleModel#` when set.",
+            "default": true,
+            "markdownDescription": "Name new chats with the model: Sovran sends the first message in one extra short request and uses the reply as the title (the first words are shown until it arrives). When off, the title is the first words of the first message. Uses `#sovran.sessions.titleModel#` when set.",
             "order": 2
           },
           "sovran.sessions.titleModel": {

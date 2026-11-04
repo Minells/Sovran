@@ -113,7 +113,6 @@ const providers: AppState['providers'] = [
     baseUrl: 'http://localhost:11434/v1',
     authType: 'none',
     hasKey: false,
-    source: 'settings',
     models: [
       { id: 'qwen2.5-coder:14b', toolMode: 'auto' },
       { id: 'devstral:24b', toolMode: 'auto', learnedToolMode: 'prompted' },
@@ -126,17 +125,18 @@ const providers: AppState['providers'] = [
     authType: 'header',
     headerName: 'api-key',
     hasKey: true,
-    source: 'file',
     models: [{ id: 'coder-large', contextWindow: 131072, toolMode: 'native' }],
   },
 ];
 
-/** `?config=missing|error` previews the other states of the config file card. */
+/** `?config=missing|error|ignored` previews the other states of the config file card. */
 const configParam = params.get('config');
 const configFile: AppState['configFile'] =
   configParam === 'missing'
     ? { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] }
-    : configParam === 'error'
+    : configParam === 'ignored'
+      ? { path: '~/.sovran/config.yaml', state: 'ignored', providers: 0, problems: [] }
+      : configParam === 'error'
       ? {
           path: '~/.sovran/config.yaml',
           state: 'error',
@@ -146,7 +146,7 @@ const configFile: AppState['configFile'] =
             { line: 12, message: 'API keys are never read from config.yaml. Use "Set key" in Sovran: keys are kept in VS Code Secret Storage.' },
           ],
         }
-      : { path: '~/.sovran/config.yaml', state: 'ok', providers: 1, problems: [] };
+      : { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] };
 
 const editArgs = JSON.stringify({
   path: 'src/auth/session.ts',
@@ -336,7 +336,7 @@ function baseState(): AppState {
       projectInstructions: true,
       maxToolResultChars: 20000,
       persistSessions: true,
-      generateTitles: params.get('titles') === 'on',
+      generateTitles: params.get('titles') !== 'off',
       overriddenByWorkspace: [],
     },
     configFile: scenario === 'onboarding' ? { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] } : configFile,
@@ -424,10 +424,16 @@ onPost((m) => {
     case 'openConfigFile':
     case 'reloadConfigFile':
       return send({ type: 'notice', id: `n-${Date.now()}`, level: 'info', message: `${m.type === 'openConfigFile' ? 'Opens' : 'Reloads'} ~/.sovran/config.yaml in VS Code.` });
+    case 'stopConfigFile':
+    case 'useConfigFile': {
+      const stop = m.type === 'stopConfigFile';
+      state = { ...state, configFile: { ...state.configFile, state: stop ? 'ignored' : 'ok', providers: stop ? 0 : state.providers.length } };
+      return send({ type: 'patch', patch: { configFile: state.configFile } });
+    }
     case 'saveProvider': {
       if (!m.requestId) return;
       const id = m.provider.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'provider';
-      const view = { id, name: m.provider.name, baseUrl: m.provider.baseUrl, authType: m.provider.authType, hasKey: m.provider.authType !== 'none', source: 'settings' as const, models: [] };
+      const view = { id, name: m.provider.name, baseUrl: m.provider.baseUrl, authType: m.provider.authType, hasKey: m.provider.authType !== 'none', models: [] };
       state = { ...state, providers: [...state.providers.filter((p) => p.id !== id), view] };
       send({ type: 'patch', patch: { providers: state.providers } });
       send({ type: 'providerSaved', requestId: m.requestId, providerId: id });

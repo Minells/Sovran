@@ -10,7 +10,7 @@ import { onPost, setUiState } from './vscode';
 const baseState = (over: Partial<AppState> = {}): AppState => ({
   view: 'chat',
   workspace: { name: 'w', trusted: true, hasFolder: true },
-  providers: [{ id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, source: 'settings', models: [{ id: 'coder', toolMode: 'auto' }] }],
+  providers: [{ id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }] }],
   selected: { providerId: 'local', modelId: 'coder' },
   mode: 'act',
   sessions: [],
@@ -42,7 +42,7 @@ const baseState = (over: Partial<AppState> = {}): AppState => ({
     projectInstructions: true,
     maxToolResultChars: 20000,
     persistSessions: true,
-    generateTitles: false,
+    generateTitles: true,
     overriddenByWorkspace: [],
   },
   configFile: { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] },
@@ -268,7 +268,7 @@ describe('v0.2 recovery & productivity', () => {
     mount(
       baseState({
         mode: 'plan',
-        providers: [{ id: 'local', name: 'Local', baseUrl: 'http://x/v1', authType: 'none', hasKey: false, source: 'settings', models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] }],
+        providers: [{ id: 'local', name: 'Local', baseUrl: 'http://x/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] }],
         planModel: { providerId: 'local', modelId: 'thinker' },
       }),
     );
@@ -687,8 +687,8 @@ describe('settings view', () => {
     baseState({
       view: 'settings',
       providers: [
-        { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, source: 'settings', models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] },
-        { id: 'corp', name: 'Corp', baseUrl: 'http://gw.corp.example/v1', authType: 'bearer', hasKey: true, source: 'settings', models: [{ id: 'big', toolMode: 'auto' }] },
+        { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] },
+        { id: 'corp', name: 'Corp', baseUrl: 'http://gw.corp.example/v1', authType: 'bearer', hasKey: true, models: [{ id: 'big', toolMode: 'auto' }] },
       ],
       ...over,
     });
@@ -753,7 +753,7 @@ describe('settings view', () => {
   });
 
   it('turns model-generated chat titles on and picks the model that writes them', async () => {
-    const view = mount(settingsState());
+    const view = mount(settingsState({ settings: { ...baseState().settings, generateTitles: false } }));
     expect(screen.queryByLabelText('Title model')).not.toBeInTheDocument();
     await userEvent.click(screen.getByLabelText(/Name chats with the model/));
     expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'sessions.generateTitles', value: true } });
@@ -769,25 +769,41 @@ describe('settings view', () => {
     view.unmount();
   });
 
-  it('offers the configuration file and reports its state', async () => {
+  it('offers to create the configuration file from the providers in Settings', async () => {
     mount(settingsState());
     expect(screen.getByText('~/.sovran/config.yaml')).toBeInTheDocument();
-    expect(screen.getByText('Not created yet.')).toBeInTheDocument();
+    expect(screen.getByText('Not created. Providers live in Settings only.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Stop using/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Create config.yaml' }));
     expect(sent).toContainEqual({ type: 'openConfigFile' });
+  });
 
-    host({
-      type: 'patch',
-      patch: {
-        configFile: { path: '~/.sovran/config.yaml', state: 'error', providers: 1, problems: [{ line: 7, message: 'Unknown field "base_url". Did you mean "baseUrl"?' }] },
-        providers: [...settingsState().providers, { id: 'gpu', name: 'GPU', baseUrl: 'https://gpu.example/v1', authType: 'bearer', hasKey: true, source: 'file', models: [{ id: 'm', toolMode: 'auto' }] }],
-      },
-    });
-    expect(screen.getByText(/still using the last valid version \(1 provider\)/)).toBeInTheDocument();
-    expect(within(screen.getByRole('list', { name: 'Problems in the configuration file' })).getByText(/Did you mean "baseUrl"/)).toBeInTheDocument();
-    expect(screen.getByText('config.yaml', { selector: '.sv-tag' })).toBeInTheDocument();
+  it('shows the sync with Settings and lets the user stop using the file', async () => {
+    mount(settingsState({ configFile: { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] } }));
+    expect(screen.getByText('In sync with Settings · 2 providers')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(sent).toContainEqual({ type: 'reloadConfigFile' });
+    await userEvent.click(screen.getByRole('button', { name: 'Stop using config.yaml…' }));
+    expect(sent).toContainEqual({ type: 'stopConfigFile' });
+  });
+
+  it('lists the problems of a broken file and keeps the way back to Settings', async () => {
+    mount(
+      settingsState({
+        configFile: { path: '~/.sovran/config.yaml', state: 'error', providers: 1, problems: [{ line: 7, message: 'Unknown field "base_url". Did you mean "baseUrl"?' }] },
+      }),
+    );
+    expect(screen.getByText(/Settings keep the last valid version \(1 provider\)/)).toBeInTheDocument();
+    expect(within(screen.getByRole('list', { name: 'Problems in the configuration file' })).getByText(/Did you mean "baseUrl"/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stop using config.yaml…' })).toBeInTheDocument();
+  });
+
+  it('uses an ignored file again on request', async () => {
+    mount(settingsState({ configFile: { path: '~/.sovran/config.yaml', state: 'ignored', providers: 0, problems: [] } }));
+    expect(screen.getByText('Ignored · Settings are used alone')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Stop using/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Use config.yaml again' }));
+    expect(sent).toContainEqual({ type: 'useConfigFile' });
   });
 
   it('changes the approval mode for this window and the default for new windows', async () => {
@@ -837,26 +853,38 @@ describe('settings view', () => {
   });
 });
 
-describe('providers from the configuration file', () => {
-  it('are edited in the file, not in the form, and say so', async () => {
-    mount(
-      baseState({
-        view: 'providers',
-        providers: [
-          { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, source: 'settings', models: [{ id: 'coder', toolMode: 'auto' }] },
-          { id: 'gpu', name: 'GPU', baseUrl: 'https://gpu.example/v1', authType: 'bearer', hasKey: true, source: 'file', overridesSettings: true, models: [{ id: 'm', toolMode: 'auto' }] },
-        ],
-      }),
-    );
-    const gpu = screen.getByRole('region', { name: 'GPU' });
-    expect(within(gpu).getByText(/config.yaml · overrides Settings/)).toBeInTheDocument();
-    expect(within(gpu).queryByRole('button', { name: 'Remove GPU' })).not.toBeInTheDocument();
-    await userEvent.click(within(gpu).getByRole('button', { name: 'Edit GPU in config.yaml' }));
-    expect(sent).toContainEqual({ type: 'openConfigFile' });
-    expect(screen.queryByRole('form')).not.toBeInTheDocument();
-    // Settings providers keep the form.
-    const local = screen.getByRole('region', { name: 'Local' });
-    expect(within(local).getByRole('button', { name: 'Remove Local' })).toBeInTheDocument();
+describe('providers and the configuration file', () => {
+  const twoProviders: AppState['providers'] = [
+    { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }] },
+    { id: 'gw', name: 'Gateway', baseUrl: 'https://gw.example/v1', authType: 'header', headerName: 'api-key', hasKey: true, models: [{ id: 'm', toolMode: 'auto' }] },
+  ];
+
+  it('edits every provider in the panel and says when the file follows', async () => {
+    mount(baseState({ view: 'providers', providers: twoProviders, configFile: { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] } }));
+    expect(screen.getByRole('note')).toHaveTextContent('In sync with ~/.sovran/config.yaml');
+    for (const name of ['Local', 'Gateway']) {
+      const card = screen.getByRole('region', { name });
+      expect(within(card).getByRole('button', { name: `Edit ${name}` })).toBeInTheDocument();
+      expect(within(card).getByRole('button', { name: `Remove ${name}` })).toBeInTheDocument();
+    }
+    // A non-standard key header is visible at a glance.
+    expect(within(screen.getByRole('region', { name: 'Gateway' })).getByText('Header api-key')).toBeInTheDocument();
+  });
+
+  it('has no sync note without the file', () => {
+    mount(baseState({ view: 'providers', providers: twoProviders }));
+    expect(screen.queryByText(/In sync with/)).not.toBeInTheDocument();
+  });
+
+  it('offers the standard API key first, and says which header carries it', async () => {
+    mount(baseState({ view: 'providers', providers: twoProviders }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add' }));
+    const auth = screen.getByRole('radiogroup', { name: 'Authentication' });
+    expect(within(auth).getAllByRole('radio').map((r) => r.textContent)).toEqual(['API key', 'Custom header', 'None']);
+    expect(within(auth).getByRole('radio', { name: 'API key' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByText(/Sent as "Authorization: Bearer <key>", the OpenAI standard/)).toBeInTheDocument();
+    await userEvent.click(within(auth).getByRole('radio', { name: 'Custom header' }));
+    expect(screen.getByText(/Sent as "api-key: <key>"\. Use it only if your gateway documents this header/)).toBeInTheDocument();
   });
 });
 
@@ -872,7 +900,7 @@ describe('guided setup', () => {
     expect(screen.getByText('Connecting…')).toBeInTheDocument();
 
     // The host saves the provider (the app now has one), then reports the connection test.
-    host({ type: 'patch', patch: { providers: [{ id: 'ollama', name: 'Ollama', baseUrl: 'http://localhost:11434/v1', authType: 'none', hasKey: false, source: 'settings', models: [] }] } });
+    host({ type: 'patch', patch: { providers: [{ id: 'ollama', name: 'Ollama', baseUrl: 'http://localhost:11434/v1', authType: 'none', hasKey: false, models: [] }] } });
     host({ type: 'providerSaved', requestId: save.requestId!, providerId: 'ollama' });
     expect(screen.getByText('Connecting…')).toBeInTheDocument();
     host({ type: 'providerTest', requestId: save.requestId!, providerId: 'ollama', result: { ok: true, models: ['qwen2.5-coder:14b', 'llama3.1:8b'], message: 'Connected' } });
