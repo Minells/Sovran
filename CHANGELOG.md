@@ -25,6 +25,7 @@ pre-releases and even minor versions are stable releases.
 - The status bar shows `auto-edit` or `auto` when Act mode runs unattended.
 
 ### Security
+- Dependency install scripts are denied in `allowScripts` (none is needed: esbuild, vsce-sign, ttf2woff2, es5-ext), which silences npm 12's warning, and CI installs with `--ignore-scripts` to check the same setup.
 - Development tooling: `minimatch` and `glob` are overridden to their patched majors (GHSA-g3hv-75wg-m249, GHSA-3g3m-2fjr-6pw4), until ESLint, typescript-eslint, vsce and fantasticon accept them. `npm audit` reports no vulnerabilities and the `glob` deprecation warnings are gone. The extension itself was not affected: none of these packages ships in the VSIX.
 - Attaching a file that matches `sovran.security.protectedPaths` asks for confirmation first, whether it comes from `@`, the attach menu or the file dialog.
 - Files outside the workspace can be attached only through the system file dialog that the extension host opens; a path sent by the webview is still confined to the workspace.

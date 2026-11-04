@@ -22,7 +22,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # Dependency install scripts are not needed (see docs/DEVELOPMENT.md) and npm 12 blocks them by default:
+      # CI installs the same way, so it checks what developers get.
+      - run: npm ci --ignore-scripts
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
@@ -44,7 +46,9 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      # Dependency install scripts are not needed (see docs/DEVELOPMENT.md) and npm 12 blocks them by default:
+      # CI installs the same way, so it checks what developers get.
+      - run: npm ci --ignore-scripts
       - run: npx vsce package --no-dependencies --pre-release -o sovran.vsix
       - run: npx vsce ls --no-dependencies
       - uses: actions/upload-artifact@v4
