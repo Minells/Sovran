@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { AgentSettings } from '../core/agent/agentRunner';
 import type { ApprovalMode } from '../core/permissions/policy';
 import type { Logger } from '../core/ports';
+import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_OUTPUT_TOKENS } from '../core/providers/limits';
 import type { ProviderConfig } from '../core/providers/types';
 import type { SettingKey, SettingUpdate, SettingsView } from '../shared/protocol';
 
@@ -134,8 +135,8 @@ export function readSettings(): HostSettings {
         maxToolResultChars: Math.min(200_000, Math.max(2000, setting('context.maxToolResultChars', 20_000))),
         protectedPaths,
       },
-      defaultContextWindow: 32_768,
-      defaultMaxOutputTokens: 4096,
+      defaultContextWindow: DEFAULT_CONTEXT_WINDOW,
+      defaultMaxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
     },
     includeActiveEditor: setting('context.includeActiveEditor', true),
     projectInstructions: setting('context.projectInstructions', true),

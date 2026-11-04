@@ -324,6 +324,26 @@ describe('sync with Settings', () => {
     expect(() => updateConfigText('providers: [\n', [])).toThrow(/syntax errors/);
   });
 
+  it('removes a limit the user cleared in the panel, keeping the rest of the entry', () => {
+    const file = [
+      'providers:',
+      '  - id: gw # company gateway',
+      '    baseUrl: https://gw/v1',
+      '    models:',
+      '      - id: glm-5.3-flash',
+      '        contextWindow: 131072',
+      '        maxOutputTokens: 8192',
+      '',
+    ].join('\n');
+    const out = updateConfigText(file, [
+      p({ id: 'gw', baseUrl: 'https://gw/v1', models: [{ id: 'glm-5.3-flash', maxOutputTokens: 8192 }] }),
+    ]);
+    expect(out).toContain('# company gateway');
+    expect(out).not.toContain('contextWindow');
+    const r = parseConfigFile(out);
+    expect(r.ok && r.config.providers[0]!.models).toEqual([{ id: 'glm-5.3-flash', maxOutputTokens: 8192 }]);
+  });
+
   it('is stable: writing the same providers again changes nothing', () => {
     const settings = [p({ id: 'a', models: [{ id: 'm' }] })];
     const once = updateConfigText(configFileTemplate(), settings);

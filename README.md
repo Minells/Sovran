@@ -207,10 +207,22 @@ curl -sS https://your-gateway.example/v1/chat/completions -H "Authorization: Bea
 
 | Field | Meaning |
 |---|---|
-| `contextWindow` | Tokens the model accepts. Sovran never guesses; the default is 32 768 |
-| `maxOutputTokens` | Reserved for the reply (default 4 096) |
+| `contextWindow` | Tokens the model accepts (prompt and reply). When unset, Sovran uses what the server reports, else 32 768 |
+| `maxOutputTokens` | Tokens kept for the reply, also sent as `max_tokens`. When unset, 4 096 are kept (less if the server's cap or a quarter of the window is smaller) and `max_tokens` is not sent |
 | `toolMode` | `auto` (detect, the default), `native`, `prompted` or `none` |
 | `temperature` | Sent only when set |
+
+Both limits can be set per model in **Manage providers** (the *Context* and *Max output* fields), in `config.yaml` or in
+`sovran.providers`; a value you set always wins. An empty field shows what Sovran will use and where it comes from
+(*server* or *default*), and **Settings → Models** shows the limits of the selected model.
+
+**Limits reported by the server.** Sovran reads them when it tests a connection, discovers models, starts, or sees a new
+provider: vLLM and SGLang `max_model_len`, OpenRouter `context_length` and `max_completion_tokens`, `context_window`,
+LM Studio's `max_context_length`, and LiteLLM's `/model/info`. Ollama and llama.cpp are not read on purpose: they report
+the context the model was trained with, not the one it runs with (Ollama's `num_ctx`), and trusting that would overflow
+the real window. A server's maximum output is used as a ceiling, not as the reserve: reserving 32K tokens for every reply
+would take them from the conversation. For models that always reason (GLM, DeepSeek-R1), set `maxOutputTokens`
+generously, since the reasoning shares that budget.
 
 ## Configuration file (`config.yaml`)
 
@@ -283,8 +295,10 @@ How the sync works:
 - **Never from a repository.** The file lives in your home folder, not in the workspace, so a cloned repository cannot
   ship one (the same reason `sovran.providers` is user scope only). `sovran.configFile.enabled` turns the file off.
 
-Changes saved in VS Code apply immediately. If you edit the file with another program and the folder did not exist
-when VS Code started, use **Reload** in Settings.
+Changes saved in VS Code apply immediately; changes saved with another program (or through a symbolic link) within
+about two seconds, since Sovran also checks the file's date and size besides watching it. A file event for content that
+is already in sync changes nothing, and a hand edit is never overwritten: if the file and Settings change at the same
+moment, the file wins and Sovran says so.
 
 ## Settings
 

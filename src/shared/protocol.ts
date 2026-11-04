@@ -15,7 +15,12 @@ export type View = 'chat' | 'history' | 'providers' | 'settings';
 export interface ModelView {
   id: string;
   name?: string;
+  /** Set by the user; empty means the server's value or the default. */
   contextWindow?: number;
+  /** Set by the user: reserved for the reply and sent as max_tokens. */
+  maxOutputTokens?: number;
+  /** What the server reports for the model, when it does. */
+  serverLimits?: { contextWindow?: number; maxOutputTokens?: number };
   toolMode: ToolMode;
   /** What Sovran learned at runtime (e.g. downgraded to prompted tools). */
   learnedToolMode?: 'native' | 'prompted';
@@ -253,6 +258,7 @@ export const providerInputSchema = z.object({
       z.object({
         id: z.string().trim().min(1).max(200),
         contextWindow: z.number().int().min(1024).max(10_000_000).optional(),
+        maxOutputTokens: z.number().int().min(64).max(1_000_000).optional(),
         toolMode: z.enum(['auto', 'native', 'prompted', 'none']).optional(),
       }),
     )

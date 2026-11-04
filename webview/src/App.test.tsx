@@ -853,6 +853,54 @@ describe('settings view', () => {
   });
 });
 
+describe('model limits', () => {
+  const withLimits = (models: AppState['providers'][number]['models']) =>
+    baseState({
+      view: 'providers',
+      providers: [{ id: 'gw', name: 'Gateway', baseUrl: 'https://gw.example/v1', authType: 'bearer', hasKey: true, models }],
+      selected: { providerId: 'gw', modelId: models[0]!.id },
+    });
+
+  it('shows what an empty limit means, and saves typed and cleared limits', async () => {
+    mount(
+      withLimits([
+        { id: 'glm-5.3-flash', toolMode: 'auto', serverLimits: { contextWindow: 131072, maxOutputTokens: 32768 } },
+        { id: 'local', toolMode: 'auto', contextWindow: 16384 },
+      ]),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Edit Gateway' }));
+    const glmCtx = screen.getByLabelText('Context window for glm-5.3-flash');
+    expect(glmCtx).toHaveAttribute('placeholder', '131072');
+    expect(glmCtx.closest('label')).toHaveTextContent('Context · server');
+    expect(screen.getByLabelText('Max output tokens for glm-5.3-flash')).toHaveAttribute('placeholder', '4096');
+    expect(screen.getByLabelText('Max output tokens for glm-5.3-flash').closest('label')).toHaveTextContent('Max output · default');
+    expect(screen.getByLabelText('Max output tokens for local')).toHaveAttribute('placeholder', '4096');
+    // A value typed by the user needs no source.
+    expect(screen.getByLabelText('Context window for local').closest('label')!.querySelector('span')).toHaveTextContent(/^Context$/);
+    expect(screen.getByLabelText('Context window for local')).toHaveValue('16384');
+
+    await userEvent.type(screen.getByLabelText('Max output tokens for glm-5.3-flash'), '8192');
+    await userEvent.clear(screen.getByLabelText('Context window for local'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save provider' }));
+    const save = sent.find((m) => m.type === 'saveProvider') as Extract<WebviewMessage, { type: 'saveProvider' }>;
+    expect(save.provider.models).toEqual([
+      { id: 'glm-5.3-flash', contextWindow: undefined, maxOutputTokens: 8192, toolMode: 'auto' },
+      { id: 'local', contextWindow: undefined, maxOutputTokens: undefined, toolMode: 'auto' },
+    ]);
+  });
+
+  it('lowers the default reply reserve for a small window', async () => {
+    mount(withLimits([{ id: 'small', toolMode: 'auto', serverLimits: { contextWindow: 8192 } }]));
+    await userEvent.click(screen.getByRole('button', { name: 'Edit Gateway' }));
+    expect(screen.getByLabelText('Max output tokens for small')).toHaveAttribute('placeholder', '2048');
+  });
+
+  it('tells in Settings which limits the selected model uses and where they come from', () => {
+    mount({ ...withLimits([{ id: 'glm-5.3-flash', toolMode: 'auto', serverLimits: { contextWindow: 131072 } }]), view: 'settings' });
+    expect(screen.getAllByTestId('model-limits')[0]).toHaveTextContent('Context 131,072 tokens (reported by the server) · 4,096 kept for the reply (default)');
+  });
+});
+
 describe('providers and the configuration file', () => {
   const twoProviders: AppState['providers'] = [
     { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }] },

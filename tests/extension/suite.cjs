@@ -126,14 +126,22 @@ exports.run = async function run() {
     };
     const local = (id) => ({ id, name: id, baseUrl: 'http://127.0.0.1:9/v1', auth: { type: 'none' }, models: [{ id: 'm' }] });
 
-    // The file wins when it is saved: Settings follow.
-    fs.writeFileSync(file, 'providers:\n  # my note\n  - id: lab\n    baseUrl: http://127.0.0.1:9/v1\n    auth: none\n    models: [m]\n');
-    await until(() => ids() === 'lab', `Settings did not follow the file (Settings: "${ids()}")`);
+    // The file wins when it is saved: Settings follow. Wait for something only this content has (the previous test
+    // already left a provider "lab" in Settings, so waiting for the id alone would not wait at all).
+    const name = () => (cfg().get('providers') ?? []).find((p) => p.id === 'lab')?.name;
+    fs.writeFileSync(file, 'providers:\n  # my note\n  - id: lab\n    name: Lab One\n    baseUrl: http://127.0.0.1:9/v1\n    auth: none\n    models: [m]\n');
+    await until(() => ids() === 'lab' && name() === 'Lab One', `Settings did not follow the file (Settings: "${ids()}", name "${name()}")`);
 
     // Settings change (the panel writes sovran.providers): the file follows and keeps its comments.
     await cfg().update('providers', [...cfg().get('providers'), local('extra')], G);
     await until(() => /id: extra/.test(text()), 'the file did not follow Settings');
     assert.ok(text().includes('# my note'), 'the comment in the file was lost');
+
+    // A repeated event for content already in sync (macOS can deliver late ones, Reload re-reads) changes nothing:
+    // Settings keep the provider added above.
+    fs.utimesSync(file, new Date(), new Date());
+    await sleep(1000);
+    assert.strictEqual(ids(), 'extra,lab', `a repeated file event undid a Settings change (Settings: "${ids()}")`);
 
     // Stop using the file: edits to it no longer reach Settings.
     await cfg().update('configFile.enabled', false, G);

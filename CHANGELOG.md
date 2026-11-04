@@ -6,6 +6,8 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- **Model limits from the server.** When a model has no `contextWindow`, Sovran uses the window the server reports (vLLM/SGLang `max_model_len`, OpenRouter, LiteLLM `/model/info` and other common fields), else 32 768. A reported maximum output caps the reply reserve. Limits are read when testing a connection, discovering models, at start-up and for new providers.
+- **Context window and max output per model in the panel**, next to the tool mode; empty fields show the value and its source (*server* or *default*), and Settings shows the limits of the selected model. Both were already available in `config.yaml` and settings.
 - **`config.yaml` and Settings stay in sync both ways.** Saving the file updates Settings; changing providers in the panel (or the model you pick) updates the file, keeping its comments and formatting. A new file starts with the providers you already have. **Stop using config.yaml…** goes back to Settings only, keeping the file (ignored, `sovran.configFile.enabled`) or moving it to the trash; **Use config.yaml again** joins both sides. Sovran never writes into a file with problems or unsaved editor changes.
 - **Clear authentication errors.** A 401/403 now says what the request carried (no key stored, the key as `Authorization: Bearer`, or the key in a custom header). Keys pasted with a `Bearer ` prefix, an `Authorization:` header name or quotes are cleaned up. The connection test checks chat directly when a gateway refuses `/models` to the key.
 - **Configuration file `~/.sovran/config.yaml`** as an alternative to the panel: describe providers and models in YAML (same fields as `sovran.providers`, plus shorthands such as `auth: none` and plain model ids) and save. Sovran applies the file at once, connects to new or changed providers and asks for missing keys. Problems are underlined in the editor with fix hints, and the last valid version stays in use. Optional `defaultModel`, `planModel` and `titleModel` select models when the file changes. Open it from **Settings → Models**, the guided setup, the providers page or `Sovran: Open Model Config File`.
@@ -34,6 +36,12 @@ pre-releases and even minor versions are stable releases.
 - Allow-listed commands that trip a guardrail now ask (for example `git push` when `git` is allowed).
 - `sovran.terminal.mirrorToTerminal` is user-scope only, so a workspace cannot hide the command mirror.
 - Agent commands no longer inherit `ELECTRON_RUN_AS_NODE` from the extension host.
+
+### Fixed
+- `config.yaml` saved with another program is applied within about two seconds on every system: file watching misses or delays changes to a file outside the workspace that no editor has open (Linux, macOS), so Sovran also checks the file's date and size.
+- A repeated or late file event, Sovran's own write or Reload no longer undoes a provider just changed in Settings: the sync now decides by content whether the file changed. If both change at the same moment, the file's hand edit wins and Sovran says so.
+- Emptying a limit in the provider form now removes it (it used to keep the old value).
+- Learning that a model needs prompted tools no longer drops what else Sovran learned about it.
 
 ### Changed
 - The sidebar shows **Sovran** instead of *Sovran: Agent*: the view is named like its container, which VS Code then shows once. `Sovran: Focus Agent` is now `Sovran: Focus Panel`.
