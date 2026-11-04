@@ -84,7 +84,7 @@
         {
           "type": "webview",
           "id": "sovran.chat",
-          "name": "Agent",
+          "name": "Sovran",
           "icon": "media/brand/sovran-activitybar.svg"
         }
       ]
@@ -142,7 +142,7 @@
       },
       {
         "command": "sovran.focus",
-        "title": "Focus Agent",
+        "title": "Focus Panel",
         "category": "Sovran"
       },
       {
