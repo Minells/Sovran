@@ -10,6 +10,7 @@ import { CommandLoader, FileIndex } from './workspaceServices';
 import { readSettings } from './config';
 import { ConfigFileHost } from './configFileHost';
 import { SovranController } from './SovranController';
+import { SovranPanels } from './SovranPanels';
 import { SovranViewProvider } from './SovranViewProvider';
 import { MementoCapabilityStore, ProviderSecrets, SovranStatusBar, createLogger } from './services';
 
@@ -32,8 +33,8 @@ export async function activate(context: vscode.ExtensionContext) {
   const testConfigFile = context.extensionMode === vscode.ExtensionMode.Test ? process.env.SOVRAN_TEST_CONFIG_FILE : undefined;
   const configFile = new ConfigFileHost(context.globalState, testConfigFile || undefined);
 
-  // The view provider needs the controller and the controller needs to reveal the view.
-  const ref: { view?: SovranViewProvider } = {};
+  // The view provider and the editor tabs need the controller, and the controller needs to reveal and open them.
+  const ref: { view?: SovranViewProvider; panels?: SovranPanels } = {};
   const reveal = async () => ref.view?.reveal();
 
   const controller = new SovranController({
@@ -50,10 +51,14 @@ export async function activate(context: vscode.ExtensionContext) {
     commandLoader,
     configFile,
     reveal,
+    openPanel: async (sessionId) => ref.panels?.open(sessionId),
   });
   await controller.init();
   const viewProvider = new SovranViewProvider(context.extensionUri, controller, logger);
   ref.view = viewProvider;
+  // Registers the serializer, so chat tabs from the last session are restored with their chat.
+  const panels = new SovranPanels(context.extensionUri, controller, logger);
+  ref.panels = panels;
 
   const command = (id: string, fn: (...args: unknown[]) => unknown) => vscode.commands.registerCommand(id, fn);
   context.subscriptions.push(
@@ -65,12 +70,18 @@ export async function activate(context: vscode.ExtensionContext) {
     configFile,
     statusBar,
     controller,
+    panels,
     vscode.window.registerWebviewViewProvider(SovranViewProvider.viewId, viewProvider),
-    command('sovran.focus', reveal),
+    command('sovran.focus', () => controller.focus()),
     command('sovran.newSession', async () => {
       await reveal();
       controller.newSession();
     }),
+    command('sovran.newChatInEditor', () => controller.openInEditor()),
+    command('sovran.openInEditor', () => controller.moveSidebarToEditor()),
+    // Editor title buttons pass the diff's URI; the command palette and the keybinding pass nothing.
+    command('sovran.acceptProposal', (uri) => controller.decideProposal(true, uri)),
+    command('sovran.rejectProposal', (uri) => controller.decideProposal(false, uri)),
     command('sovran.showHistory', async () => {
       controller.showView('history');
       await reveal();
@@ -89,16 +100,12 @@ export async function activate(context: vscode.ExtensionContext) {
     command('sovran.setApiKey', () => controller.promptApiKey()),
     command('sovran.toggleMode', () => controller.toggleMode()),
     command('sovran.attachFiles', async () => {
-      await reveal();
+      await controller.focus();
       await controller.attachFiles();
     }),
-    command('sovran.askAboutSelection', async () => {
-      await reveal();
-      await controller.handle({ type: 'setIncludeEditor', value: true });
-      controller.focusComposer();
-    }),
+    command('sovran.askAboutSelection', () => controller.askAboutSelection()),
     command('sovran.cancelRun', () => controller.cancel()),
-    command('sovran.compact', () => controller.handle({ type: 'compact' })),
+    command('sovran.compact', () => controller.compactNow()),
     command('sovran.showLogs', () => logger.show()),
   );
   logger.info(`Sovran activated (VS Code ${vscode.version}).`);

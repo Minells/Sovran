@@ -6,6 +6,10 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- **Chats in editor tabs.** **Open Chat in Editor** (the arrow icon in the view title) moves the view's chat into an editor tab and starts a new chat in the view; **New Chat in Editor** opens more. Chat tabs open beside your code and stay together in one group, are titled after the chat, and come back with the same chat after a restart. Each chat runs on its own, so chats in different tabs work **in parallel**. The view's chat list shows which chats are working, waiting for approval or open in a tab; selecting one focuses its tab, and each item can be opened in a tab.
+- **Approval bar above the chat.** A pending action is decided in a bar between the header and the conversation that never scrolls away, with **Reject** and **Apply / Run / Allow** on the right. <kbd>Enter</kbd> approves and <kbd>Esc</kbd> rejects, from the empty chat input or anywhere in the chat; text being typed, menus and focused buttons keep their keys, and Enter only counts once the bar has been on screen for 0.4 s. The bar also holds *Reject with feedback…*, *Always allow…* and *Apply future edits in this chat without asking*; commands, warnings and the reason Auto mode still asks are shown there in full.
+- **Apply and Reject on the proposal's diff editor**, and <kbd>Ctrl+Enter</kbd> (<kbd>Cmd+Enter</kbd>) there to apply. Also `Sovran: Apply Proposed Change` and `Sovran: Reject Proposed Change`.
+- **Readable diffs in the chat:** line numbers, long lines wrapped instead of scrolled sideways, the first 80 lines with *Show N more lines*, and *Open diff editor*.
 - **Model limits from the server.** When a model has no `contextWindow`, Sovran uses the window the server reports (vLLM/SGLang `max_model_len`, OpenRouter, LiteLLM `/model/info` and other common fields), else 32 768. A reported maximum output caps the reply reserve. Limits are read when testing a connection, discovering models, at start-up and for new providers.
 - **Context window and max output per model in the panel**, next to the tool mode; empty fields show the value and its source (*server* or *default*), and Settings shows the limits of the selected model. Both were already available in `config.yaml` and settings.
 - **`config.yaml` and Settings stay in sync both ways.** Saving the file updates Settings; changing providers in the panel (or the model you pick) updates the file, keeping its comments and formatting. A new file starts with the providers you already have. **Stop using config.yaml…** goes back to Settings only, keeping the file (ignored, `sovran.configFile.enabled`) or moving it to the trash; **Use config.yaml again** joins both sides. Sovran never writes into a file with problems or unsaved editor changes.
@@ -23,6 +27,12 @@ pre-releases and even minor versions are stable releases.
 - **Sovran Settings** in the panel, opened from the gear in the view title: Act and Plan models, providers, approval mode for this window and for new windows, allowed commands, protected files, limits and context options.
 - **Guided setup** in three steps (choose, connect, model): Sovran saves the provider, asks for a key when needed, tests the connection and offers the models the server reports.
 - The status bar shows `auto-edit` or `auto` when Act mode runs unattended.
+
+### Fixed
+- Scrolling the chat while Sovran streams or waits for approval: the conversation no longer animates every streamed chunk (which fought the mouse wheel), and diffs no longer have their own scroll area that caught the wheel. A new proposal that is taller than the view is shown from its start.
+- The approval buttons can no longer end up below a long diff or be folded away with the tool row.
+- <kbd>Esc</kbd> in the empty chat input rejects a pending action instead of stopping the whole run (the Stop button still stops it).
+- A removed line that starts with `-- ` (an SQL or Lua comment) was hidden from diffs in the chat.
 
 ### Security
 - Dependency install scripts are denied in `allowScripts` (none is needed: esbuild, vsce-sign, ttf2woff2, es5-ext), which silences npm 12's warning, and CI installs with `--ignore-scripts` to check the same setup.

@@ -44,6 +44,11 @@
   --sv-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
+/* A chat in an editor tab sits on the editor's background, like any other editor. */
+body[data-surface='panel'] {
+  --sv-bg: var(--vscode-editor-background, var(--vscode-sideBar-background));
+}
+
 * {
   box-sizing: border-box;
 }
@@ -94,6 +99,10 @@ a {
 
 .sv-tabular {
   font-variant-numeric: tabular-nums;
+}
+
+.sv-nowrap {
+  white-space: nowrap;
 }
 
 /* ---------------------------------------------------------------- shell */
@@ -245,7 +254,16 @@ a {
   display: flex;
   flex-direction: column;
   gap: var(--sv-s4);
-  scroll-behavior: smooth;
+  /*
+   * No `scroll-behavior: smooth` here: following the stream sets scrollTop on every chunk, and a smooth scroll would
+   * animate each one, restart constantly and fight the user's wheel. Deliberate jumps pass `behavior` themselves.
+   */
+  scroll-padding-top: var(--sv-s2);
+}
+
+.sv-transcript:focus-visible {
+  outline: 1px solid var(--sv-focus);
+  outline-offset: -1px;
 }
 
 .sv-user {
@@ -575,6 +593,11 @@ a {
   background: var(--sv-hover);
 }
 
+/* A pending approval cannot be folded away. */
+.sv-tool__row:disabled {
+  cursor: default;
+}
+
 .sv-tool__row[aria-expanded='false'] .sv-tool__chevron {
   transform: rotate(-90deg);
 }
@@ -670,10 +693,11 @@ a {
   color: var(--sv-muted);
 }
 
+/*
+ * Diffs have no scroll area of their own: the chat scrolls, so the wheel never gets stuck inside a diff, and long lines
+ * wrap (keeping their indentation) instead of scrolling sideways in a narrow view.
+ */
 .sv-diff {
-  margin: 0;
-  max-height: 320px;
-  overflow: auto;
   font-family: var(--sv-mono);
   font-size: var(--sv-text-xs);
   line-height: 1.5;
@@ -682,31 +706,220 @@ a {
   padding: var(--sv-s1) 0;
 }
 
-.sv-diff span {
-  display: block;
-  padding: 0 var(--sv-s2);
-  white-space: pre;
+.sv-diff__row {
+  display: grid;
+  grid-template-columns: minmax(3ch, auto) 1.5ch minmax(0, 1fr);
+  column-gap: var(--sv-s1);
+  padding-right: var(--sv-s2);
 }
 
-.sv-diff .add {
+.sv-diff__no {
+  padding-left: var(--sv-s2);
+  text-align: right;
+  color: var(--sv-muted);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+}
+
+.sv-diff__sign {
+  user-select: none;
+  color: var(--sv-muted);
+}
+
+.sv-diff__text {
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+.sv-diff__row[data-kind='add'] {
   background: color-mix(in srgb, var(--sv-added) 16%, transparent);
 }
 
-.sv-diff .del {
+.sv-diff__row[data-kind='add'] .sv-diff__sign {
+  color: var(--sv-added);
+}
+
+.sv-diff__row[data-kind='del'] {
   background: color-mix(in srgb, var(--sv-removed) 16%, transparent);
 }
 
-.sv-diff .hunk {
+.sv-diff__row[data-kind='del'] .sv-diff__sign {
+  color: var(--sv-removed);
+}
+
+.sv-diff__row[data-kind='hunk'],
+.sv-diff__row[data-kind='note'] {
   color: var(--sv-muted);
+}
+
+.sv-diff__row[data-kind='hunk']:not(:first-child) {
+  margin-top: var(--sv-s1);
+  border-top: 1px dashed var(--sv-border);
+  padding-top: 2px;
+}
+
+.sv-diff__more {
+  display: block;
+  margin: var(--sv-s1) var(--sv-s2) 0;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--sv-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+.sv-diff__more:hover {
+  text-decoration: underline;
 }
 
 /* ---------------------------------------------------------------- approval */
 
+/*
+ * The decision bar: between the header and the chat, so it never scrolls away. Only the accent edge marks it; the
+ * buttons sit on the right and wrap under the summary when the view is narrow.
+ */
+.sv-approval-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-s2);
+  padding: var(--sv-s2) var(--sv-s3);
+  border-bottom: 1px solid var(--sv-border);
+  box-shadow: inset 2px 0 0 var(--sv-accent);
+  background: var(--sv-surface);
+  max-height: 45vh;
+  overflow-y: auto;
+  animation: sv-enter 160ms var(--sv-ease);
+}
+
+.sv-approval-bar__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sv-s1) var(--sv-s2);
+}
+
+.sv-approval-bar__icon {
+  color: var(--sv-accent);
+}
+
+/* Sized by its content: when the summary and the buttons do not fit on one line, the buttons wrap (still on the right)
+   instead of squeezing the path until it breaks mid-name. */
+.sv-approval-bar__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--sv-s2);
+}
+
+.sv-approval-bar__title {
+  font-weight: 600;
+}
+
+.sv-approval-bar__target,
+.sv-approval-bar__path {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sv-s2);
+  min-width: 0;
+  max-width: 100%;
+  font-size: var(--sv-text-sm);
+}
+
+.sv-approval-bar__target {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sv-approval-bar__target code,
+.sv-approval-bar__path {
+  font-family: var(--sv-mono);
+  overflow-wrap: anywhere;
+}
+
+.sv-approval-bar__target:hover code {
+  text-decoration: underline;
+}
+
+.sv-approval-bar__stats {
+  font-size: var(--sv-text-xs);
+  white-space: nowrap;
+}
+
+.sv-plus {
+  color: var(--sv-added);
+}
+
+.sv-minus {
+  color: var(--sv-removed);
+}
+
+.sv-approval-bar__actions {
+  display: flex;
+  gap: var(--sv-s2);
+  margin-left: auto;
+}
+
+.sv-approval-bar .sv-btn kbd {
+  margin-left: 2px;
+  border-color: currentColor;
+  opacity: 0.7;
+}
+
+.sv-approval-bar__options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sv-s1) var(--sv-s3);
+  font-size: var(--sv-text-sm);
+}
+
+.sv-approval-bar__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-s2);
+}
+
+.sv-approval-bar__form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sv-s2);
+}
+
+.sv-approval-bar__form-actions .sv-hint-text {
+  margin-right: auto;
+}
+
+.sv-link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--sv-link);
+  font: inherit;
+  cursor: pointer;
+}
+
+.sv-link-btn:hover {
+  text-decoration: underline;
+}
+
+/* The proposal inside the transcript: what is being decided, marked with the same accent edge as the bar. */
 .sv-approval {
   margin: var(--sv-s1) 0 var(--sv-s2);
-  padding: var(--sv-s3);
+  padding: var(--sv-s2) var(--sv-s3);
   border: 1px solid var(--sv-border);
   border-radius: var(--sv-radius-lg);
+  box-shadow: inset 2px 0 0 var(--sv-accent);
   background: var(--sv-surface);
   display: flex;
   flex-direction: column;
@@ -714,14 +927,13 @@ a {
   animation: sv-enter 160ms var(--sv-ease);
 }
 
-.sv-approval__title {
+.sv-approval__hint {
+  margin: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--sv-s2);
-  font-weight: 600;
-}
-
-.sv-approval__title .codicon {
+  gap: 4px;
+  font-size: var(--sv-text-xs);
   color: var(--sv-muted);
 }
 
@@ -738,8 +950,17 @@ a {
 }
 
 .sv-approval__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
   color: var(--sv-muted);
   font-size: var(--sv-text-xs);
+}
+
+.sv-approval-bar .sv-approval__command {
+  max-height: 9em;
+  overflow-y: auto;
 }
 
 .sv-approval__warnings {
@@ -1172,9 +1393,33 @@ kbd {
 }
 
 .sv-history-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--sv-s2);
   font-size: var(--sv-text-xs);
   color: var(--sv-muted);
   font-variant-numeric: tabular-nums;
+}
+
+.sv-history-item__status {
+  display: inline-flex;
+  gap: var(--sv-s2);
+}
+
+.sv-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--sv-fg);
+}
+
+.sv-live .codicon {
+  font-size: 12px;
+}
+
+.sv-live[data-tone='attention'] {
+  font-weight: 600;
 }
 
 .sv-history-item__actions {
@@ -1488,6 +1733,7 @@ kbd {
 /* High-contrast themes: rely on contrast borders rather than tinted fills. */
 body.vscode-high-contrast .sv-user,
 body.vscode-high-contrast .sv-approval,
+body.vscode-high-contrast .sv-approval-bar,
 body.vscode-high-contrast .sv-notice,
 body.vscode-high-contrast .sv-code {
   border: 1px solid var(--vscode-contrastBorder);
@@ -1689,6 +1935,18 @@ body.vscode-high-contrast .sv-code {
   width: 100%;
   max-width: 780px;
   margin-inline: auto;
+}
+
+/* In an editor tab the input and the decision bar line up with the conversation column. */
+body[data-surface='panel'] .sv-composer,
+body[data-surface='panel'] .sv-approval-bar > * {
+  width: 100%;
+  max-width: calc(780px + 2 * var(--sv-s3));
+  margin-inline: auto;
+}
+
+body[data-surface='panel'] .sv-approval-bar > * {
+  max-width: 780px;
 }
 
 .sv-transcript-wrap {

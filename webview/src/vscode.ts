@@ -47,6 +47,8 @@ export interface UiPersistedState {
   draft?: string;
   /** The Settings area last shown, so Settings reopens where the user left it. */
   settingsArea?: string;
+  /** The chat shown, so an editor tab is restored with it after a restart (the host checks it exists). */
+  sessionId?: string;
 }
 
 export function getUiState(): UiPersistedState {

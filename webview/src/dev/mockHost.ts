@@ -10,6 +10,8 @@ import { onPost } from '../vscode';
 const params = new URLSearchParams(location.search);
 const theme = params.get('theme') === 'light' ? 'light' : 'dark';
 const scenario = params.get('scenario') ?? 'conversation';
+/** `?surface=panel` previews a chat in an editor tab (full width, editor background). */
+const surface = params.get('surface') === 'panel' ? 'panel' : 'sidebar';
 
 const THEMES: Record<string, Record<string, string>> = {
   dark: {
@@ -18,6 +20,7 @@ const THEMES: Record<string, Record<string, string>> = {
     'editor-font-family': 'Menlo, Monaco, Consolas, "DejaVu Sans Mono", monospace',
     'editor-font-size': '12px',
     'sideBar-background': '#181818',
+    'editor-background': '#1f1f1f',
     foreground: '#cccccc',
     descriptionForeground: '#9d9d9d',
     'widget-border': '#313131',
@@ -60,6 +63,7 @@ const THEMES: Record<string, Record<string, string>> = {
     'editor-font-family': 'Menlo, Monaco, Consolas, "DejaVu Sans Mono", monospace',
     'editor-font-size': '12px',
     'sideBar-background': '#f8f8f8',
+    'editor-background': '#ffffff',
     foreground: '#3b3b3b',
     descriptionForeground: '#717171',
     'widget-border': '#e5e5e5',
@@ -101,9 +105,11 @@ const THEMES: Record<string, Record<string, string>> = {
 const style = document.createElement('style');
 style.textContent = `:root{${Object.entries(THEMES[theme]!)
   .map(([k, v]) => `--vscode-${k.replace(/\./g, '-')}:${v}`)
-  .join(';')}} body{max-width:${params.get('width') ?? '420'}px;height:100vh;border-right:1px solid var(--vscode-panel-border)}`;
+  .join(';')}} body{max-width:${surface === 'panel' ? 'none' : `${params.get('width') ?? '420'}px`};height:100vh;border-right:1px solid var(--vscode-panel-border)}`;
 document.head.appendChild(style);
 document.body.classList.add(theme === 'light' ? 'vscode-light' : 'vscode-dark');
+// The host sets this on <body> (see webviewHtml).
+document.body.dataset.surface = surface;
 
 const now = Date.now();
 const providers: AppState['providers'] = [
@@ -260,12 +266,39 @@ const doneConversation: SessionMessage[] = [
   },
 ];
 
+/** `?scenario=bigdiff`: a proposal longer than the view, as real edits usually are. */
+const bigDiff = [
+  '===================================================================',
+  '--- a/src/auth/session.ts\t',
+  '+++ b/src/auth/session.ts\t',
+  '@@ -1,40 +1,52 @@',
+  " import { randomUUID } from 'node:crypto';",
+  " import type { User } from '../users';",
+  '+import { readDuration } from "../config/env";',
+  ' ',
+  '-const TTL = 3600;',
+  "+/** Session lifetime in seconds. Override with SESSION_TTL (for example 900 for 15 minutes, or '2h' in duration notation). */",
+  "+const TTL = readDuration(process.env.SESSION_TTL, { fallback: 3600, min: 60, max: 86_400 * 30 });",
+  ' ',
+  ...Array.from({ length: 24 }, (_, i) => ` export function helper${i}(session: Session): boolean { return session.expiresAt > Date.now() + ${i} * 1000; }`),
+  '-export function isExpired(s: Session) {',
+  '-  return s.expiresAt < Date.now();',
+  '+export function isExpired(s: Session, now = Date.now()) {',
+  '+  // A session that expires within the clock skew allowance counts as expired, so clients refresh early.',
+  '+  return s.expiresAt - CLOCK_SKEW_MS < now;',
+  ' }',
+  '-- old SQL-style comment kept as text',
+  ...Array.from({ length: 30 }, (_, i) => `+export const LIMIT_${i} = ${i * 10};`),
+].join('\n');
+
 const diff = `--- a/src/auth/session.ts\n+++ b/src/auth/session.ts\n@@ -1,7 +1,7 @@\n import { randomUUID } from 'node:crypto';\n import type { User } from '../users';\n \n-const TTL = 3600;\n+const TTL = Number(process.env.SESSION_TTL ?? 3600);\n \n export interface Session {\n   id: string;`;
 
 function baseState(): AppState {
-  const messages = scenario === 'conversation' ? conversation : scenario === 'auto' ? autoConversation : scenario === 'done' ? doneConversation : [];
+  const messages = scenario === 'conversation' || scenario === 'bigdiff' ? conversation : scenario === 'auto' ? autoConversation : scenario === 'done' ? doneConversation : [];
+  const awaitingEdit = scenario === 'conversation' || scenario === 'bigdiff';
   const approvalParam = (['ask', 'edits', 'auto'] as const).find((m) => m === params.get('approval')) ?? 'ask';
   return {
+    surface,
     view: scenario === 'providers' ? 'providers' : scenario === 'history' ? 'history' : scenario === 'settings' ? 'settings' : 'chat',
     workspace: { name: 'acme-api', trusted: true, hasFolder: true },
     providers: scenario === 'onboarding' ? [] : providers,
@@ -278,16 +311,37 @@ function baseState(): AppState {
       { id: 's3', title: 'Plan the migration to Postgres 17', createdAt: now - 86_400_000 * 1.2, updatedAt: now - 86_400_000 * 1.2, messageCount: 11 },
       { id: 's4', title: 'Add tests for the billing webhooks', createdAt: now - 86_400_000 * 4, updatedAt: now - 86_400_000 * 4, messageCount: 9 },
     ],
+    liveSessions:
+      scenario === 'history'
+        ? [
+            { id: 's1', inEditor: true, running: true, needsApproval: true },
+            { id: 's2', inEditor: true, running: true, needsApproval: false },
+            { id: 's3', inEditor: true, running: false, needsApproval: false },
+          ]
+        : awaitingEdit
+          ? [{ id: 's1', inEditor: surface === 'panel', running: true, needsApproval: true }]
+          : [],
     session: { id: messages.length ? 's1' : 'draft', title: messages.length ? 'Make the session TTL configurable' : 'New chat', messages },
     run:
-      scenario === 'conversation'
+      awaitingEdit
         ? { sessionId: 's1', iteration: 3, maxIterations: 25, startedAt: now - 58_000, activity: { phase: 'awaiting_approval', label: 'src/auth/session.ts', toolName: 'edit_file', callId: 't3' } }
         : scenario === 'auto'
           ? { sessionId: 's1', iteration: 4, maxIterations: 25, startedAt: now - 41_000, activity: { phase: 'awaiting_approval', label: 'git push origin main', toolName: 'execute_terminal', callId: 'x3' } }
           : null,
     approvals:
-      scenario === 'conversation'
-        ? [{ id: 'ap1', callId: 't3', toolName: 'edit_file', title: 'src/auth/session.ts', detail: { kind: 'edit', path: 'src/auth/session.ts', isNew: false, diff, added: 1, removed: 1 } }]
+      awaitingEdit
+        ? [
+            {
+              id: 'ap1',
+              callId: 't3',
+              toolName: 'edit_file',
+              title: 'src/auth/session.ts',
+              detail:
+                scenario === 'bigdiff'
+                  ? { kind: 'edit', path: 'src/auth/session.ts', isNew: false, diff: bigDiff, added: 36, removed: 4 }
+                  : { kind: 'edit', path: 'src/auth/session.ts', isNew: false, diff, added: 1, removed: 1 },
+            },
+          ]
         : scenario === 'auto'
           ? [
               {

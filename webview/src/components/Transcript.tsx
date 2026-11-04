@@ -1,12 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import type { ApprovalView, AssistantMessageView, RunViewT, ToolCallView, ToolMessageView } from './types';
 import type { SessionMessage } from '../../../src/shared/protocol';
-import { hasShellMetacharacters } from '../../../src/core/permissions/shell';
-import { approvalOption } from '../lib/approvals';
 import { renderMarkdown } from '../lib/markdown';
 import { toolInfo, toolTarget } from '../lib/format';
 import { post } from '../vscode';
 import { useStore } from '../state/store';
+import { ApprovalDetail, approvalAnchor } from './Approval';
+import { DiffView } from './Diff';
 import { Button, Icon, IconButton, Mark } from './primitives';
 
 // ------------------------------------------------------------------------------------- markdown
@@ -51,214 +51,6 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return <div className="sv-md" onClick={onClick} dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
-// ------------------------------------------------------------------------------------- diff
-
-export function DiffView({ diff, maxLines = 400 }: { diff: string; maxLines?: number }) {
-  const lines = diff.split('\n').filter((l) => !l.startsWith('--- ') && !l.startsWith('+++ '));
-  const shown = lines.slice(0, maxLines);
-  return (
-    <pre className="sv-diff" aria-label="Proposed changes">
-      {shown.map((l, i) => (
-        <span
-          key={i}
-          className={
-            l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : l.startsWith('@@') ? 'hunk' : undefined
-          }
-        >
-          {l || ' '}
-        </span>
-      ))}
-      {lines.length > maxLines ? <span className="hunk">… {lines.length - maxLines} more lines</span> : null}
-    </pre>
-  );
-}
-
-// ------------------------------------------------------------------------------------- approval
-
-const HIDDEN =
-  // eslint-disable-next-line no-control-regex -- invisible/control characters are exactly what this detects
-  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g;
-/** Makes invisible and direction-changing characters visible so the approved text is the text that runs. */
-export const revealHidden = (s: string) =>
-  s.replace(HIDDEN, (c) => `⟨U+${c.charCodeAt(0).toString(16).toUpperCase().padStart(4, '0')}⟩`);
-
-/** Mirrors the host's allow-list rule: the entry, or the entry followed by arguments. The host re-checks it. */
-const coversCommand = (entry: string, command: string) => {
-  const e = entry.trim().replace(/\s+/g, ' ');
-  const c = command.trim().replace(/\s+/g, ' ');
-  return e.length > 0 && (c === e || c.startsWith(`${e} `));
-};
-
-export function ApprovalCard({ approval }: { approval: ApprovalView }) {
-  const { app } = useStore();
-  const [rejecting, setRejecting] = useState(false);
-  const [feedback, setFeedback] = useState('');
-  const [grant, setGrant] = useState(false);
-  const d = approval.detail;
-  const [allowEntry, setAllowEntry] = useState<string | null>(null);
-  const allowError =
-    allowEntry === null || d.kind !== 'command'
-      ? ''
-      : !allowEntry.trim()
-        ? 'Enter the start of the command to allow.'
-        : hasShellMetacharacters(allowEntry)
-          ? 'Shell operators cannot be allowed.'
-          : !coversCommand(allowEntry, d.command)
-            ? 'The entry must be the start of this command.'
-            : '';
-  const respond = (approved: boolean, allowCommand?: string) =>
-    post({
-      type: 'approval',
-      id: approval.id,
-      approved,
-      grant: approved && grant && d.kind === 'edit' ? 'session-edits' : undefined,
-      feedback: !approved && feedback.trim() ? feedback.trim() : undefined,
-      ...(allowCommand ? { allowCommand } : {}),
-    });
-  // In an unattended mode the card explains why this action still needs a human, without repeating a warning
-  // that is already listed below.
-  const paused = app.approvalMode !== 'ask' && !!approval.reason;
-  const reasonListed = d.kind === 'command' && !!approval.reason && d.warnings.includes(approval.reason);
-
-  const title =
-    d.kind === 'edit'
-      ? d.isNew
-        ? 'Create this file?'
-        : 'Apply these changes?'
-      : d.kind === 'command'
-        ? 'Run this command?'
-        : 'Allow reading a protected file?';
-  const icon =
-    d.kind === 'command' ? 'terminal' : d.kind === 'edit' ? 'git-pull-request-go-to-changes' : 'shield';
-
-  return (
-    <section className="sv-approval" aria-label={title}>
-      <div className="sv-approval__title">
-        <Icon name={icon} />
-        <span>{title}</span>
-      </div>
-      {paused ? (
-        <div className="sv-approval__paused" role="note">
-          <Icon name="shield" />
-          <span>
-            {approvalOption(app.approvalMode).label} mode still asks here
-            {reasonListed ? ', for the reason below.' : `: ${approval.reason}`}
-          </span>
-        </div>
-      ) : null}
-      {d.kind === 'command' ? (
-        <>
-          <pre className="sv-approval__command">{revealHidden(d.command)}</pre>
-          <div className="sv-approval__meta">{d.cwd === '.' ? 'in the workspace folder' : `in ${d.cwd}`}</div>
-          {d.warnings.length ? (
-            <ul className="sv-approval__warnings">
-              {d.warnings.map((w) => (
-                <li key={w}>{w}</li>
-              ))}
-            </ul>
-          ) : null}
-        </>
-      ) : d.kind === 'edit' ? (
-        <>
-          <div className="sv-approval__meta">
-            <code>{d.path}</code> ·{' '}
-            <span className="sv-tabular">
-              +{d.added} −{d.removed}
-            </span>
-          </div>
-          <DiffView diff={d.diff} maxLines={60} />
-        </>
-      ) : (
-        <div className="sv-approval__meta">
-          <code>{d.path}</code> · {d.reason}
-        </div>
-      )}
-      {rejecting ? (
-        <textarea
-          className="sv-approval__feedback"
-          placeholder="Tell Sovran what to do instead (optional)"
-          aria-label="Feedback for the agent"
-          value={feedback}
-          autoFocus
-          onChange={(e) => setFeedback(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) respond(false);
-          }}
-        />
-      ) : null}
-      {allowEntry !== null && d.kind === 'command' ? (
-        <div className="sv-allow">
-          <label className="sv-allow__label" htmlFor={`allow-${approval.id}`}>
-            Always run commands that start with:
-          </label>
-          <input
-            id={`allow-${approval.id}`}
-            className="sv-allow__input"
-            value={allowEntry}
-            spellCheck={false}
-            autoFocus
-            aria-invalid={!!allowError}
-            onChange={(e) => setAllowEntry(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !allowError) respond(true, allowEntry.trim());
-              if (e.key === 'Escape') setAllowEntry(null);
-            }}
-          />
-          <span className={allowError ? 'sv-field__error' : 'sv-field__help'}>
-            {allowError || 'Saved to your allowed commands. Risky commands and shell operators still ask.'}
-          </span>
-        </div>
-      ) : null}
-      <div className="sv-approval__actions">
-        {rejecting ? (
-          <>
-            <Button variant="primary" onClick={() => respond(false)}>
-              Send rejection
-            </Button>
-            <Button variant="ghost" onClick={() => setRejecting(false)}>
-              Back
-            </Button>
-          </>
-        ) : allowEntry !== null ? (
-          <>
-            <Button variant="primary" icon="check" disabled={!!allowError} onClick={() => respond(true, allowEntry.trim())}>
-              Run and always allow
-            </Button>
-            <Button variant="ghost" onClick={() => setAllowEntry(null)}>
-              Back
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button variant="primary" icon="check" onClick={() => respond(true)}>
-              {d.kind === 'command' ? 'Run' : d.kind === 'edit' ? 'Apply' : 'Allow'}
-            </Button>
-            {d.kind === 'edit' ? (
-              <Button icon="diff" onClick={() => post({ type: 'openApprovalDiff', id: approval.id })}>
-                Review diff
-              </Button>
-            ) : null}
-            {d.kind === 'command' && d.allowPrefix ? (
-              <Button title={`Run now and stop asking for "${d.allowPrefix}" commands`} onClick={() => setAllowEntry(d.allowPrefix)}>
-                Always allow…
-              </Button>
-            ) : null}
-            <Button variant="ghost" onClick={() => setRejecting(true)}>
-              Reject…
-            </Button>
-          </>
-        )}
-      </div>
-      {d.kind === 'edit' && !rejecting && app.approvalMode === 'ask' ? (
-        <label className="sv-check">
-          <input type="checkbox" checked={grant} onChange={(e) => setGrant(e.target.checked)} />
-          Apply future edits in this chat without asking
-        </label>
-      ) : null}
-    </section>
-  );
-}
-
 // ------------------------------------------------------------------------------------- tool row
 
 type RowStatus = 'queued' | 'awaiting' | 'running' | 'success' | 'error' | 'denied' | 'cancelled';
@@ -297,8 +89,8 @@ export function ToolRow({
           ? 'queued'
           : 'cancelled';
   const [open, setOpen] = useState<boolean | null>(null);
-  const expanded =
-    open ?? (status === 'awaiting' || (status === 'running' && call.name === 'execute_terminal'));
+  // A pending approval always shows its detail: the bar above links to it, so it must not be folded away.
+  const expanded = status === 'awaiting' || (open ?? (status === 'running' && call.name === 'execute_terminal'));
   const target = toolTarget(call.name, call.arguments) || result?.summary || '';
   const display = result?.display;
   const verb = status === 'running' || status === 'awaiting' || status === 'queued' ? info.doing : info.done;
@@ -328,6 +120,7 @@ export function ToolRow({
         type="button"
         className="sv-tool__row"
         aria-expanded={expanded}
+        disabled={status === 'awaiting'}
         onClick={() => setOpen(!expanded)}
       >
         <Icon
@@ -348,7 +141,7 @@ export function ToolRow({
       </button>
       {expanded ? (
         <div className="sv-tool__detail">
-          {approval ? <ApprovalCard approval={approval} /> : null}
+          {approval ? <ApprovalDetail approval={approval} /> : null}
           {!approval && status === 'running' && output ? <pre className="sv-output">{output}</pre> : null}
           {result ? <ToolResultDetail result={result} /> : null}
           {!result && !approval && status !== 'running' ? (
@@ -365,7 +158,7 @@ function ToolResultDetail({ result }: { result: ToolMessageView }) {
   if (d?.kind === 'diff') {
     return (
       <>
-        <DiffView diff={d.diff} />
+        <DiffView diff={d.diff} label={`Changes to ${d.path}`} />
         <Button variant="ghost" icon="go-to-file" onClick={() => post({ type: 'openFile', path: d.path })}>
           Open {d.path}
         </Button>
@@ -791,21 +584,36 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
   // Remounted per session (keyed by the parent), so these start pinned to the bottom.
   const [pinned, setPinned] = useState(true);
 
+  // Follows new content while the user is at the bottom. Instantly: CSS smooth scrolling would animate every streamed
+  // chunk, keep restarting, and fight the user's own scrolling.
   useLayoutEffect(() => {
     const el = ref.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   });
 
+  // A new approval while following: a detail taller than the view is shown from its start (a diff reads top-down), and
+  // following stops so the view stays there. The scroll event that follows updates `pinned`.
+  const approvalId = app.approvals[0]?.id;
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const detail = approvalId ? document.getElementById(approvalAnchor(approvalId)) : null;
+    if (!el || !detail || !stick.current) return;
+    const row = detail.closest('.sv-tool') ?? detail;
+    const top = row.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 8;
+    if (top < el.scrollHeight - el.clientHeight) {
+      el.scrollTop = Math.max(0, top);
+      stick.current = false;
+    }
+  }, [approvalId]);
+
+  const reduceMotion = () => !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   const jumpToLatest = () => {
     const el = ref.current;
     if (!el) return;
-    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    el.scrollTo({ top: el.scrollHeight, behavior: reduce ? 'auto' : 'smooth' });
+    el.scrollTo({ top: el.scrollHeight, behavior: reduceMotion() ? 'auto' : 'smooth' });
     stick.current = true;
     setPinned(true);
   };
-  const needsApproval = app.approvals.length > 0;
-
   const modelOf = (b: Extract<Block, { kind: 'turn' }>) => b.messages.find((m) => m.model)?.model?.modelId;
   const running = !!run;
 
@@ -814,6 +622,9 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
       <div
         className="sv-transcript"
         ref={ref}
+        // Focusable, so the arrow and Page keys scroll it; Enter and Escape still answer a pending approval.
+        tabIndex={0}
+        aria-label="Conversation"
         onScroll={(e) => {
           const el = e.currentTarget;
           const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
@@ -850,10 +661,11 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
           );
         })}
       </div>
-      {!pinned ? (
-        <button type="button" className="sv-jump" data-attention={needsApproval} onClick={jumpToLatest}>
+      {/* While a decision waits, nothing new arrives and the bar links to the proposal, so no jump button covers it. */}
+      {!pinned && !approvalId ? (
+        <button type="button" className="sv-jump" onClick={jumpToLatest}>
           <Icon name="arrow-down" />
-          {needsApproval ? 'Approval needed' : 'Latest'}
+          Latest
         </button>
       ) : null}
     </div>

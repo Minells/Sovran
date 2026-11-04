@@ -157,6 +157,19 @@ export interface SlashCommandView {
   source: 'builtin' | 'workspace';
 }
 
+/** Where a webview runs: the Activity Bar view, or a chat opened as an editor tab. */
+export type SurfaceKind = 'sidebar' | 'panel';
+
+/** A chat that is open in an editor tab or has a run in progress, for the chat list. */
+export interface LiveSessionView {
+  id: string;
+  /** Shown in an editor tab (opening it from the list focuses that tab). */
+  inEditor: boolean;
+  running: boolean;
+  /** Waiting for the user to approve or reject an action. */
+  needsApproval: boolean;
+}
+
 /** User-scope settings edited from the Settings view. Effective values; see `overriddenByWorkspace`. */
 export interface SettingsView {
   /** Approval mode a new window starts in (`sovran.approvals.mode`). */
@@ -180,6 +193,8 @@ export interface SettingsView {
 }
 
 export interface AppState {
+  /** The webview this state is for. A chat in an editor tab only shows chats; lists and settings live in the view. */
+  surface: SurfaceKind;
   view: View;
   workspace: { name: string | null; trusted: boolean; hasFolder: boolean };
   providers: ProviderView[];
@@ -192,6 +207,8 @@ export interface AppState {
   /** How much Act mode may do without asking, for this window. */
   approvalMode: ApprovalMode;
   sessions: SessionSummary[];
+  /** Chats open in editor tabs or running, in any webview. */
+  liveSessions: LiveSessionView[];
   session: CurrentSessionView | null;
   run: RunView | null;
   approvals: ApprovalView[];
@@ -314,6 +331,10 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('openApprovalDiff'), id }),
   z.object({ type: z.literal('newSession') }),
   z.object({ type: z.literal('openSession'), id }),
+  /** Opens a chat in an editor tab (focusing the tab when it is already open there). */
+  z.object({ type: z.literal('openSessionInEditor'), id }),
+  /** The webview received keyboard focus: commands such as "Ask Sovran About Selection" target the last one used. */
+  z.object({ type: z.literal('focused') }),
   z.object({ type: z.literal('renameSession'), id, title: z.string().trim().min(1).max(120) }),
   z.object({ type: z.literal('deleteSession'), id }),
   z.object({ type: z.literal('setMode'), mode: z.enum(['plan', 'act']) }),
