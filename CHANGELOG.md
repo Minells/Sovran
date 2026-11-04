@@ -34,6 +34,7 @@ pre-releases and even minor versions are stable releases.
 - Agent commands no longer inherit `ELECTRON_RUN_AS_NODE` from the extension host.
 
 ### Changed
+- Build: the Vite and Vitest configs are ESM (`.mts`), which removes Vite's `configLoader` warning without making the CommonJS extension bundle an ES module. The webview bundle has a 650 kB size budget instead of Vite's 500 kB default for network-loaded pages: it is read from local disk, and the budget still warns about accidental heavy imports.
 - **Settings areas are tabs.** *Models*, *Approvals*, *Agent*, *Context* and *Data* stay at the top; the selected area is larger and highlighted, and only its settings are shown. Arrow keys, Home and End move between areas, and Settings reopens on the last area. In narrow sidebars the other areas shrink to their icon.
 - **Retry** under the last response is now a quiet icon that appears on hover or keyboard focus, next to Copy. Errors keep their visible Retry button.
 - `@` with nothing typed yet suggests the active editor and open tabs first.
