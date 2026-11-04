@@ -27,7 +27,10 @@ export async function activate(context: vscode.ExtensionContext) {
   logger.info(ripgrep ? 'Using VS Code ripgrep for search.' : 'ripgrep not found; using built-in search.');
   const fileIndex = new FileIndex();
   const commandLoader = new CommandLoader();
-  const configFile = new ConfigFileHost(context.globalState);
+  // Smoke tests point the config file at a temporary folder. Only in test mode: normal runs always use
+  // ~/.sovran/config.yaml, so nothing in the environment can move it (for example into a repository).
+  const testConfigFile = context.extensionMode === vscode.ExtensionMode.Test ? process.env.SOVRAN_TEST_CONFIG_FILE : undefined;
+  const configFile = new ConfigFileHost(context.globalState, testConfigFile || undefined);
 
   // The view provider needs the controller and the controller needs to reveal the view.
   const ref: { view?: SovranViewProvider } = {};

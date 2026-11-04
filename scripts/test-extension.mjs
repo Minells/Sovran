@@ -6,14 +6,16 @@ import { fileURLToPath } from 'node:url';
 import { join, resolve } from 'node:path';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
-// A throwaway home folder, so the config file tests never read or write the developer's ~/.sovran.
-const home = mkdtempSync(join(tmpdir(), 'sovran-home-'));
+// A throwaway config file, so the tests never read or write the developer's ~/.sovran. HOME itself must not change:
+// the environment applies to the whole VS Code process, and on macOS a HOME without a login keychain blocks VS Code
+// at start-up on a system dialog nobody can answer in CI.
+const configFile = join(mkdtempSync(join(tmpdir(), 'sovran-test-')), '.sovran', 'config.yaml');
 try {
   await runTests({
     extensionDevelopmentPath: root,
     extensionTestsPath: resolve(root, 'tests/extension/suite.cjs'),
     launchArgs: [resolve(root, 'tests/fixtures/workspace'), '--disable-extensions'],
-    extensionTestsEnv: { HOME: home, USERPROFILE: home },
+    extensionTestsEnv: { SOVRAN_TEST_CONFIG_FILE: configFile },
   });
 } catch (e) {
   console.error('Extension tests failed:', e);

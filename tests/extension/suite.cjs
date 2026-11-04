@@ -64,12 +64,11 @@ exports.run = async function run() {
     }
   });
   await test('config.yaml problems show in the editor and clear once the file is fixed', async () => {
-    const os = require('node:os');
     const fs = require('node:fs');
-    const path = require('node:path');
-    // scripts/test-extension.mjs points HOME at a temporary folder.
-    assert.ok(os.homedir().includes('sovran-home-'), `refusing to touch a real home folder: ${os.homedir()}`);
-    const uri = vscode.Uri.file(path.join(os.homedir(), '.sovran', 'config.yaml'));
+    // scripts/test-extension.mjs points the config file at a temporary folder (honoured only in test mode).
+    const file = process.env.SOVRAN_TEST_CONFIG_FILE ?? '';
+    assert.ok(file.includes('sovran-test-'), `refusing to touch a real config file: "${file}"`);
+    const uri = vscode.Uri.file(file);
     const BAD = 'providers:\n  - id: lab\n    base_url: http://localhost:8000/v1\n';
     const GOOD = 'providers:\n  - id: lab\n    baseUrl: http://localhost:8000/v1\n    auth: none\n    models: [m]\n';
     const diagnostics = () => vscode.languages.getDiagnostics(uri);
