@@ -58,6 +58,22 @@ The README screenshots are generated from this harness.
 - Security-relevant settings must be `application`-scoped and read with `userSetting()` in `src/extension/config.ts`.
 - New tools declare a `risk` (`read`/`write`/`execute`). Write and execute tools must implement `prepare()` so the user sees exactly what will happen before approving.
 
+## Dependency overrides
+
+`package.json` pins two transitive **development** dependencies with `overrides` (nothing here ships in the VSIX;
+`npm audit --omit=dev` is clean without them):
+
+| Override | Why | Used by | Remove when |
+|---|---|---|---|
+| `minimatch` → `^11.0.4` | [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249): denial of service through glob pattern amplification, fixed only in 11.0.1+ | ESLint, typescript-eslint, `@vscode/vsce`, `glob` | ESLint, typescript-eslint and vsce accept `^11` |
+| `glob` → `^14.0.3` | [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4): traversal continues after an `AbortSignal` cancels it, fixed only in 14.0.2+. Also removes the `glob@10`/`glob@11` deprecation warnings | fantasticon, svgicons2svgfont, cacache (node-gyp for `ttf2woff2`) | fantasticon and its dependencies accept `^14` |
+
+Both are major versions above what those packages declare, so a change to an override is checked against the tools'
+real behaviour, not only `npm audit`: `npx vsce ls` lists the same files, ESLint lints the same files with the same
+results, `npm run build:icons` produces a byte-identical `media/brand/sovran-icons.woff`, and `npm run check` passes.
+Never use `npm audit fix --force` here: it "fixes" these by downgrading ESLint, typescript-eslint and fantasticon by
+several majors.
+
 ## Manual compatibility matrix (M5)
 
 Record the results in `docs/IMPLEMENTATION_STATUS.md`:
