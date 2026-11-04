@@ -35,6 +35,10 @@
   --sv-accent: var(--sovran-accent, #ff5a36);
   --sv-on-accent: var(--sovran-on-accent, #0f1012);
   --sv-accent-hover: var(--sovran-accent-hover, #e0502f);
+  /* VS Code's own primary button: the decision in the approval bar looks like every other confirmation in VS Code. */
+  --sv-button-bg: var(--vscode-button-background, #0078d4);
+  --sv-button-fg: var(--vscode-button-foreground, #ffffff);
+  --sv-button-hover: var(--vscode-button-hoverBackground, #026ec1);
   --sv-warn: var(--vscode-editorWarning-foreground, #cca700);
   --sv-ok: var(--vscode-testing-iconPassed, #73c991);
   --sv-err: var(--vscode-errorForeground, #f48771);
@@ -258,7 +262,8 @@ a {
    * No `scroll-behavior: smooth` here: following the stream sets scrollTop on every chunk, and a smooth scroll would
    * animate each one, restart constantly and fight the user's wheel. Deliberate jumps pass `behavior` themselves.
    */
-  scroll-padding-top: var(--sv-s2);
+  /* Room for the pinned message (two lines), so a revealed proposal or diff is not hidden under it. */
+  scroll-padding-top: 72px;
 }
 
 .sv-transcript:focus-visible {
@@ -779,20 +784,32 @@ a {
 /* ---------------------------------------------------------------- approval */
 
 /*
- * The decision bar: between the header and the chat, so it never scrolls away. Only the accent edge marks it; the
- * buttons sit on the right and wrap under the summary when the view is narrow.
+ * The decision bar: a quiet card right above the chat input, outside the scrolling conversation, so it never scrolls
+ * away. Neutral surface and border, no brand colour: the primary button is VS Code's own. The buttons sit on the right
+ * and wrap under the summary when the view is narrow.
  */
 .sv-approval-bar {
   display: flex;
   flex-direction: column;
   gap: var(--sv-s2);
+  margin: var(--sv-s2) var(--sv-s3) 0;
   padding: var(--sv-s2) var(--sv-s3);
-  border-bottom: 1px solid var(--sv-border);
-  box-shadow: inset 2px 0 0 var(--sv-accent);
+  border: 1px solid var(--sv-border);
+  border-radius: var(--sv-radius-lg);
   background: var(--sv-surface);
   max-height: 45vh;
   overflow-y: auto;
   animation: sv-enter 160ms var(--sv-ease);
+}
+
+.sv-approval-bar .sv-btn--primary {
+  background: var(--sv-button-bg);
+  color: var(--sv-button-fg);
+  font-weight: 500;
+}
+
+.sv-approval-bar .sv-btn--primary:hover {
+  background: var(--sv-button-hover);
 }
 
 .sv-approval-bar__head {
@@ -803,7 +820,7 @@ a {
 }
 
 .sv-approval-bar__icon {
-  color: var(--sv-accent);
+  color: var(--sv-muted);
 }
 
 /* Sized by its content: when the summary and the buttons do not fit on one line, the buttons wrap (still on the right)
@@ -913,13 +930,12 @@ a {
   text-decoration: underline;
 }
 
-/* The proposal inside the transcript: what is being decided, marked with the same accent edge as the bar. */
+/* The proposal inside the transcript: what is being decided. */
 .sv-approval {
   margin: var(--sv-s1) 0 var(--sv-s2);
   padding: var(--sv-s2) var(--sv-s3);
   border: 1px solid var(--sv-border);
   border-radius: var(--sv-radius-lg);
-  box-shadow: inset 2px 0 0 var(--sv-accent);
   background: var(--sv-surface);
   display: flex;
   flex-direction: column;
@@ -1734,6 +1750,7 @@ kbd {
 body.vscode-high-contrast .sv-user,
 body.vscode-high-contrast .sv-approval,
 body.vscode-high-contrast .sv-approval-bar,
+body.vscode-high-contrast .sv-pin__card,
 body.vscode-high-contrast .sv-notice,
 body.vscode-high-contrast .sv-code {
   border: 1px solid var(--vscode-contrastBorder);
@@ -1938,15 +1955,16 @@ body.vscode-high-contrast .sv-code {
 }
 
 /* In an editor tab the input and the decision bar line up with the conversation column. */
-body[data-surface='panel'] .sv-composer,
-body[data-surface='panel'] .sv-approval-bar > * {
+body[data-surface='panel'] .sv-composer {
   width: 100%;
   max-width: calc(780px + 2 * var(--sv-s3));
   margin-inline: auto;
 }
 
-body[data-surface='panel'] .sv-approval-bar > * {
+body[data-surface='panel'] .sv-approval-bar {
+  width: calc(100% - 2 * var(--sv-s3));
   max-width: 780px;
+  margin-inline: auto;
 }
 
 .sv-transcript-wrap {
@@ -1955,6 +1973,49 @@ body[data-surface='panel'] .sv-approval-bar > * {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+
+/*
+ * Your message pinned at the top while its answer scrolls by. It sits where the message itself sat (same card, same
+ * inset), on the view's background so the conversation passes under it, and it stops short of the scrollbar.
+ */
+.sv-pin {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: var(--sv-s3);
+  z-index: 2;
+  padding: var(--sv-s2) 0 6px var(--sv-s3);
+  background: var(--sv-bg);
+  pointer-events: none;
+}
+
+.sv-pin__card {
+  display: block;
+  width: 100%;
+  max-width: 780px;
+  margin-inline: auto;
+  padding: var(--sv-s2) var(--sv-s3);
+  border: 0;
+  border-radius: var(--sv-radius-lg);
+  background: var(--sv-surface);
+  text-align: left;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.sv-pin__card:hover {
+  background: var(--sv-surface-strong);
+}
+
+.sv-pin__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .sv-jump {

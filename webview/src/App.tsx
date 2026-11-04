@@ -66,7 +66,6 @@ function ChatView() {
           <span>Restricted Mode: Sovran can read and plan, but cannot edit files or run commands until you trust this workspace.</span>
         </div>
       ) : null}
-      {approval ? <ApprovalBar key={approval.id} approval={approval} /> : null}
       <main className="sv-main">
         {messages.length ? (
           <Transcript key={app.session?.id} messages={messages} run={app.run} />
@@ -76,7 +75,9 @@ function ChatView() {
           </div>
         )}
         <Notices />
-        {app.run ? <RunStatus run={app.run} /> : null}
+        {/* A pending decision sits right above the input, where the eyes already are, and takes the place of the run
+            status ("Waiting for your approval" would only repeat it). */}
+        {approval ? <ApprovalBar key={approval.id} approval={approval} /> : app.run ? <RunStatus run={app.run} /> : null}
         {/* Hidden while the guided setup is on screen; an existing conversation always keeps its composer. */}
         {messages.length > 0 || !setup ? <Composer /> : null}
       </main>

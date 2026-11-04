@@ -118,7 +118,7 @@ describe('App', () => {
     expect(screen.queryByText(/LEAK/)).not.toBeInTheDocument();
   });
 
-  it('puts the decision above the chat, the diff inline, and sends the decision with a session grant', async () => {
+  it('puts the decision above the chat input, the diff inline, and sends the decision with a session grant', async () => {
     const messages: AppState['session'] = {
       id: 's',
       title: 't',
@@ -135,9 +135,10 @@ describe('App', () => {
       }),
     );
     const bar = screen.getByRole('region', { name: 'Apply these changes?' });
-    // Above the conversation, so it never scrolls away.
-    expect(bar.compareDocumentPosition(screen.getByLabelText('Conversation')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(screen.getByText('Waiting for your approval')).toBeInTheDocument();
+    // Outside the conversation (so it never scrolls away), right above the input; it replaces the run status line.
+    expect(bar.compareDocumentPosition(screen.getByLabelText('Conversation')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(bar.compareDocumentPosition(screen.getByLabelText('Message Sovran')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText('Waiting for your approval')).not.toBeInTheDocument();
     // The diff is read in the transcript, under the tool call; the decision is only in the bar.
     const diff = screen.getByRole('group', { name: 'Proposed changes' });
     expect(within(bar).queryByRole('group')).not.toBeInTheDocument();
@@ -1176,5 +1177,84 @@ describe('chats in editor tabs', () => {
     mount(baseState({ surface: 'panel', session: { id: 'chat-42', title: 'Panel chat', messages: [] } }));
     expect(getUiState().sessionId).toBe('chat-42');
     expect(document.querySelector('.sv-app')).toHaveAttribute('data-surface', 'panel');
+  });
+});
+
+describe('pinned message', () => {
+  const rect = (top: number, height = 40) => ({ top, bottom: top + height, left: 0, right: 300, width: 300, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  /** A scroll area whose top edge is at y = 100, holding your messages at the given tops. */
+  const layout = (tops: number[]) => {
+    const scroller = document.createElement('div');
+    scroller.getBoundingClientRect = () => rect(100, 500);
+    tops.forEach((top, i) => {
+      const el = document.createElement('div');
+      el.dataset.userMessage = `u${i}`;
+      el.getBoundingClientRect = () => rect(top);
+      scroller.appendChild(el);
+    });
+    return scroller;
+  };
+
+  it('pins the message whose answer is being read, and the next message pushes it out', async () => {
+    const { pickPinned } = await import('./components/StickyPrompt');
+    // At the top of the conversation the message is in view: nothing to pin.
+    expect(pickPinned(layout([112, 600]), 64)).toBeNull();
+    // Its top reached the top of the view: it sticks, like position: sticky.
+    expect(pickPinned(layout([108, 600]), 64)).toEqual({ id: 'u0', offset: 0 });
+    expect(pickPinned(layout([-300, 600]), 64)).toEqual({ id: 'u0', offset: 0 });
+    // The next message arrives under the pin and pushes it up (150 − (100 + 64 + 8)).
+    expect(pickPinned(layout([-300, 150]), 64)).toEqual({ id: 'u0', offset: -22 });
+    // Pushed out until only padding would show: gone. Then the next one takes over.
+    expect(pickPinned(layout([-300, 112]), 64)).toBeNull();
+    expect(pickPinned(layout([-300, 108]), 64)).toEqual({ id: 'u1', offset: 0 });
+    expect(pickPinned(layout([]), 64)).toBeNull();
+  });
+
+  it('shows your message above its answer while scrolling, and goes back to it when selected', async () => {
+    const long = 'Explain the retry logic and every place it is used, with the configuration that controls it';
+    mount(
+      baseState({
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            { role: 'user', id: 'u1', content: long, createdAt: 0 },
+            { role: 'assistant', id: 'a1', content: 'A long answer', createdAt: 0 },
+            { role: 'user', id: 'u2', content: 'Thanks', display: '/thanks', createdAt: 0 },
+          ],
+        },
+      }),
+    );
+    const conversation = screen.getByLabelText('Conversation');
+    const [first, second] = [...conversation.querySelectorAll<HTMLElement>('[data-user-message]')];
+    expect(first!.dataset.userMessage).toBe('u1');
+    conversation.getBoundingClientRect = () => rect(0, 500);
+    conversation.scrollTo = vi.fn() as never;
+    let tops = [20, 900];
+    first!.getBoundingClientRect = () => rect(tops[0]!);
+    second!.getBoundingClientRect = () => rect(tops[1]!);
+    const scroll = async () => {
+      await act(async () => {
+        fireEvent.scroll(conversation);
+        await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+      });
+    };
+    await scroll();
+    expect(screen.queryByRole('button', { name: /^Your message/ })).not.toBeInTheDocument();
+
+    tops = [-400, 300];
+    Object.defineProperty(conversation, 'scrollTop', { configurable: true, value: 1000 });
+    await scroll();
+    const pin = screen.getByRole('button', { name: `Your message: ${long}. Go to it` });
+    expect(pin).toHaveTextContent(long);
+    await userEvent.click(pin);
+    // Back to the message, a little below the pinning line so it is read whole and not pinned over itself.
+    // 1000 + (−400) − 0 − 12: the message lands 12 px below the top edge.
+    expect(conversation.scrollTo).toHaveBeenCalledWith({ top: 588, behavior: 'smooth' });
+
+    // The next exchange: its message (as typed) is pinned instead.
+    tops = [-1400, -600];
+    await scroll();
+    expect(screen.getByRole('button', { name: /^Your message: \/thanks/ })).toBeInTheDocument();
   });
 });

@@ -78,8 +78,8 @@ confirmation once per window, and new windows start in the mode set by `sovran.a
   <img src="media/screenshots/auto-mode-dark.png" width="320" alt="Auto mode: edits and tests ran without asking, a push still asks">
 </p>
 
-When Sovran needs you, a **bar above the chat** asks: it never scrolls away, and **Reject** and **Apply** (or **Run**,
-**Allow**) sit on its right. Press <kbd>Enter</kbd> to approve or <kbd>Esc</kbd> to reject, from the empty chat input or
+When Sovran needs you, a **bar right above the chat input** asks: it never scrolls away, and **Reject** and **Apply**
+(or **Run**, **Allow**) sit on its right. Press <kbd>Enter</kbd> to approve or <kbd>Esc</kbd> to reject, from the empty chat input or
 anywhere in the chat; text you are typing keeps its keys. The diff itself is in the conversation, with line numbers and
 wrapped lines, and the proposal's diff editor has **Apply** and **Reject** buttons too (<kbd>Ctrl+Enter</kbd> applies).
 **Always allow…** adds a command's prefix (for example `npm test`) to your allowed commands after showing you exactly
@@ -112,6 +112,8 @@ Errors tell you what went wrong and how to fix it.
 </p>
 
 **Conversations that persist.** Chats are saved per workspace and restored after restart, and you can search, rename or delete them.
+While you scroll, the message that started the answer you are reading stays pinned at the top, and the next message
+pushes it out, so you always see where each answer starts and ends. Select the pinned message to go back to it.
 
 **Chats in editor tabs, in parallel.** **Open Chat in Editor** (the arrow in the view title) moves the current chat into
 an editor tab, beside your code, and **New Chat in Editor** opens another. Each chat runs on its own, so you can let one

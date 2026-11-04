@@ -7,6 +7,7 @@ import { post } from '../vscode';
 import { useStore } from '../state/store';
 import { ApprovalDetail, approvalAnchor } from './Approval';
 import { DiffView } from './Diff';
+import { StickyPrompt } from './StickyPrompt';
 import { Button, Icon, IconButton, Mark } from './primitives';
 
 // ------------------------------------------------------------------------------------- markdown
@@ -415,7 +416,7 @@ function UserBlock({ message, canEdit }: { message: UserMessageView; canEdit: bo
   };
   if (draft !== null) {
     return (
-      <div className="sv-user sv-user--editing">
+      <div className="sv-user sv-user--editing" data-user-message={message.id}>
         <textarea
           className="sv-approval__feedback"
           aria-label="Edit message"
@@ -442,7 +443,7 @@ function UserBlock({ message, canEdit }: { message: UserMessageView; canEdit: bo
     );
   }
   return (
-    <div className="sv-user">
+    <div className="sv-user" data-user-message={message.id}>
       {message.attachments?.length ? (
         <div className="sv-user__context">
           {message.attachments.map((a) =>
@@ -575,6 +576,7 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const blocks = useMemo(() => groupBlocks(messages), [messages]);
+  const userMessages = useMemo(() => messages.filter((m): m is UserMessageView => m.role === 'user'), [messages]);
   const results = useMemo(
     () =>
       new Map(messages.filter((m): m is ToolMessageView => m.role === 'tool').map((m) => [m.toolCallId, m])),
@@ -599,7 +601,9 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
     const detail = approvalId ? document.getElementById(approvalAnchor(approvalId)) : null;
     if (!el || !detail || !stick.current) return;
     const row = detail.closest('.sv-tool') ?? detail;
-    const top = row.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - 8;
+    // Below the pinned message, which covers the top of the view (the transcript's scroll-padding-top).
+    const space = parseFloat(getComputedStyle(el).scrollPaddingTop) || 8;
+    const top = row.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop - space;
     if (top < el.scrollHeight - el.clientHeight) {
       el.scrollTop = Math.max(0, top);
       stick.current = false;
@@ -619,6 +623,7 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
 
   return (
     <div className="sv-transcript-wrap">
+      <StickyPrompt scrollerRef={ref} messages={userMessages} />
       <div
         className="sv-transcript"
         ref={ref}
