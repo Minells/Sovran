@@ -597,5 +597,11 @@
   "overrides": {
     "minimatch": "^11.0.4",
     "glob": "^14.0.3"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign": false,
+    "es5-ext": false,
+    "esbuild": false,
+    "ttf2woff2": false
   }
 }

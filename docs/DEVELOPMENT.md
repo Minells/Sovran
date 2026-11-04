@@ -58,6 +58,23 @@ The README screenshots are generated from this harness.
 - Security-relevant settings must be `application`-scoped and read with `userSetting()` in `src/extension/config.ts`.
 - New tools declare a `risk` (`read`/`write`/`execute`). Write and execute tools must implement `prepare()` so the user sees exactly what will happen before approving.
 
+## Dependency install scripts
+
+npm 12 blocks the install scripts of dependencies unless `allowScripts` in `package.json` approves them. Sovran needs
+none, so they are denied explicitly (which also silences npm's warning), and CI installs with `npm ci --ignore-scripts`
+so it checks the same setup:
+
+| Package | Script | Why it is not needed |
+|---|---|---|
+| `esbuild` | checks and optimizes the platform binary | the binary comes from esbuild's optional platform package |
+| `@vscode/vsce-sign` | copies the signing binary | used only to sign packages (`--sign-tool`), which the release does not do |
+| `ttf2woff2` (via fantasticon) | builds a native module with node-gyp | falls back to its WASM build; `npm run build:icons` gives a byte-identical font |
+| `es5-ext` (via fantasticon) | prints a message for Russian time zones | no function |
+
+When a new dependency brings an install script, npm lists it after `npm install`. Read the script, check whether the
+project works without it (`npm ci --ignore-scripts`, then `npm run check`, `npm run build`, `npx vsce package`), and
+record the decision with `npm install-scripts deny <pkg>` or `npm install-scripts approve <pkg>`.
+
 ## Dependency overrides
 
 `package.json` pins two transitive **development** dependencies with `overrides` (nothing here ships in the VSIX;
