@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useReducer, useState } from 'react';
 import type { HostMessage } from '../../src/shared/protocol';
+import { ApprovalBar, approvalCopy } from './components/Approval';
 import { Composer, RunStatus } from './components/Composer';
 import { EmptyState } from './components/Home';
 import { HistoryView, Notices, ProvidersView, useSetupActive } from './components/Panels';
@@ -7,7 +8,7 @@ import { Mark } from './components/primitives';
 import { SettingsView } from './components/Settings';
 import { Transcript } from './components/Transcript';
 import { StoreContext, initialUiState, reducer, useStore } from './state/store';
-import { post } from './vscode';
+import { post, setUiState } from './vscode';
 
 function SessionTitle() {
   const { app } = useStore();
@@ -51,6 +52,8 @@ function ChatView() {
   const { app } = useStore();
   const setup = useSetupActive();
   const messages = app.session?.messages ?? [];
+  // Tools run one at a time, so a chat waits for at most one decision; the first is the one to answer.
+  const approval = app.approvals[0];
   return (
     <>
       <header className="sv-header">
@@ -63,6 +66,7 @@ function ChatView() {
           <span>Restricted Mode: Sovran can read and plan, but cannot edit files or run commands until you trust this workspace.</span>
         </div>
       ) : null}
+      {approval ? <ApprovalBar key={approval.id} approval={approval} /> : null}
       <main className="sv-main">
         {messages.length ? (
           <Transcript key={app.session?.id} messages={messages} run={app.run} />
@@ -83,7 +87,14 @@ function ChatView() {
 function LiveAnnouncer() {
   const { app } = useStore();
   const phase = app.run?.activity.phase;
-  const text = !app.run ? '' : phase === 'awaiting_approval' ? 'Sovran is waiting for your approval.' : phase === 'running' ? `Sovran is ${app.run.activity.label}.` : 'Sovran is working.';
+  const approval = app.approvals[0];
+  const text = approval
+    ? `Sovran is waiting for your approval: ${approvalCopy(approval).title} Press Enter to ${approvalCopy(approval).verb.toLowerCase()} or Escape to reject.`
+    : !app.run
+      ? ''
+      : phase === 'running'
+        ? `Sovran is ${app.run.activity.label}.`
+        : 'Sovran is working.';
   return (
     <div className="sv-sr-only" aria-live="polite">
       {text}
@@ -94,7 +105,7 @@ function LiveAnnouncer() {
 function Shell() {
   const { app } = useStore();
   return (
-    <div className="sv-app" data-mode={app.mode} data-approval={app.mode === 'act' ? app.approvalMode : undefined}>
+    <div className="sv-app" data-surface={app.surface} data-mode={app.mode} data-approval={app.mode === 'act' ? app.approvalMode : undefined}>
       {app.view === 'history' ? <HistoryView /> : app.view === 'providers' ? <ProvidersView /> : app.view === 'settings' ? <SettingsView /> : <ChatView />}
       <LiveAnnouncer />
     </div>
@@ -108,10 +119,21 @@ export function App() {
       const data = e.data as HostMessage | undefined;
       if (data && typeof data === 'object' && typeof data.type === 'string') dispatch(data);
     };
+    // Commands such as "Ask Sovran About Selection" go to the Sovran webview the user worked in last.
+    const onFocus = () => post({ type: 'focused' });
     window.addEventListener('message', onMessage);
+    window.addEventListener('focus', onFocus);
     post({ type: 'ready' });
-    return () => window.removeEventListener('message', onMessage);
+    return () => {
+      window.removeEventListener('message', onMessage);
+      window.removeEventListener('focus', onFocus);
+    };
   }, []);
+  // Saved with the webview, so a chat in an editor tab comes back with the same chat after VS Code restarts.
+  const sessionId = state.app?.session?.id;
+  useEffect(() => {
+    if (sessionId) setUiState({ sessionId });
+  }, [sessionId]);
   const value = useMemo(() => (state.app ? { state, app: state.app, dispatch } : null), [state]);
   if (!value) return <div className="sv-app" aria-busy="true" />;
   return (

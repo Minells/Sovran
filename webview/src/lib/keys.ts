@@ -12,6 +12,9 @@ export interface Shortcut {
   label: string;
 }
 
+/** Label for a VS Code keybinding declared as ctrl+<key> (cmd+<key> on macOS). */
+export const modShortcut = (key: string) => (isMac() ? `⌘${key}` : `Ctrl+${key}`);
+
 /** Everything the composer and Sovran's global keybindings can do, for the shortcuts popover. */
 export function shortcutList(opts: { approvals: boolean }): Shortcut[] {
   const alt = altLabel();
@@ -21,7 +24,14 @@ export function shortcutList(opts: { approvals: boolean }): Shortcut[] {
     { keys: '@', label: 'Add a workspace file' },
     { keys: '/', label: 'Run a command' },
     { keys: `${alt}M`, label: 'Switch Plan / Act' },
-    ...(opts.approvals ? [{ keys: `${alt}A`, label: 'Change approvals' }] : []),
+    ...(opts.approvals
+      ? [
+          { keys: `${alt}A`, label: 'Change approvals' },
+          { keys: '↵', label: 'Approve what Sovran asks for (chat input empty)' },
+          { keys: 'Esc', label: 'Reject it' },
+          { keys: modShortcut('↵'), label: 'Apply a change from its diff editor' },
+        ]
+      : []),
     { keys: 'Esc', label: 'Stop Sovran while it works' },
     { keys: globalShortcut('Y'), label: 'Focus Sovran from anywhere' },
     { keys: globalShortcut('U'), label: 'Ask about the editor selection' },

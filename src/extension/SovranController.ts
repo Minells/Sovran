@@ -45,17 +45,19 @@ import type {
   EditorContextView,
   FileSuggestionView,
   HostMessage,
+  LiveSessionView,
   ProviderInput,
   ProviderTestResult,
   ProviderView,
   RunView,
   SelectedModel,
   SettingUpdate,
+  SurfaceKind,
   View,
   WebviewMessage,
 } from '../shared/protocol';
 import { endpointLocation } from '../shared/endpoints';
-import type { DiffPresenter } from './adapters/DiffPresenter';
+import { DiffPresenter } from './adapters/DiffPresenter';
 import { mergeSnapshots, type FsCheckpointRepository } from './adapters/FsCheckpointRepository';
 import type { CommandLoader, FileIndex } from './workspaceServices';
 import type { NodeProcessRunner } from './adapters/NodeProcessRunner';
@@ -115,10 +117,17 @@ export interface ControllerDeps {
   fileIndex: FileIndex;
   commandLoader: CommandLoader;
   configFile: ConfigFileHost;
+  /** Shows the Activity Bar view. */
   reveal: () => Promise<void>;
+  /**
+   * Opens an editor tab showing `sessionId` (a new chat when undefined), titled `title` from the start so the tab never
+   * shows a placeholder. It registers itself with `addPanel`.
+   */
+  openPanel?: (sessionId: string | undefined, title: string) => Promise<void>;
 }
 
 interface PendingApproval {
+  sessionId: string;
   view: ApprovalView;
   settle: (r: ApprovalResponse) => void;
   request: ApprovalRequest;
@@ -130,6 +139,38 @@ interface ActiveRun {
   view: RunView;
 }
 
+/** What the controller needs from an editor tab that shows a chat. */
+export interface PanelHost {
+  reveal(): void;
+  setTitle(title: string): void;
+  /** Whether the tab is the active editor (VS Code then reports no active text editor). */
+  readonly active: boolean;
+  /** Whether the tab is on screen (not behind another tab in its group). */
+  readonly visible: boolean;
+  readonly viewColumn: vscode.ViewColumn | undefined;
+}
+
+/**
+ * A webview that shows Sovran: the Activity Bar view ("sidebar") or a chat in an editor tab ("panel"). Each has its own
+ * chat, screen and composer context; providers, settings, modes and the chat list are shared by all of them.
+ */
+interface Surface {
+  readonly id: string;
+  readonly kind: SurfaceKind;
+  /** Undefined while the webview is not resolved (the view is collapsed, or a tab is restoring). */
+  post: ((m: HostMessage) => void) | undefined;
+  session: Session;
+  /** Panels always show the chat; lists and settings open in the sidebar. */
+  view: View;
+  attachments: Array<AttachmentView & { absolute: string }>;
+  includeEditor: boolean;
+  panel?: PanelHost;
+}
+
+const SIDEBAR = 'sidebar';
+/** Editor tab titles longer than this are shortened; the full title is in the chat header. */
+const MAX_TAB_TITLE = 40;
+
 const APPROVAL_LABEL: Record<ApprovalMode, string> = { ask: 'Ask', edits: 'Auto-edit', auto: 'Auto' };
 
 const newSession = (mode: AgentMode): Session => {
@@ -139,10 +180,13 @@ const newSession = (mode: AgentMode): Session => {
 
 /**
  * Host-side authority: owns sessions, runs, approvals and provider configuration, and projects
- * them to the webview as AppState snapshots plus incremental messages.
+ * them to the webviews (surfaces) as AppState snapshots plus incremental messages.
+ *
+ * Several surfaces can be open at once: the Activity Bar view and any number of chats in editor tabs. Each shows one
+ * chat; a chat is shown by at most one surface. Each chat can have its own run, so chats in different tabs work in
+ * parallel. Messages about a chat go to the surface that shows it; shared state goes to every surface.
  */
-export class SovranController implements ApprovalPort, vscode.Disposable {
-  private post: ((m: HostMessage) => void) | undefined;
+export class SovranController implements vscode.Disposable {
   private settings: HostSettings = readSettings();
   /** Providers in use: Settings' (which mirror the config file while it is synced). */
   private providers: ProviderConfig[] = [];
@@ -171,30 +215,46 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private approvalMode: ApprovalMode = 'ask';
   /** Whether the user confirmed the Auto-mode warning in this window. */
   private autoConfirmed = false;
-  private view: View = 'chat';
   private sessions: SessionSummary[] = [];
-  private session: Session = newSession('act');
   private readonly loaded = new Map<string, Session>();
-  private run: ActiveRun | null = null;
+  /** Chats deleted in this window: a run still winding down must not save them back. */
+  private readonly deleted = new Set<string>();
+  /** The Activity Bar view. It always exists; its webview comes and goes with the view. */
+  private readonly sidebar: Surface;
+  /** The sidebar first, then editor tabs in the order they were opened. */
+  private readonly surfaces = new Map<string, Surface>();
+  /** The surface the user worked in last: commands without a surface of their own (Ask About Selection) go there. */
+  private lastFocused: string = SIDEBAR;
+  /** Runs in progress, by session id. Each chat runs on its own, so chats in different tabs work in parallel. */
+  private readonly runs = new Map<string, ActiveRun>();
   private readonly approvals = new Map<string, PendingApproval>();
-  private attachments: Array<AttachmentView & { absolute: string }> = [];
-  private includeEditor = true;
   private editor: EditorContextView | null = null;
+  /** The last focused text editor: a chat in an editor tab is the active editor, but the code beside it still counts. */
+  private lastTextEditor: vscode.TextEditor | undefined;
   private readonly grants = new Map<string, SessionGrants>();
   private readonly registry = createBuiltinRegistry();
   private readonly deltas = new Map<string, Extract<HostMessage, { type: 'messageDelta' }>>();
   private readonly outputs = new Map<string, Extract<HostMessage, { type: 'toolOutput' }>>();
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
-  private persistTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Debounced saves, per session: chats running in parallel must not cancel each other's save. */
+  private readonly persistTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private editorTimer: ReturnType<typeof setTimeout> | undefined;
   private readonly disposables: vscode.Disposable[] = [];
 
-  constructor(private readonly deps: ControllerDeps) {}
+  constructor(private readonly deps: ControllerDeps) {
+    this.sidebar = this.createSurface(SIDEBAR, 'sidebar', newSession('act'));
+    this.surfaces.set(SIDEBAR, this.sidebar);
+    this.loaded.set(this.sidebar.session.id, this.sidebar.session);
+  }
+
+  private createSurface(id: string, kind: SurfaceKind, session: Session, panel?: PanelHost): Surface {
+    return { id, kind, post: undefined, session, view: 'chat', attachments: [], includeEditor: this.settings.includeActiveEditor, panel };
+  }
 
   // ------------------------------------------------------------------ lifecycle
 
   async init() {
-    this.includeEditor = this.settings.includeActiveEditor;
+    this.sidebar.includeEditor = this.settings.includeActiveEditor;
     this.approvalMode = this.settings.agent.policy.approvalMode;
     // Choosing Auto as the start-up default in settings is itself the informed choice.
     this.autoConfirmed = this.approvalMode === 'auto';
@@ -208,8 +268,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     this.titleModel = this.parseModelRef(readTitleModel());
     this.commands = await this.deps.commandLoader.load().catch(() => mergeCommands([]));
     if (!vscode.workspace.isTrusted) this.mode = 'plan';
-    this.session.mode = this.mode;
-    this.loaded.set(this.session.id, this.session);
+    this.sidebar.session.mode = this.mode;
     this.sessions = await this.deps.repo.list().catch(() => []);
     this.updateEditorContext();
     this.updateStatusBar();
@@ -245,52 +304,183 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
           planModel: this.planModel,
           titleModel: this.titleModel,
           settings: readSettingsView(this.settings),
-          context: this.contextView(),
         });
+        this.patchContexts();
       }),
     );
   }
 
+  // ------------------------------------------------------------------ surfaces
+
+  /** Connects the Activity Bar view's webview. */
   attach(post: (m: HostMessage) => void) {
-    this.post = post;
+    this.sidebar.post = post;
   }
 
   detach() {
-    this.post = undefined;
+    this.sidebar.post = undefined;
+  }
+
+  /**
+   * Registers an editor tab. It shows `sessionId` when that chat exists (a restored tab, or "Open in Editor"), else a
+   * new chat. A chat shown by another surface moves here, so every chat has one place. Call before the webview loads.
+   */
+  async addPanel(id: string, post: (m: HostMessage) => void, panel: PanelHost, sessionId?: string): Promise<void> {
+    const session = (sessionId && (await this.loadSession(sessionId))) || this.blankSession();
+    const surface = this.createSurface(id, 'panel', session, panel);
+    surface.post = post;
+    this.surfaces.set(id, surface);
+    this.lastFocused = id;
+    const previous = this.surfaceFor(session.id, surface);
+    if (previous) this.showSession(previous, this.blankSession());
+    panel.setTitle(this.tabTitle(session));
+    this.liveSessionsChanged();
+  }
+
+  /** The editor tab was closed. A run in its chat continues; if it needs approval, Sovran offers to reopen the chat. */
+  removePanel(id: string) {
+    const surface = this.surfaces.get(id);
+    if (!surface || surface.kind !== 'panel') return;
+    this.surfaces.delete(id);
+    if (this.lastFocused === id) this.lastFocused = SIDEBAR;
+    this.forget(surface.session);
+    this.liveSessionsChanged();
+  }
+
+  /** A surface received focus (its webview reported it, or its editor tab became active). */
+  surfaceFocused(id: string) {
+    if (this.surfaces.has(id)) this.lastFocused = id;
+  }
+
+  /** The surface that commands without one of their own act on: the last one used that still exists. */
+  private target(): Surface {
+    return this.surfaces.get(this.lastFocused) ?? this.sidebar;
+  }
+
+  /** The surface showing `sessionId`, other than `except`. */
+  private surfaceFor(sessionId: string, except?: Surface): Surface | undefined {
+    for (const s of this.surfaces.values()) if (s !== except && s.session.id === sessionId) return s;
+    return undefined;
+  }
+
+  private async revealSurface(s: Surface) {
+    if (s.panel) s.panel.reveal();
+    else await this.deps.reveal();
+  }
+
+  private blankSession(): Session {
+    const s = newSession(this.mode);
+    this.loaded.set(s.id, s);
+    return s;
+  }
+
+  private async loadSession(id: string): Promise<Session | undefined> {
+    const cached = this.loaded.get(id);
+    if (cached) return cached;
+    const stored = await this.deps.repo.load(id).catch(() => undefined);
+    if (!stored) return undefined;
+    const s = repairInterruptedSession(stored, Date.now());
+    this.loaded.set(id, s);
+    return s;
+  }
+
+  /** Drops an empty chat nobody shows any more from memory (it was never saved). */
+  private forget(session: Session) {
+    if (session.messages.length === 0 && !this.surfaceFor(session.id) && !this.runs.has(session.id)) this.loaded.delete(session.id);
+  }
+
+  /** Shows `session` in `surface` and sends the surface a full snapshot. */
+  private showSession(surface: Surface, session: Session) {
+    const previous = surface.session;
+    surface.session = session;
+    surface.view = 'chat';
+    if (previous !== session) this.forget(previous);
+    surface.panel?.setTitle(this.tabTitle(session));
+    this.sendState(surface);
+    this.liveSessionsChanged();
+  }
+
+  /**
+   * A full snapshot. Pending text deltas go out first: the snapshot already contains their text, and a delta arriving
+   * after it would add the text twice.
+   */
+  private sendState(surface: Surface) {
+    this.flush();
+    this.sendTo(surface, { type: 'state', state: this.snapshot(surface) });
+  }
+
+  private tabTitle(session: Session): string {
+    return this.titleForTab(session.title);
+  }
+
+  private titleForTab(t: string): string {
+    return t.length > MAX_TAB_TITLE ? `${t.slice(0, MAX_TAB_TITLE - 1).trimEnd()}…` : t;
+  }
+
+  /** Sends the chat's header (title and messages) to the surface showing it and renames its editor tab. */
+  private sessionChanged(session: Session) {
+    const surface = this.surfaceFor(session.id);
+    if (!surface) return;
+    this.patchSurface(surface, { session: { id: session.id, title: session.title, messages: session.messages } });
+    surface.panel?.setTitle(this.tabTitle(session));
+  }
+
+  /** Opens a chat in an editor tab, or focuses the tab that already shows it. Without an id, a new chat. */
+  async openInEditor(sessionId?: string) {
+    if (!this.deps.openPanel) return;
+    const shown = sessionId ? this.surfaceFor(sessionId) : undefined;
+    if (shown?.panel) return shown.panel.reveal();
+    // The chat may not be loaded yet (opened from the list): its summary has the title.
+    const title = (sessionId && (this.loaded.get(sessionId)?.title ?? this.sessions.find((s) => s.id === sessionId)?.title)) || DEFAULT_TITLE;
+    await this.deps.openPanel(sessionId, this.titleForTab(title));
+  }
+
+  /**
+   * "Open Chat in Editor" in the view: the view's chat moves to an editor tab and the view starts a new chat. An empty
+   * chat has nothing to move, so a new chat opens in the editor instead.
+   */
+  async moveSidebarToEditor() {
+    const session = this.sidebar.session;
+    await this.openInEditor(session.messages.length ? session.id : undefined);
   }
 
   dispose() {
-    this.run?.abort.abort();
+    for (const run of this.runs.values()) run.abort.abort();
     for (const ac of this.titleRequests) ac.abort();
     for (const d of this.disposables) d.dispose();
     clearTimeout(this.flushTimer);
-    clearTimeout(this.persistTimer);
+    for (const t of this.persistTimers.values()) clearTimeout(t);
     clearTimeout(this.editorTimer);
   }
 
   // ------------------------------------------------------------------ webview messages
 
-  async handle(msg: WebviewMessage): Promise<void> {
+  /** Handles a validated message from the webview of surface `from` (the Activity Bar view when omitted). */
+  async handle(msg: WebviewMessage, from: string = SIDEBAR): Promise<void> {
+    const surface = this.surfaces.get(from);
+    if (!surface) return;
+    // Anything but the start-up handshake means the user is working in this surface.
+    if (msg.type !== 'ready') this.lastFocused = from;
     try {
       switch (msg.type) {
         case 'ready':
-          return this.send({ type: 'state', state: this.snapshot() });
+          return this.sendState(surface);
+        case 'focused':
+          return;
         case 'send':
-          return await this.sendPrompt(msg.text);
+          return await this.sendPrompt(surface, msg.text);
         case 'cancel':
-          return this.cancel();
+          return this.cancel(surface.session.id);
         case 'approval':
           return await this.resolveApproval(msg.id, { approved: msg.approved, grant: msg.grant, feedback: msg.feedback }, msg.allowCommand);
-        case 'openApprovalDiff': {
-          const pending = this.approvals.get(msg.id);
-          const d = pending?.request.detail;
-          if (d?.kind === 'edit') await this.deps.diff.show(msg.id, d.path, d.absolutePath, d.isNew);
-          return;
-        }
+        case 'openApprovalDiff':
+          return await this.showApprovalDiff(msg.id);
         case 'newSession':
-          return this.newSession();
+          return this.newSession(surface);
         case 'openSession':
-          return await this.openSession(msg.id);
+          return await this.openSession(surface, msg.id);
+        case 'openSessionInEditor':
+          return await this.openInEditor(msg.id);
         case 'renameSession':
           return await this.renameSession(msg.id, msg.title);
         case 'deleteSession':
@@ -322,80 +512,96 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         case 'showLogs':
           return this.deps.logger.show();
         case 'attachFiles':
-          return await this.attachFiles();
+          return await this.attachFiles(surface);
         case 'removeAttachment':
-          this.attachments = this.attachments.filter((a) => a.id !== msg.id);
-          return this.patch({ context: this.contextView() });
+          surface.attachments = surface.attachments.filter((a) => a.id !== msg.id);
+          return this.patchSurface(surface, { context: this.contextView(surface) });
         case 'setIncludeEditor':
-          this.includeEditor = msg.value;
-          return this.patch({ context: this.contextView() });
+          surface.includeEditor = msg.value;
+          return this.patchSurface(surface, { context: this.contextView(surface) });
         case 'openFile':
-          return await this.openFile(msg.path, msg.line);
+          return await this.openFile(msg.path, msg.line, surface);
         case 'openExternal':
           return await this.openExternal(msg.url);
         case 'insertCode':
-          return await this.insertCode(msg.code);
+          return await this.insertCode(msg.code, surface);
         case 'setView':
-          return this.setView(msg.view);
+          return await this.setView(surface, msg.view);
         case 'saveProvider':
-          return await this.saveProvider(msg.provider, msg.requestId);
+          return await this.saveProvider(msg.provider, msg.requestId, surface);
         case 'deleteProvider':
           return await this.deleteProvider(msg.id);
         case 'testProvider':
-          return await this.testProvider(msg.requestId, msg.providerId);
+          return await this.testProvider(msg.requestId, msg.providerId, surface);
         case 'setApiKey':
           return await this.promptApiKey(msg.providerId);
         case 'openSettings':
           await vscode.commands.executeCommand('workbench.action.openSettings', 'sovran');
           return;
         case 'restoreCheckpoint':
-          return await this.restoreCheckpoint(msg.messageId);
+          return await this.restoreCheckpoint(surface, msg.messageId);
         case 'retry':
-          return await this.retry();
+          return await this.retry(surface);
         case 'editMessage':
-          return await this.editMessage(msg.messageId, msg.text);
+          return await this.editMessage(surface, msg.messageId, msg.text);
         case 'compact':
-          return await this.compactNow();
+          return await this.compactNow(surface);
         case 'suggestFiles':
-          return this.send({ type: 'fileSuggestions', requestId: msg.requestId, items: await this.suggestFiles(msg.query) });
+          return this.sendTo(surface, { type: 'fileSuggestions', requestId: msg.requestId, items: await this.suggestFiles(msg.query) });
         case 'attachPath':
-          return await this.attachPath(msg.path);
+          return await this.attachPath(surface, msg.path);
         case 'listDirectory':
-          return await this.listDirectory(msg.requestId, msg.path);
+          return await this.listDirectory(surface, msg.requestId, msg.path);
         case 'uploadFiles':
-          return await this.uploadFiles();
+          return await this.uploadFiles(surface);
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       this.deps.logger.error(`Failed to handle ${msg.type}: ${message}`);
-      this.notice('error', message);
+      this.notice('error', message, surface);
     }
   }
 
   // ------------------------------------------------------------------ state projection
 
-  snapshot(): AppState {
+  /** The full state for one surface: its chat and screen, plus everything the surfaces share. */
+  snapshot(surface: Surface = this.sidebar): AppState {
+    const session = surface.session;
     return {
-      view: this.view,
+      surface: surface.kind,
+      view: surface.view,
       workspace: this.workspaceView(),
       providers: this.providerViews(),
       selected: this.selected,
       mode: this.mode,
       approvalMode: this.approvalMode,
       sessions: this.sessions,
-      session: { id: this.session.id, title: this.session.title, messages: this.session.messages },
-      run: this.run && this.run.sessionId === this.session.id ? this.run.view : null,
-      approvals: this.visibleApprovals(),
-      context: this.contextView(),
-      grants: { edits: this.grantsFor(this.session.id).edits },
+      liveSessions: this.liveSessionViews(),
+      session: { id: session.id, title: session.title, messages: session.messages },
+      run: this.runs.get(session.id)?.view ?? null,
+      approvals: this.approvalsFor(session.id),
+      context: this.contextView(surface),
+      grants: { edits: this.grantsFor(session.id).edits },
       planModel: this.planModel,
       titleModel: this.titleModel,
-      usage: this.usageView(this.session),
-      compaction: this.compactionView(this.session),
+      usage: this.usageView(session),
+      compaction: this.compactionView(session),
       commands: this.commandViews(),
       settings: readSettingsView(this.settings),
       configFile: this.configFileView,
     };
+  }
+
+  /** Chats open in editor tabs or running, so the chat list can show where each one is and whether it needs you. */
+  private liveSessionViews(): LiveSessionView[] {
+    const ids = new Set<string>(this.runs.keys());
+    for (const s of this.surfaces.values()) if (s.kind === 'panel') ids.add(s.session.id);
+    const awaiting = new Set([...this.approvals.values()].map((a) => a.sessionId));
+    return [...ids].map((id) => ({ id, inEditor: this.surfaceFor(id)?.kind === 'panel', running: this.runs.has(id), needsApproval: awaiting.has(id) }));
+  }
+
+  private liveSessionsChanged() {
+    this.patch({ liveSessions: this.liveSessionViews() });
   }
 
   private usageView(s: Session): AppState['usage'] {
@@ -415,16 +621,43 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     return vscode.workspace.asRelativePath(absPath, (vscode.workspace.workspaceFolders?.length ?? 0) > 1);
   }
 
+  /** Sends to every surface: state they all share (providers, settings, modes, the chat list). */
   private send(m: HostMessage) {
-    this.post?.(m);
+    for (const s of this.surfaces.values()) s.post?.(m);
+  }
+
+  private sendTo(surface: Surface, m: HostMessage) {
+    surface.post?.(m);
+  }
+
+  /** Sends to the surface showing the chat, if any (a chat runs on while its tab is closed). */
+  private sendToSession(sessionId: string, m: HostMessage) {
+    const s = this.surfaceFor(sessionId);
+    if (s) this.sendTo(s, m);
   }
 
   private patch(p: Partial<AppState>) {
     this.send({ type: 'patch', patch: p });
   }
 
-  private notice(level: 'info' | 'warning' | 'error', message: string) {
-    this.send({ type: 'notice', id: randomUUID(), level, message });
+  private patchSurface(surface: Surface, p: Partial<AppState>) {
+    this.sendTo(surface, { type: 'patch', patch: p });
+  }
+
+  private patchSession(sessionId: string, p: Partial<AppState>) {
+    this.sendToSession(sessionId, { type: 'patch', patch: p });
+  }
+
+  /** Each surface has its own attachments; the active editor is the same for all. */
+  private patchContexts() {
+    for (const s of this.surfaces.values()) this.patchSurface(s, { context: this.contextView(s) });
+  }
+
+  /** Shows a notice in `to`, or in every surface when it concerns them all (providers, settings, the config file). */
+  private notice(level: 'info' | 'warning' | 'error', message: string, to?: Surface) {
+    const m: HostMessage = { type: 'notice', id: randomUUID(), level, message };
+    if (to) this.sendTo(to, m);
+    else this.send(m);
   }
 
   private workspaceView(): AppState['workspace'] {
@@ -453,15 +686,15 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     }));
   }
 
-  private visibleApprovals(): ApprovalView[] {
-    return this.run && this.run.sessionId === this.session.id ? [...this.approvals.values()].map((a) => a.view) : [];
+  private approvalsFor(sessionId: string): ApprovalView[] {
+    return [...this.approvals.values()].filter((a) => a.sessionId === sessionId).map((a) => a.view);
   }
 
-  private contextView() {
+  private contextView(surface: Surface) {
     return {
       editor: this.editor,
-      includeEditor: this.includeEditor,
-      attachments: this.attachments.map(({ id, path: p, label, external }) => ({ id, path: p, label, ...(external ? { external } : {}) })),
+      includeEditor: surface.includeEditor,
+      attachments: surface.attachments.map(({ id, path: p, label, external }) => ({ id, path: p, label, ...(external ? { external } : {}) })),
     };
   }
 
@@ -484,7 +717,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       endpoint: baseUrl ?? null,
       mode: this.mode,
       approvalMode: this.approvalMode,
-      running: !!this.run,
+      running: this.runs.size > 0,
     });
   }
 
@@ -510,8 +743,21 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     return undefined;
   }
 
+  /**
+   * The text editor the user means by "the active file". While a chat in an editor tab is focused it is the active
+   * editor and VS Code reports no text editor, so the last text editor counts as long as it is still on screen (the code
+   * beside the chat). Without a focused chat tab this is simply the active text editor, as before.
+   */
+  private textEditor(): vscode.TextEditor | undefined {
+    const active = vscode.window.activeTextEditor;
+    if (active) return (this.lastTextEditor = active);
+    const last = this.lastTextEditor;
+    const chatTabActive = [...this.surfaces.values()].some((s) => s.panel?.active);
+    return chatTabActive && last && (vscode.window.visibleTextEditors ?? []).includes(last) ? last : undefined;
+  }
+
   private updateEditorContext(push = false) {
-    const ed = vscode.window.activeTextEditor;
+    const ed = this.textEditor();
     let next: EditorContextView | null = null;
     if (ed && ed.document.uri.scheme === 'file') {
       const rel = vscode.workspace.asRelativePath(ed.document.uri, (vscode.workspace.workspaceFolders?.length ?? 0) > 1);
@@ -525,13 +771,13 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     }
     if (JSON.stringify(next) === JSON.stringify(this.editor)) return;
     this.editor = next;
-    if (push) this.patch({ context: this.contextView() });
+    if (push) this.patchContexts();
   }
 
-  private async collectAttachments(): Promise<ContextAttachment[]> {
+  private async collectAttachments(surface: Surface): Promise<ContextAttachment[]> {
     const out: ContextAttachment[] = [];
-    const ed = vscode.window.activeTextEditor;
-    if (this.includeEditor && ed && ed.document.uri.scheme === 'file') {
+    const ed = this.textEditor();
+    if (surface.includeEditor && ed && ed.document.uri.scheme === 'file') {
       const rel = vscode.workspace.asRelativePath(ed.document.uri, (vscode.workspace.workspaceFolders?.length ?? 0) > 1);
       // The lexical check drives the chip; the send-time check also follows symbolic links.
       const allowed = !this.editorBlock(ed.document.uri, rel) && (await resolveAndVerify(ed.document.uri.fsPath, this.deps.workspace).then(() => true, () => false));
@@ -553,14 +799,14 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         }
       }
     }
-    for (const a of this.attachments) {
+    for (const a of surface.attachments) {
       if (out.some((o) => o.path === a.path && o.kind === 'file')) continue;
       try {
         if (a.external) {
           // Picked by the user in the system dialog. It may have changed since: check it is still a text file.
           const problem = await this.fileProblem(a.absolute, a.path);
           if (problem) {
-            this.notice('warning', problem);
+            this.notice('warning', problem, surface);
             continue;
           }
         } else {
@@ -576,13 +822,14 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
           ...(a.external ? { external: true } : {}),
         });
       } catch (e) {
-        this.notice('warning', `Could not attach ${a.path}: ${e instanceof Error ? e.message : String(e)}`);
+        this.notice('warning', `Could not attach ${a.path}: ${e instanceof Error ? e.message : String(e)}`, surface);
       }
     }
     return out;
   }
 
-  async attachFiles() {
+  /** Quick pick of workspace files for the next message of `surface` (the last chat used, from the command). */
+  async attachFiles(surface: Surface = this.target()) {
     const uris = await vscode.workspace.findFiles('**/*', '{**/node_modules/**,**/.git/**}', 5000);
     const multi = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
     const items = uris
@@ -595,15 +842,15 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       title: 'Sovran: Add Files to Context',
     });
     if (!picked?.length) return;
-    for (const p of picked) await this.attachPath(p.uri.fsPath, false);
-    this.patch({ context: this.contextView() });
+    for (const p of picked) await this.attachPath(surface, p.uri.fsPath, false);
+    this.patchSurface(surface, { context: this.contextView(surface) });
   }
 
   /**
    * "Upload from computer" in the attach menu. Files inside the workspace follow the usual rules; files outside it are
    * accepted only from this host-owned dialog, never from a path the webview sends, so the user picks every one of them.
    */
-  private async uploadFiles() {
+  private async uploadFiles(surface: Surface) {
     const uris = await vscode.window.showOpenDialog({
       canSelectFiles: true,
       canSelectFolders: false,
@@ -615,22 +862,22 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (!uris?.length) return;
     for (const uri of uris) {
       if (uri.scheme !== 'file') {
-        this.notice('warning', `${path.basename(uri.path)} is not a local file, so it cannot be attached.`);
+        this.notice('warning', `${path.basename(uri.path)} is not a local file, so it cannot be attached.`, surface);
         continue;
       }
       if (vscode.workspace.getWorkspaceFolder(uri)) {
-        await this.attachPath(uri.fsPath, false);
+        await this.attachPath(surface, uri.fsPath, false);
         continue;
       }
       const shown = displayPath(uri.fsPath, os.homedir());
       const problem = await this.fileProblem(uri.fsPath, shown);
       if (problem) {
-        this.notice('warning', problem);
+        this.notice('warning', problem, surface);
         continue;
       }
-      await this.addAttachment(uri.fsPath, shown, true);
+      await this.addAttachment(surface, uri.fsPath, shown, true);
     }
-    this.patch({ context: this.contextView() });
+    this.patchSurface(surface, { context: this.contextView(surface) });
   }
 
   /** Why a file cannot be attached (missing, too large or binary), or undefined when it can. */
@@ -645,8 +892,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   }
 
   /** Adds a checked file to the next message. Protected files ask first, as they would when the agent reads them. */
-  private async addAttachment(absolute: string, shown: string, external = false) {
-    if (this.attachments.some((a) => a.absolute === absolute)) return;
+  private async addAttachment(surface: Surface, absolute: string, shown: string, external = false) {
+    if (surface.attachments.some((a) => a.absolute === absolute)) return;
     const label = path.basename(absolute);
     if (isProtectedPath(shown, this.settings.agent.policy.protectedPaths)) {
       const choice = await vscode.window.showWarningMessage(
@@ -654,16 +901,16 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         { modal: true, detail: `${shown} matches a protected-path pattern. Its contents are sent to the model with your next message.` },
         'Attach',
       );
-      if (choice !== 'Attach' || this.attachments.some((a) => a.absolute === absolute)) return;
+      if (choice !== 'Attach' || surface.attachments.some((a) => a.absolute === absolute)) return;
     }
-    this.attachments.push({ id: randomUUID(), path: shown, label, absolute, ...(external ? { external: true } : {}) });
+    surface.attachments.push({ id: randomUUID(), path: shown, label, absolute, ...(external ? { external: true } : {}) });
   }
 
   /** `@` and attach-menu suggestions. Before anything is typed, the active editor and the open tabs come first. */
   private async suggestFiles(query: string): Promise<FileSuggestionView[]> {
     if (query.trim()) return this.deps.fileIndex.suggest(query);
     const multi = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
-    const active = vscode.window.activeTextEditor?.document.uri;
+    const active = this.textEditor()?.document.uri;
     const activeAbs = active?.scheme === 'file' ? active.fsPath : undefined;
     const activeRel = activeAbs ? vscode.workspace.asRelativePath(activeAbs, multi) : undefined;
     // Open files outside the workspace and protected files are never suggested.
@@ -677,8 +924,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   }
 
   /** One folder of the workspace for the attach menu, confined to the workspace like every other path. */
-  private async listDirectory(requestId: string, requested: string) {
-    const reply = (listing: DirectoryListingView) => this.send({ type: 'directoryListing', requestId, listing });
+  private async listDirectory(surface: Surface, requestId: string, requested: string) {
+    const reply = (listing: DirectoryListingView) => this.sendTo(surface, { type: 'directoryListing', requestId, listing });
     const roots = this.deps.workspace.roots();
     const dir = requested.trim().replace(/^\.\/?$/, '').replace(/\/+$/, '');
     if (!roots.length) return reply({ path: '', entries: [], error: 'Open a folder to browse its files.' });
@@ -726,49 +973,63 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   // ------------------------------------------------------------------ sessions
 
-  private setView(view: View) {
-    this.view = view;
-    this.patch({ view });
+  /** Changes what a surface shows. Chats in editor tabs only show chats: lists and settings open in the view. */
+  private async setView(surface: Surface, view: View) {
+    if (surface.kind === 'panel' && view !== 'chat') {
+      await this.setView(this.sidebar, view);
+      return this.deps.reveal();
+    }
+    surface.view = view;
+    this.patchSurface(surface, { view });
   }
 
+  /** Shows a screen of the Activity Bar view (History, Settings, Providers). */
   showView(view: View) {
-    this.setView(view);
+    void this.setView(this.sidebar, view);
   }
 
-  focusComposer(text?: string) {
-    this.setView('chat');
-    this.send({ type: 'focusComposer', text });
+  focusComposer(surface: Surface = this.target(), text?: string) {
+    void this.setView(surface, 'chat');
+    this.sendTo(surface, { type: 'focusComposer', text });
   }
 
-  newSession() {
-    if (this.session.messages.length === 0) {
-      this.setView('chat');
-      this.send({ type: 'focusComposer' });
+  /** "Ask Sovran About Selection": the last chat used shows it, with the active file or selection attached. */
+  async askAboutSelection() {
+    const surface = this.target();
+    await this.revealSurface(surface);
+    surface.includeEditor = true;
+    this.patchSurface(surface, { context: this.contextView(surface) });
+    this.focusComposer(surface);
+  }
+
+  /** Focuses the last Sovran surface used: the view, or the chat in an editor tab. */
+  async focus() {
+    await this.revealSurface(this.target());
+  }
+
+  /** Starts a new chat in `surface` (the view when called from its New Chat button or the command). */
+  newSession(surface: Surface = this.sidebar) {
+    if (surface.session.messages.length === 0) {
+      void this.setView(surface, 'chat');
+    } else {
+      this.showSession(surface, this.blankSession());
+    }
+    this.sendTo(surface, { type: 'focusComposer' });
+  }
+
+  /** Shows a chat in `surface`. A chat already open in another tab or in the view is focused there instead. */
+  private async openSession(surface: Surface, id: string) {
+    const elsewhere = this.surfaceFor(id, surface);
+    if (elsewhere) return this.revealSurface(elsewhere);
+    if (surface.session.id === id) return this.setView(surface, 'chat');
+    const s = await this.loadSession(id);
+    if (!s) {
+      this.notice('error', 'This chat could not be loaded. It may have been deleted.', surface);
+      this.sessions = await this.deps.repo.list();
+      this.patch({ sessions: this.sessions });
       return;
     }
-    this.session = newSession(this.mode);
-    this.loaded.set(this.session.id, this.session);
-    this.view = 'chat';
-    this.send({ type: 'state', state: this.snapshot() });
-    this.send({ type: 'focusComposer' });
-  }
-
-  private async openSession(id: string) {
-    let s = this.loaded.get(id);
-    if (!s) {
-      const stored = await this.deps.repo.load(id);
-      if (!stored) {
-        this.notice('error', 'This chat could not be loaded. It may have been deleted.');
-        this.sessions = await this.deps.repo.list();
-        this.patch({ sessions: this.sessions });
-        return;
-      }
-      s = repairInterruptedSession(stored, Date.now());
-      this.loaded.set(id, s);
-    }
-    this.session = s;
-    this.view = 'chat';
-    this.send({ type: 'state', state: this.snapshot() });
+    this.showSession(surface, s);
   }
 
   private async renameSession(id: string, title: string) {
@@ -777,35 +1038,45 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     s.title = title;
     s.updatedAt = Date.now();
     await this.persist(s);
-    if (s.id === this.session.id) this.patch({ session: { id: s.id, title: s.title, messages: s.messages } });
+    this.sessionChanged(s);
   }
 
   private async deleteSession(id: string) {
     const summary = this.sessions.find((s) => s.id === id);
     const choice = await vscode.window.showWarningMessage(`Delete "${summary?.title ?? 'this chat'}"?`, { modal: true, detail: 'This cannot be undone.' }, 'Delete');
     if (choice !== 'Delete') return;
-    if (this.run?.sessionId === id) this.cancel();
+    this.deleted.add(id);
+    this.cancel(id);
+    this.cancelPersist(id);
     await this.deps.repo.delete(id);
     await this.deps.checkpoints.deleteForSession(id).catch(() => undefined);
     this.loaded.delete(id);
     this.grants.delete(id);
     this.sessions = await this.deps.repo.list();
-    if (this.session.id === id) {
-      this.session = newSession(this.mode);
-      this.loaded.set(this.session.id, this.session);
-      this.send({ type: 'state', state: this.snapshot() });
-    } else {
-      this.patch({ sessions: this.sessions });
-    }
+    // The surface that showed it (the view or an editor tab) starts a new chat.
+    const shown = this.surfaceFor(id);
+    if (shown) this.showSession(shown, this.blankSession());
+    this.patch({ sessions: this.sessions });
   }
 
   private schedulePersist(session: Session) {
-    clearTimeout(this.persistTimer);
-    this.persistTimer = setTimeout(() => void this.persist(session), 500);
+    clearTimeout(this.persistTimers.get(session.id));
+    this.persistTimers.set(
+      session.id,
+      setTimeout(() => {
+        this.persistTimers.delete(session.id);
+        void this.persist(session);
+      }, 500),
+    );
+  }
+
+  private cancelPersist(sessionId: string) {
+    clearTimeout(this.persistTimers.get(sessionId));
+    this.persistTimers.delete(sessionId);
   }
 
   private async persist(session: Session) {
-    if (session.messages.length === 0) return;
+    if (session.messages.length === 0 || this.deleted.has(session.id)) return;
     try {
       await this.deps.repo.save(session);
       this.sessions = await this.deps.repo.list();
@@ -823,7 +1094,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       mode = 'plan';
     }
     this.mode = mode;
-    this.session.mode = mode;
+    // The mode is the window's, so it applies to every open chat.
+    for (const s of this.surfaces.values()) s.session.mode = mode;
     this.updateStatusBar();
     this.patch({ mode });
   }
@@ -967,7 +1239,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   async pickModel() {
     if (this.providers.length === 0) {
-      this.setView('providers');
+      await this.setView(this.sidebar, 'providers');
       await this.deps.reveal();
       return;
     }
@@ -1006,7 +1278,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       return this.patch({ planModel: null });
     }
     if (pick.action === 'manage') {
-      this.setView('providers');
+      await this.setView(this.sidebar, 'providers');
       return this.deps.reveal();
     }
     if (pick.action === 'discover') return this.discoverAndPick();
@@ -1384,7 +1656,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     return id;
   }
 
-  private async saveProvider(input: ProviderInput, requestId?: string) {
+  private async saveProvider(input: ProviderInput, requestId?: string, from: Surface = this.sidebar) {
     const existing = input.id ? this.settingsProviders.find((p) => p.id === input.id) : undefined;
     const id = existing?.id ?? this.slug(input.name);
     const config: ProviderConfig = {
@@ -1420,8 +1692,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     this.patch({ providers: this.providerViews(), selected: this.selected });
     if (requestId) {
       // Guided setup: confirm the save, then test the connection and report the models the server offers.
-      this.send({ type: 'providerSaved', requestId, providerId: id });
-      await this.testProvider(requestId, id);
+      this.sendTo(from, { type: 'providerSaved', requestId, providerId: id });
+      await this.testProvider(requestId, id, from);
     } else {
       this.notice('info', `Saved ${config.name}.`);
     }
@@ -1469,10 +1741,11 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     this.patch({ providers: this.providerViews() });
   }
 
-  private async testProvider(requestId: string, providerId: string) {
+  /** Answers the surface that asked: request ids are only unique within one webview. */
+  private async testProvider(requestId: string, providerId: string, from: Surface) {
     const config = this.providers.find((p) => p.id === providerId);
     if (!config) return;
-    this.send({ type: 'providerTest', requestId, providerId, result: await this.checkConnection(config) });
+    this.sendTo(from, { type: 'providerTest', requestId, providerId, result: await this.checkConnection(config) });
   }
 
   /** Lists the server's models, or (for gateways without /models) sends a one-token completion. */
@@ -1538,16 +1811,17 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   // ------------------------------------------------------------------ runs
 
-  private async sendPrompt(text: string) {
-    if (this.run) {
-      this.notice('warning', 'Sovran is still working. Stop the current run before sending another message.');
+  private async sendPrompt(surface: Surface, text: string) {
+    const session = surface.session;
+    if (this.runs.has(session.id)) {
+      this.notice('warning', 'Sovran is still working in this chat. Stop it before sending another message.', surface);
       return;
     }
     const slash = parseSlash(text);
     const command = slash ? this.commands.find((c) => c.name === slash.name) : undefined;
     if (command?.kind === 'action') {
-      if (command.name === 'compact') return this.compactNow();
-      if (command.name === 'new') return this.newSession();
+      if (command.name === 'compact') return this.compactNow(surface);
+      if (command.name === 'new') return this.newSession(surface);
     }
     const user: UserMessage = {
       role: 'user',
@@ -1556,33 +1830,35 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       ...(command ? { display: text } : {}),
       createdAt: Date.now(),
     };
-    const attachments = await this.collectAttachments();
+    const attachments = await this.collectAttachments(surface);
     if (attachments.length) user.attachments = attachments;
-    this.attachments = [];
-    this.patch({ context: this.contextView() });
-    await this.startRun(this.session, user);
+    surface.attachments = [];
+    this.patchSurface(surface, { context: this.contextView(surface) });
+    await this.startRun(session, user);
   }
 
-  private resolveModel(): { provider: ProviderConfig; model: ModelConfig } | undefined {
+  private resolveModel(session: Session): { provider: ProviderConfig; model: ModelConfig } | undefined {
     const sel = this.effectiveModel();
     const provider = sel && this.providers.find((p) => p.id === sel.providerId);
     const model = sel && provider?.models?.find((m) => m.id === sel.modelId);
     if (!provider || !model) {
-      this.notice('error', 'Add a model provider before chatting.');
-      this.setView('providers');
+      this.notice('error', 'Add a model provider before chatting.', this.surfaceFor(session.id));
+      void this.setView(this.sidebar, 'providers');
       return undefined;
     }
     // A copy: the limits the server reported are used for this run and never written back to settings or the file.
     return { provider, model: { ...model, serverLimits: this.serverLimits(provider.id, model.id) } };
   }
 
-  private createRunner(provider: ProviderConfig, workspace: WorkspacePort) {
+  /** A runner for one chat: its approval requests carry the chat, so they reach the surface that shows it. */
+  private createRunner(provider: ProviderConfig, workspace: WorkspacePort, sessionId: string) {
+    const approvals: ApprovalPort = { request: (request, signal) => this.request(sessionId, request, signal) };
     return new AgentRunner({
       provider: this.createProvider(provider),
       registry: this.registry,
       workspace,
       process: this.deps.process,
-      approvals: this,
+      approvals,
       capabilities: this.deps.capabilities,
       logger: this.deps.logger,
     });
@@ -1591,19 +1867,34 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private beginRun(session: Session, activity: RunView['activity']): ActiveRun {
     const abort = new AbortController();
     const view: RunView = { sessionId: session.id, iteration: 0, maxIterations: this.settings.agent.maxIterations, startedAt: Date.now(), activity };
-    this.run = { sessionId: session.id, abort, view };
-    this.patch({ run: view });
+    const run: ActiveRun = { sessionId: session.id, abort, view };
+    this.runs.set(session.id, run);
+    this.patchSession(session.id, { run: view });
     this.updateStatusBar();
-    return this.run;
+    this.liveSessionsChanged();
+    return run;
+  }
+
+  private endRun(session: Session) {
+    this.runs.delete(session.id);
+    this.updateStatusBar();
+    this.liveSessionsChanged();
+  }
+
+  /** Settles the chat's pending approvals as rejected (its run ended or was stopped). Other chats keep theirs. */
+  private dropApprovals(sessionId: string) {
+    for (const a of [...this.approvals.values()]) if (a.sessionId === sessionId) a.settle({ approved: false });
   }
 
   /** Appends `user` (if needed) and runs the agent for it. `mergeInto` keeps an earlier checkpoint when retrying. */
   private async startRun(session: Session, user: UserMessage, mergeInto?: Checkpoint) {
-    const resolved = this.resolveModel();
+    // Checked again here, with nothing awaited before beginRun: two quick sends must not start two runs in one chat.
+    if (this.runs.has(session.id)) return;
+    const resolved = this.resolveModel(session);
     if (!resolved) return;
     const { provider, model } = resolved;
     if (provider.auth?.type !== 'none' && !this.keyStatus.get(provider.id)) {
-      this.notice('warning', `${provider.name} has no API key stored. Requests are sent without credentials.`);
+      this.notice('warning', `${provider.name} has no API key stored. Requests are sent without credentials.`, this.surfaceFor(session.id));
     }
 
     if (!session.messages.includes(user)) session.messages.push(user);
@@ -1616,8 +1907,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     session.updatedAt = Date.now();
     session.providerId = provider.id;
     session.modelId = model.id;
-    this.send({ type: 'messageUpsert', sessionId: session.id, message: user });
-    if (session.id === this.session.id) this.patch({ session: { id: session.id, title: session.title, messages: session.messages } });
+    this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: user });
+    this.sessionChanged(session);
     void this.persist(session);
 
     const mode: AgentMode = vscode.workspace.isTrusted ? this.mode : 'plan';
@@ -1626,7 +1917,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     this.deps.logger.addSecret(secret);
     // Every write in this run goes through the recorder, so the run can be undone as a unit.
     const recorder = new CheckpointRecorder(this.deps.workspace);
-    const runner = this.createRunner(provider, recorder);
+    const runner = this.createRunner(provider, recorder, session.id);
     this.deps.logger.info(`Run started · ${provider.id}/${model.id} · ${mode} mode`);
     try {
       const outcome = await runner.run({
@@ -1648,22 +1939,16 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       this.deps.logger.error(`Run crashed: ${message}`);
-      this.notice('error', `The run stopped unexpectedly: ${message}`);
+      this.notice('error', `The run stopped unexpectedly: ${message}`, this.surfaceFor(session.id));
     } finally {
       this.flush();
-      for (const [id, a] of this.approvals) {
-        a.settle({ approved: false });
-        this.approvals.delete(id);
-      }
-      this.run = null;
+      this.dropApprovals(session.id);
+      this.endRun(session);
       await this.saveCheckpoint(session, user, recorder.changedFiles(), mergeInto);
       session.updatedAt = Date.now();
-      clearTimeout(this.persistTimer);
+      this.cancelPersist(session.id);
       await this.persist(session);
-      this.updateStatusBar();
-      if (session.id === this.session.id) {
-        this.patch({ run: null, approvals: [], grants: { edits: this.grantsFor(session.id).edits } });
-      }
+      this.patchSession(session.id, { run: null, approvals: [], grants: { edits: this.grantsFor(session.id).edits } });
     }
   }
 
@@ -1685,7 +1970,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       const title = await generateTitle(this.createProvider(provider), model, text, ac.signal);
       if (!title || session.title !== derived || !this.loaded.has(session.id)) return;
       session.title = title;
-      if (session.id === this.session.id) this.patch({ session: { id: session.id, title: session.title, messages: session.messages } });
+      this.sessionChanged(session);
       await this.persist(session);
     } catch (e) {
       const err = e instanceof ProviderError ? e : errorFromException(e, { url: provider.baseUrl });
@@ -1707,17 +1992,18 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       return;
     }
     user.checkpoint = { id: checkpoint.id, files: merged.map((f) => this.rel(f.absolutePath)) };
-    this.send({ type: 'messageUpsert', sessionId: session.id, message: user });
+    this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: user });
   }
 
   // ------------------------------------------------------------------ rollback, retry, rewind
 
-  private async restoreCheckpoint(messageId: string) {
-    if (this.run?.sessionId === this.session.id) return this.notice('warning', 'Stop the current run before undoing changes.');
-    const user = this.session.messages.find((m): m is UserMessage => m.id === messageId && m.role === 'user');
+  private async restoreCheckpoint(surface: Surface, messageId: string) {
+    const session = surface.session;
+    if (this.runs.has(session.id)) return this.notice('warning', 'Stop the current run before undoing changes.', surface);
+    const user = session.messages.find((m): m is UserMessage => m.id === messageId && m.role === 'user');
     if (!user?.checkpoint || user.checkpoint.restoredAt) return;
-    const checkpoint = await this.deps.checkpoints.load(this.session.id, user.checkpoint.id);
-    if (!checkpoint) return this.notice('error', 'The snapshot for these changes is no longer available.');
+    const checkpoint = await this.deps.checkpoints.load(session.id, user.checkpoint.id);
+    if (!checkpoint) return this.notice('error', 'The snapshot for these changes is no longer available.', surface);
     const plan = await planRestore(checkpoint.files, this.deps.workspace);
     const modified = plan.filter((p) => p.state === 'modified');
     let includeModified = false;
@@ -1734,11 +2020,12 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     }
     const result = await restoreFiles(plan, this.deps.workspace, includeModified);
     user.checkpoint.restoredAt = Date.now();
-    this.send({ type: 'messageUpsert', sessionId: this.session.id, message: user });
-    await this.persist(this.session);
+    this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: user });
+    await this.persist(session);
     this.notice(
       'info',
       `Undid changes to ${result.restored.length} file${result.restored.length === 1 ? '' : 's'}${result.skipped.length ? `; kept ${result.skipped.length} you changed` : ''}. Use Undo in the editor to reverse this.`,
+      surface,
     );
   }
 
@@ -1756,7 +2043,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     return choice === 'Undo changes' ? 'undo' : choice === 'Keep changes' ? 'keep' : 'cancel';
   }
 
-  private async undoMessages(session: Session, users: readonly UserMessage[]) {
+  private async undoMessages(session: Session, users: readonly UserMessage[], surface: Surface) {
     let skipped = 0;
     for (const u of [...users].reverse()) {
       if (!u.checkpoint || u.checkpoint.restoredAt) continue;
@@ -1766,7 +2053,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       skipped += result.skipped.length;
       u.checkpoint.restoredAt = Date.now();
     }
-    if (skipped) this.notice('warning', `Kept ${skipped} file${skipped === 1 ? '' : 's'} you changed after Sovran edited ${skipped === 1 ? 'it' : 'them'}.`);
+    if (skipped) this.notice('warning', `Kept ${skipped} file${skipped === 1 ? '' : 's'} you changed after Sovran edited ${skipped === 1 ? 'it' : 'them'}.`, surface);
   }
 
   /** Drops the compaction boundary when the message it points to no longer exists. */
@@ -1774,9 +2061,9 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (session.compaction && !session.messages.some((m) => m.id === session.compaction!.firstKeptId)) delete session.compaction;
   }
 
-  private async retry() {
-    if (this.run) return this.notice('warning', 'Stop the current run before retrying.');
-    const session = this.session;
+  private async retry(surface: Surface) {
+    const session = surface.session;
+    if (this.runs.has(session.id)) return this.notice('warning', 'Stop the current run before retrying.', surface);
     let i = session.messages.length - 1;
     while (i >= 0 && session.messages[i]!.role !== 'user') i--;
     if (i < 0) return;
@@ -1785,27 +2072,27 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (decision === 'cancel') return;
     let mergeInto: Checkpoint | undefined;
     if (decision === 'undo') {
-      await this.undoMessages(session, [user]);
+      await this.undoMessages(session, [user], surface);
       delete user.checkpoint;
     } else if (decision === 'keep' && user.checkpoint) {
       mergeInto = await this.deps.checkpoints.load(session.id, user.checkpoint.id);
     }
     session.messages.length = i + 1;
     this.fixCompaction(session);
-    this.send({ type: 'state', state: this.snapshot() });
+    this.resync(session);
     await this.startRun(session, user, mergeInto);
   }
 
-  private async editMessage(messageId: string, text: string) {
-    if (this.run) return this.notice('warning', 'Stop the current run before editing a message.');
-    const session = this.session;
+  private async editMessage(surface: Surface, messageId: string, text: string) {
+    const session = surface.session;
+    if (this.runs.has(session.id)) return this.notice('warning', 'Stop the current run before editing a message.', surface);
     const i = session.messages.findIndex((m) => m.id === messageId && m.role === 'user');
     if (i < 0) return;
     const original = session.messages[i] as UserMessage;
     const discarded = session.messages.slice(i).filter((m): m is UserMessage => m.role === 'user');
     const decision = await this.confirmRewind(discarded);
     if (decision === 'cancel') return;
-    if (decision === 'undo') await this.undoMessages(session, discarded);
+    if (decision === 'undo') await this.undoMessages(session, discarded, surface);
     session.messages.length = i;
     this.fixCompaction(session);
     const slash = parseSlash(text);
@@ -1818,53 +2105,64 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       ...(original.attachments ? { attachments: original.attachments } : {}),
       createdAt: Date.now(),
     };
-    this.send({ type: 'state', state: this.snapshot() });
+    this.resync(session);
     await this.startRun(session, user);
   }
 
-  private async compactNow() {
-    if (this.run) return this.notice('warning', 'Stop the current run before compacting.');
-    const session = this.session;
+  /** Sends a full snapshot to the surface showing the chat, after its messages were cut (retry, edit). */
+  private resync(session: Session) {
+    const surface = this.surfaceFor(session.id);
+    if (surface) this.sendState(surface);
+  }
+
+  /** Summarizes the older messages of `surface`'s chat (the last chat used, from the command). */
+  async compactNow(surface: Surface = this.target()) {
+    const session = surface.session;
+    if (this.runs.has(session.id)) return this.notice('warning', 'Stop the current run before compacting.', surface);
     if (!planCompaction(messagesForModel(session), 1)) {
-      return this.notice('info', 'There is not enough conversation to summarize yet.');
+      return this.notice('info', 'There is not enough conversation to summarize yet.', surface);
     }
-    const resolved = this.resolveModel();
+    const resolved = this.resolveModel(session);
     if (!resolved) return;
     const run = this.beginRun(session, { phase: 'compacting', label: 'Summarizing earlier messages' });
     const secret = await this.deps.secrets.get(resolved.provider.id);
     try {
-      await this.createRunner(resolved.provider, this.deps.workspace).compact(
+      await this.createRunner(resolved.provider, this.deps.workspace, session.id).compact(
         { session, model: resolved.model, settings: this.settings.agent, signal: run.abort.signal, emit: (e) => this.onAgentEvent(session, e), secrets: [secret] },
         1,
       );
     } finally {
-      this.run = null;
+      this.endRun(session);
       await this.persist(session);
-      this.updateStatusBar();
-      if (session.id === this.session.id) this.patch({ run: null });
+      this.patchSession(session.id, { run: null });
     }
   }
 
   /** Attaches a workspace file named by the webview (`@` mention, attach menu) or picked in a dialog. */
-  private async attachPath(p: string, push = true) {
+  private async attachPath(surface: Surface, p: string, push = true) {
     let resolved;
     try {
       // Symlink-aware: a link inside the repository must not attach a file from outside it.
       resolved = await resolveAndVerify(p, this.deps.workspace);
     } catch (e) {
-      return this.notice('warning', e instanceof PathError ? e.message : `${p} is not inside the workspace.`);
+      return this.notice('warning', e instanceof PathError ? e.message : `${p} is not inside the workspace.`, surface);
     }
     const problem = await this.fileProblem(resolved.absolute, resolved.relative);
-    if (problem) return this.notice('warning', problem);
-    await this.addAttachment(resolved.absolute, resolved.relative);
-    if (push) this.patch({ context: this.contextView() });
+    if (problem) return this.notice('warning', problem, surface);
+    await this.addAttachment(surface, resolved.absolute, resolved.relative);
+    if (push) this.patchSurface(surface, { context: this.contextView(surface) });
   }
 
-  cancel() {
-    if (!this.run) return;
-    this.run.abort.abort();
-    this.run.view = { ...this.run.view, activity: { phase: 'thinking', label: 'Stopping' } };
-    this.patch({ run: this.run.view });
+  /** Stops the run of one chat. Without an id ("Stop Agent"): the last chat used, or every run when it is idle. */
+  cancel(sessionId?: string) {
+    const ids = sessionId ? [sessionId] : this.runs.has(this.target().session.id) ? [this.target().session.id] : [...this.runs.keys()];
+    for (const id of ids) {
+      const run = this.runs.get(id);
+      if (!run) continue;
+      run.abort.abort();
+      run.view = { ...run.view, activity: { phase: 'thinking', label: 'Stopping' } };
+      this.patchSession(id, { run: run.view });
+    }
   }
 
   private async projectInstructions(): Promise<string | undefined> {
@@ -1878,19 +2176,20 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     }
   }
 
+  /** Projects a run's events to the surface showing its chat. The chat may move between surfaces while it runs. */
   private onAgentEvent(session: Session, e: AgentEvent) {
-    const visible = session.id === this.session.id;
-    const run = this.run;
+    const visible = !!this.surfaceFor(session.id);
+    const run = this.runs.get(session.id);
     const setActivity = (activity: RunView['activity'], extra: Partial<RunView> = {}) => {
       if (!run) return;
       run.view = { ...run.view, ...extra, activity };
-      if (visible) this.patch({ run: run.view });
+      this.patchSession(session.id, { run: run.view });
     };
     switch (e.type) {
       case 'iteration':
         return setActivity({ phase: 'thinking', label: 'Thinking' }, { iteration: e.iteration, maxIterations: e.maxIterations });
       case 'message_started':
-        if (visible) this.send({ type: 'messageUpsert', sessionId: session.id, message: e.message });
+        this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: e.message });
         return;
       case 'text_delta':
       case 'reasoning_delta': {
@@ -1907,11 +2206,11 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         return setActivity({ phase: 'streaming', label: `Preparing ${e.name.replace(/_/g, ' ')}`, toolName: e.name });
       case 'message_committed':
         this.flush();
-        if (visible) this.send({ type: 'messageUpsert', sessionId: session.id, message: e.message });
+        this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: e.message });
         return this.schedulePersist(session);
       case 'message_removed':
         this.flush();
-        if (visible) this.send({ type: 'messageRemoved', sessionId: session.id, messageId: e.messageId });
+        this.sendToSession(session.id, { type: 'messageRemoved', sessionId: session.id, messageId: e.messageId });
         return;
       case 'tool_phase':
         return setActivity({ phase: e.phase, label: e.label, toolName: e.toolName, callId: e.callId });
@@ -1923,22 +2222,26 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         return this.scheduleFlush();
       }
       case 'notice':
-        return this.notice(e.level, e.message);
+        // A chat with no surface (its tab was closed) has nobody to tell; the log still has it.
+        if (!visible) return this.deps.logger.info(`Notice in a chat that is not shown: ${e.message}`);
+        return this.notice(e.level, e.message, this.surfaceFor(session.id));
       case 'context':
         session.usage = { tokens: e.estimatedTokens, contextWindow: e.contextWindow, source: 'estimate', updatedAt: Date.now() };
-        if (visible) this.patch({ usage: this.usageView(session) });
+        this.patchSession(session.id, { usage: this.usageView(session) });
         return;
       case 'usage':
         if (e.promptTokens && session.usage) {
           session.usage = { ...session.usage, tokens: e.promptTokens, source: 'server', updatedAt: Date.now() };
-          if (visible) this.patch({ usage: this.usageView(session) });
+          this.patchSession(session.id, { usage: this.usageView(session) });
         }
         return;
       case 'compaction_started':
         return setActivity({ phase: 'compacting', label: 'Summarizing earlier messages' });
       case 'compacted':
-        if (visible) this.patch({ compaction: this.compactionView(session) });
-        this.notice('info', `Summarized ${e.compaction.summarizedCount} earlier messages to free context. The full transcript is still shown here.`);
+        this.patchSession(session.id, { compaction: this.compactionView(session) });
+        if (visible) {
+          this.notice('info', `Summarized ${e.compaction.summarizedCount} earlier messages to free context. The full transcript is still shown here.`, this.surfaceFor(session.id));
+        }
         return this.schedulePersist(session);
     }
   }
@@ -1951,15 +2254,16 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private flush() {
     clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
-    for (const d of this.deltas.values()) this.send(d);
-    for (const o of this.outputs.values()) this.send(o);
+    for (const d of this.deltas.values()) this.sendToSession(d.sessionId, d);
+    for (const o of this.outputs.values()) this.sendToSession(o.sessionId, o);
     this.deltas.clear();
     this.outputs.clear();
   }
 
-  // ------------------------------------------------------------------ approvals (ApprovalPort)
+  // ------------------------------------------------------------------ approvals
 
-  request(request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalResponse> {
+  /** The approval port of one chat's runs (see createRunner): the request is shown by the surface showing that chat. */
+  private request(sessionId: string, request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalResponse> {
     return new Promise<ApprovalResponse>((resolve, reject) => {
       const d = request.detail;
       const view: ApprovalView = {
@@ -1979,7 +2283,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         signal.removeEventListener('abort', onAbort);
         this.approvals.delete(request.id);
         if (d.kind === 'edit') void this.deps.diff.release(request.id);
-        this.patch({ approvals: this.visibleApprovals() });
+        this.approvalsChanged(sessionId);
       };
       const onAbort = () => {
         cleanup();
@@ -1988,6 +2292,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       if (signal.aborted) return reject(new Error('cancelled'));
       signal.addEventListener('abort', onAbort, { once: true });
       this.approvals.set(request.id, {
+        sessionId,
         view,
         request,
         settle: (r) => {
@@ -1995,17 +2300,51 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
           resolve(r);
         },
       });
+      const shown = this.surfaceFor(sessionId);
       if (d.kind === 'edit') {
         this.deps.diff.register(request.id, d.proposedContent);
-        if (this.settings.openDiffOnProposal) void this.deps.diff.show(request.id, d.path, d.absolutePath, d.isNew);
+        if (this.settings.openDiffOnProposal) void this.deps.diff.show(request.id, d.path, d.absolutePath, d.isNew, this.editorColumn(shown));
       }
-      this.patch({ approvals: this.visibleApprovals() });
-      if (!this.post) {
+      this.approvalsChanged(sessionId);
+      // Nobody sees the request: the view is collapsed, or the chat's tab is closed or behind another tab.
+      if (!shown?.post || (shown.panel && !shown.panel.visible)) {
         void vscode.window.showInformationMessage(`Sovran needs your approval: ${request.title}`, 'Review').then((c) => {
-          if (c) void this.deps.reveal();
+          if (!c) return;
+          const s = this.surfaceFor(sessionId);
+          void (s ? this.revealSurface(s) : this.openInEditor(sessionId));
         });
       }
     });
+  }
+
+  private approvalsChanged(sessionId: string) {
+    this.patchSession(sessionId, { approvals: this.approvalsFor(sessionId) });
+    this.liveSessionsChanged();
+    // Enables Apply and Reject on the proposal's diff editor.
+    void vscode.commands.executeCommand('setContext', 'sovran.approvalPending', this.approvals.size > 0);
+  }
+
+  private async showApprovalDiff(id: string) {
+    const pending = this.approvals.get(id);
+    const d = pending?.request.detail;
+    if (pending && d?.kind === 'edit') await this.deps.diff.show(id, d.path, d.absolutePath, d.isNew, this.editorColumn(this.surfaceFor(pending.sessionId)));
+  }
+
+  /**
+   * Apply or Reject from a proposal's diff editor, or from the command palette. `uri` is the diff the button belongs
+   * to; without it, the file change waiting in the last chat used (or the only one waiting).
+   */
+  async decideProposal(approved: boolean, uri?: unknown) {
+    const edits = [...this.approvals.values()].filter((a) => a.request.detail.kind === 'edit');
+    const fromDiff = DiffPresenter.approvalId(uri);
+    const pending = fromDiff
+      ? edits.find((a) => a.request.id === fromDiff)
+      : (edits.find((a) => a.sessionId === this.target().session.id) ?? (edits.length === 1 ? edits[0] : undefined));
+    if (!pending) {
+      void vscode.window.showInformationMessage('No file change is waiting for your approval.');
+      return;
+    }
+    await this.resolveApproval(pending.request.id, { approved });
   }
 
   private async resolveApproval(id: string, response: ApprovalResponse, allowCommand?: string) {
@@ -2019,7 +2358,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       if (matchesAllowList(detail.command, [allowCommand])) {
         await addAllowedCommand(allowCommand);
         this.settings = readSettings(); // the running agent reads the policy live, so the next command benefits
-        this.notice('info', `Commands starting with "${allowCommand}" now run without asking. Manage the list in Settings.`);
+        this.notice('info', `Commands starting with "${allowCommand}" now run without asking. Manage the list in Settings.`, this.surfaceFor(pending.sessionId));
       } else {
         this.deps.logger.warn('Ignored an allow-list entry that does not match the approved command.');
       }
@@ -2029,16 +2368,27 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   // ------------------------------------------------------------------ editor helpers
 
-  private async openFile(p: string, line?: number) {
+  /**
+   * Where a file or diff opens for a chat in an editor tab: in the group of the code beside it, or a new group next to
+   * it, never over the chat (that would hide the approval bar). Undefined for the view: the active group, as always.
+   */
+  private editorColumn(surface: Surface | undefined): vscode.ViewColumn | undefined {
+    const column = surface?.panel?.viewColumn;
+    if (!column) return undefined;
+    const code = this.lastTextEditor?.viewColumn;
+    return code && code !== column ? code : vscode.ViewColumn.Beside;
+  }
+
+  private async openFile(p: string, line: number | undefined, surface: Surface) {
     let resolved;
     try {
       resolved = resolveWorkspacePath(p, this.deps.workspace.roots());
     } catch {
-      return this.notice('warning', `Cannot open ${p}: it is not inside the workspace.`);
+      return this.notice('warning', `Cannot open ${p}: it is not inside the workspace.`, surface);
     }
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(resolved.absolute));
     const pos = new vscode.Position(Math.max(0, (line ?? 1) - 1), 0);
-    await vscode.window.showTextDocument(doc, { selection: new vscode.Range(pos, pos), preview: true });
+    await vscode.window.showTextDocument(doc, { selection: new vscode.Range(pos, pos), preview: true, viewColumn: this.editorColumn(surface) });
   }
 
   private async openExternal(url: string) {
@@ -2052,9 +2402,9 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     await vscode.env.openExternal(parsed);
   }
 
-  private async insertCode(code: string) {
-    const ed = vscode.window.activeTextEditor;
-    if (!ed) return this.notice('warning', 'Open a file to insert code.');
+  private async insertCode(code: string, surface: Surface) {
+    const ed = this.textEditor();
+    if (!ed) return this.notice('warning', 'Open a file to insert code.', surface);
     await ed.edit((b) => b.replace(ed.selection, code));
   }
 }

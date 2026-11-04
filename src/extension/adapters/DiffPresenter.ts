@@ -15,6 +15,14 @@ export class DiffPresenter implements vscode.TextDocumentContentProvider, vscode
     return this.contents.get(uri.query) ?? '';
   }
 
+  /** The approval a proposal document belongs to (either side of its diff), or undefined for any other value. */
+  static approvalId(uri: unknown): string | undefined {
+    if (!uri || typeof uri !== 'object') return undefined;
+    const { scheme, query } = uri as { scheme?: unknown; query?: unknown };
+    if (scheme !== DiffPresenter.scheme || typeof query !== 'string' || !query) return undefined;
+    return query.replace(/:empty$/, '');
+  }
+
   private uri(relPath: string, key: string) {
     return vscode.Uri.from({ scheme: DiffPresenter.scheme, path: `/${relPath.replace(/^\/+/, '')}`, query: key });
   }
@@ -24,12 +32,13 @@ export class DiffPresenter implements vscode.TextDocumentContentProvider, vscode
     this.contents.set(`${id}:empty`, '');
   }
 
-  async show(id: string, relPath: string, absolutePath: string, isNew: boolean) {
+  /** Opens the diff in `viewColumn` (the active group when undefined) without taking focus from the chat. */
+  async show(id: string, relPath: string, absolutePath: string, isNew: boolean, viewColumn?: vscode.ViewColumn) {
     if (!this.contents.has(id)) return;
     const left = isNew ? this.uri(relPath, `${id}:empty`) : vscode.Uri.file(absolutePath);
     const right = this.uri(relPath, id);
     const title = `${path.basename(relPath)} ${isNew ? '(new file)' : ''} ↔ Sovran proposal`.replace(/\s+/g, ' ');
-    await vscode.commands.executeCommand('vscode.diff', left, right, title, { preview: true, preserveFocus: true });
+    await vscode.commands.executeCommand('vscode.diff', left, right, title, { preview: true, preserveFocus: true, ...(viewColumn ? { viewColumn } : {}) });
   }
 
   async release(id: string) {

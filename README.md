@@ -78,8 +78,12 @@ confirmation once per window, and new windows start in the mode set by `sovran.a
   <img src="media/screenshots/auto-mode-dark.png" width="320" alt="Auto mode: edits and tests ran without asking, a push still asks">
 </p>
 
-On a command card, **Always allow…** adds the command's prefix (for example `npm test`) to your allowed commands after
-showing you exactly what will be allowed.
+When Sovran needs you, a **bar above the chat** asks: it never scrolls away, and **Reject** and **Apply** (or **Run**,
+**Allow**) sit on its right. Press <kbd>Enter</kbd> to approve or <kbd>Esc</kbd> to reject, from the empty chat input or
+anywhere in the chat; text you are typing keeps its keys. The diff itself is in the conversation, with line numbers and
+wrapped lines, and the proposal's diff editor has **Apply** and **Reject** buttons too (<kbd>Ctrl+Enter</kbd> applies).
+**Always allow…** adds a command's prefix (for example `npm test`) to your allowed commands after showing you exactly
+what will be allowed, and **Reject with feedback…** tells Sovran what to do instead.
 
 The current mode is always visible in the composer and the status bar.
 
@@ -95,7 +99,7 @@ Errors tell you what went wrong and how to fix it.
 
 - The model picker is a Quick Pick, and the status bar shows the model and mode.
 - The UI follows your theme, including high contrast.
-- Keyboard first: <kbd>Enter</kbd> sends, <kbd>Shift+Enter</kbd> adds a newline, <kbd>Esc</kbd> stops, <kbd>Alt+M</kbd> switches mode, <kbd>Alt+A</kbd> cycles approvals. A hint line under the composer shows what the keys do right now, and **Shortcuts** lists them all.
+- Keyboard first: <kbd>Enter</kbd> sends, <kbd>Shift+Enter</kbd> adds a newline, <kbd>Esc</kbd> stops, <kbd>Alt+M</kbd> switches mode, <kbd>Alt+A</kbd> cycles approvals, and while Sovran waits for you <kbd>Enter</kbd> approves and <kbd>Esc</kbd> rejects. A hint line under the composer shows what the keys do right now, and **Shortcuts** lists them all.
 - **A start page for every chat:** the model and where it runs, the current mode, starters built from the active file or selection, your latest chats and a tip.
 - **Settings in the panel.** The gear in the view title opens Sovran Settings: Act and Plan models, providers, approvals, allowed commands, protected files, limits and context options, without editing JSON.
 
@@ -108,6 +112,18 @@ Errors tell you what went wrong and how to fix it.
 </p>
 
 **Conversations that persist.** Chats are saved per workspace and restored after restart, and you can search, rename or delete them.
+
+**Chats in editor tabs, in parallel.** **Open Chat in Editor** (the arrow in the view title) moves the current chat into
+an editor tab, beside your code, and **New Chat in Editor** opens another. Each chat runs on its own, so you can let one
+work while you talk to another. The chat list in the view shows which chats are working, waiting for your approval or
+open in a tab, and selecting one focuses its tab. Tabs come back with their chat after a restart. Lists and settings
+stay in the view; the mode, approval mode and models are shared by all chats in the window.
+
+<p align="center">
+  <img src="media/screenshots/editor-tab-dark.png" width="660" alt="A chat in an editor tab waiting for approval, with the decision bar above the diff">
+  &nbsp;
+  <img src="media/screenshots/history-live-dark.png" width="320" alt="The chat list showing chats that need approval, are working or are open in an editor tab">
+</p>
 
 **Mistakes are cheap to undo.** Every response that changed files ends with a footer: *2 files changed · Undo changes*. Undo puts every file back the way it was before that response and deletes files the agent created. If you edited a file afterwards, Sovran asks before overwriting it.
 - **Retry** generates a response again. It sits next to **Copy** under the last response and appears when you hover it or reach it with the keyboard.
@@ -347,6 +363,7 @@ Read [SECURITY.md](SECURITY.md) for the threat model and known limitations. Choo
 - **No MCP support yet** (planned in v0.3).
 - **Search uses VS Code's bundled ripgrep.** It falls back to a slower built-in scan when ripgrep cannot be found.
 - **Long-running commands time out.** Watchers and dev servers are not supported as agent commands.
+- **Parallel chats share the workspace.** Two chats can edit the same file; a change made while another waits for approval is detected and refused rather than overwritten, but Sovran does not coordinate the chats' plans.
 - **Session files are plaintext.** They are not encrypted at rest.
 - **Not yet verified on every server.** Compatibility is covered by mocked-server tests, and the real-server compatibility matrix is still being run. See [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md).
 

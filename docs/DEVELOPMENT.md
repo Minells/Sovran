@@ -31,7 +31,8 @@ Query parameters:
 
 | Parameter | Values |
 |---|---|
-| `scenario` | `conversation`, `done` (finished, no pending approval), `auto`, `empty`, `onboarding`, `providers`, `history`, `settings` |
+| `scenario` | `conversation`, `bigdiff` (a proposal taller than the view), `done` (finished, no pending approval), `auto`, `empty`, `onboarding`, `providers`, `history` (with live chat status), `settings` |
+| `surface` | `panel` (a chat in an editor tab: full width, editor background; default: the Activity Bar view) |
 | `editor` | `none`, `selection`, `outside` (default: an open file) |
 | `approval` | `ask`, `edits`, `auto` |
 | `theme` | `dark`, `light` |
@@ -46,9 +47,10 @@ The README screenshots are generated from this harness.
 |---|---|---|
 | Core unit | `tests/unit/*.test.ts` | Agent loop (multi-step, approvals, plan-mode enforcement, downgrade to prompted tools, loop guard, iteration cap, cancellation, grants), tools, edit engine, path confinement (POSIX and Windows), policy, command analysis, redaction, SSE parser, tagged-stream parser, context budgeting, session repair |
 | Provider integration | `tests/integration/*.test.ts` | A real HTTP server replaying compatibility scenarios: split tool-call deltas, parallel calls, non-streaming JSON, `reasoning_content`, CRLF framing, tool rejection (400), HTTP error mapping, in-stream errors, cancellation, idle timeout, connection refused, custom auth headers, model listing variants |
-| Webview | `webview/src/*.test.tsx` | Handshake, onboarding, composer keys, streaming deltas, approval and rejection flows, mode switching, Restricted Mode, stop and cancel, error rendering, markdown sanitization |
+| Webview | `webview/src/*.test.tsx` | Handshake, onboarding, composer keys, streaming deltas, the approval bar and its Enter/Escape shortcuts (arming delay, typed text, focused controls), rejection flows, diff parsing, live chat status, mode switching, Restricted Mode, stop and cancel, error rendering, markdown sanitization |
+| Surfaces | `tests/unit/surfaces.test.ts` | The real controller with the view and editor tabs against a real HTTP model: per-surface chats and replies, parallel runs with approvals routed to their own chat, moving a chat to a tab, one place per chat, lists opened from a tab, approvals nobody sees, deleting a running chat |
 | v0.2 features | `tests/unit/wave1.test.ts`, `tests/integration/ripgrep.test.ts` | Checkpoint recording and restore conflicts, compaction planning, auto-compaction and fallback, usage events, protected-path filtering of fast search, slash commands, fuzzy ranking, ripgrep against a real binary (skipped when `rg` is absent) |
-| Extension | `tests/extension/suite.cjs` | Activation, command registration, secure defaults, opening the view (runs in CI) |
+| Extension | `tests/extension/suite.cjs` | Activation, command registration, secure defaults, opening the view, chats in editor tabs (runs in CI) |
 
 ## Architecture rules
 

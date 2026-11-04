@@ -113,7 +113,7 @@ function ShortcutsButton({ approvals }: { approvals: boolean }) {
           <div className="sv-menu__heading">Keyboard shortcuts</div>
           <dl className="sv-shortcuts__list">
             {shortcutList({ approvals }).map((s) => (
-              <div key={s.keys} className="sv-shortcuts__row">
+              <div key={`${s.keys} ${s.label}`} className="sv-shortcuts__row">
                 <dt>
                   <kbd>{s.keys}</kbd>
                 </dt>
@@ -235,6 +235,8 @@ export function Composer() {
   const [requestId, setRequestId] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const running = !!app.run;
+  // While a decision is pending, Enter and Escape in the empty input answer it (see ApprovalBar).
+  const awaiting = app.approvals.length > 0;
   const effective = app.mode === 'plan' && app.planModel ? app.planModel : app.selected;
   const provider = app.providers.find((p) => p.id === effective?.providerId);
   const model = provider?.models.find((m) => m.id === effective?.modelId);
@@ -330,6 +332,10 @@ export function Composer() {
       setDismissed(triggerKey);
       return;
     }
+    if (awaiting && !text.trim() && (e.key === 'Enter' || e.key === 'Escape')) {
+      // Left to the approval bar: Enter approves, Escape rejects. Stopping the whole run stays on the Stop button.
+      return;
+    }
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
@@ -362,7 +368,12 @@ export function Composer() {
   const listId = 'sv-suggest';
   const suggesting = open && (items.length > 0 || trigger?.kind === 'mention');
   // One line, always there (no jump on focus), and it says what the keys do right now.
-  const hints: Array<[string, string]> = running
+  const hints: Array<[string, string]> = awaiting && !text.trim()
+    ? [
+        ['↵', 'approve'],
+        ['Esc', 'reject'],
+      ]
+    : running
     ? [['Esc', 'stop']]
     : suggesting
       ? [
@@ -442,6 +453,8 @@ export function Composer() {
           aria-expanded={open && items.length > 0}
           aria-controls={open ? listId : undefined}
           aria-activedescendant={open && items.length ? `${listId}-${activeIndex}` : undefined}
+          // Empty, it passes Enter and Escape to a pending approval.
+          data-approval-keys=""
           onChange={(e) => {
             setText(e.target.value);
             setCaret(e.target.selectionStart ?? e.target.value.length);

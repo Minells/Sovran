@@ -18,6 +18,10 @@ const COMMANDS = [
   'sovran.cancelRun',
   'sovran.showLogs',
   'sovran.compact',
+  'sovran.newChatInEditor',
+  'sovran.openInEditor',
+  'sovran.acceptProposal',
+  'sovran.rejectProposal',
 ];
 
 async function test(name, fn) {
@@ -163,5 +167,25 @@ exports.run = async function run() {
     await vscode.commands.executeCommand('sovran.toggleMode');
     await vscode.commands.executeCommand('sovran.toggleMode');
     await vscode.commands.executeCommand('sovran.newSession');
+  });
+  await test('chats open in editor tabs, side by side, and close cleanly', async () => {
+    const chatTabs = () =>
+      vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) => t.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith('sovran.chatPanel'));
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const until = async (check, what, ms = 5000) => {
+      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(100);
+      assert.ok(check(), what);
+    };
+    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+    await vscode.commands.executeCommand('sovran.newChatInEditor');
+    await until(() => chatTabs().length === 1, 'New Chat in Editor did not open a tab');
+    // The view's chat is empty, so "Open Chat in Editor" opens another new chat; tabs stay in one group.
+    await vscode.commands.executeCommand('sovran.openInEditor');
+    await until(() => chatTabs().length === 2, 'Open Chat in Editor did not open a second tab');
+    assert.strictEqual(new Set(vscode.window.tabGroups.all.filter((g) => g.tabs.some((t) => chatTabs().includes(t))).map((g) => g.viewColumn)).size, 1);
+    // Tab labels reach the extension host asynchronously (a renderer round trip), so wait for them as for the tabs.
+    await until(() => chatTabs().every((t) => t.label === 'New chat'), `unexpected tab titles: ${chatTabs().map((t) => t.label)}`);
+    await vscode.window.tabGroups.close(chatTabs());
+    await until(() => chatTabs().length === 0, 'chat tabs did not close');
   });
 };

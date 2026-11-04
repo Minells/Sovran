@@ -8,12 +8,14 @@ import { reducer, initialUiState } from './state/store';
 import { onPost, setUiState } from './vscode';
 
 const baseState = (over: Partial<AppState> = {}): AppState => ({
+  surface: 'sidebar',
   view: 'chat',
   workspace: { name: 'w', trusted: true, hasFolder: true },
   providers: [{ id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }] }],
   selected: { providerId: 'local', modelId: 'coder' },
   mode: 'act',
   sessions: [],
+  liveSessions: [],
   session: { id: 's', title: 'New chat', messages: [] },
   run: null,
   approvals: [],
@@ -116,7 +118,7 @@ describe('App', () => {
     expect(screen.queryByText(/LEAK/)).not.toBeInTheDocument();
   });
 
-  it('renders an approval card inline and sends the decision with a session grant', async () => {
+  it('puts the decision above the chat, the diff inline, and sends the decision with a session grant', async () => {
     const messages: AppState['session'] = {
       id: 's',
       title: 't',
@@ -132,10 +134,17 @@ describe('App', () => {
         approvals: [{ id: 'ap', callId: 'c1', toolName: 'edit_file', title: 'src/a.ts', detail: { kind: 'edit', path: 'src/a.ts', isNew: false, diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1 } }],
       }),
     );
-    const card = screen.getByRole('region', { name: 'Apply these changes?' });
+    const bar = screen.getByRole('region', { name: 'Apply these changes?' });
+    // Above the conversation, so it never scrolls away.
+    expect(bar.compareDocumentPosition(screen.getByLabelText('Conversation')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText('Waiting for your approval')).toBeInTheDocument();
-    await userEvent.click(within(card).getByLabelText(/without asking/));
-    await userEvent.click(within(card).getByRole('button', { name: 'Apply' }));
+    // The diff is read in the transcript, under the tool call; the decision is only in the bar.
+    const diff = screen.getByRole('group', { name: 'Proposed changes' });
+    expect(within(bar).queryByRole('group')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'Apply' })).toHaveLength(1);
+    expect(diff).toHaveTextContent('−a');
+    await userEvent.click(within(bar).getByLabelText(/without asking/));
+    await userEvent.click(within(bar).getByRole('button', { name: 'Apply' }));
     expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: true, grant: 'session-edits', feedback: undefined });
   });
 
@@ -150,10 +159,29 @@ describe('App', () => {
     expect(screen.getByText('Deletes files and folders recursively.')).toBeInTheDocument();
     // Commands that must always ask are never offered for the allow-list.
     expect(screen.queryByRole('button', { name: 'Always allow…' })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Reject…' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Reject with feedback…' }));
+    // While the form is open the bar offers only its own actions.
+    expect(screen.queryByRole('button', { name: 'Run' })).not.toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('Feedback for the agent'), 'use npm run clean');
     await userEvent.click(screen.getByRole('button', { name: 'Send rejection' }));
     expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: false, grant: undefined, feedback: 'use npm run clean' });
+  });
+
+  it('sends feedback with Enter and goes back with Escape without rejecting', async () => {
+    mount(
+      baseState({
+        session: { id: 's', title: 't', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'execute_terminal', arguments: '{"command":"make"}' }] }] },
+        run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'make', callId: 'c1' } },
+        approvals: [{ id: 'ap', callId: 'c1', toolName: 'execute_terminal', title: 'make', detail: { kind: 'command', command: 'make', cwd: '.', warnings: [], allowPrefix: 'make' } }],
+      }),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Reject with feedback…' }));
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByLabelText('Feedback for the agent')).not.toBeInTheDocument();
+    expect(sent.some((m) => m.type === 'approval')).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: 'Reject with feedback…' }));
+    await userEvent.type(screen.getByLabelText('Feedback for the agent'), 'use the Makefile target "build"{Enter}');
+    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: false, grant: undefined, feedback: 'use the Makefile target "build"' });
   });
 
   it('switches mode via the radio group and Alt+M, and disables Act when untrusted', async () => {
@@ -550,7 +578,7 @@ describe('markdown safety', () => {
 
 describe('approval spoofing defense', () => {
   it('reveals hidden and bidi characters in commands', async () => {
-    const { revealHidden } = await import('./components/Transcript');
+    const { revealHidden } = await import('./components/Approval');
     expect(revealHidden('ls \u202Eabc\u200B')).toBe('ls ⟨U+202E⟩abc⟨U+200B⟩');
   });
 });
@@ -977,5 +1005,176 @@ describe('guided setup', () => {
     await userEvent.type(screen.getByLabelText('Model ID'), 'coder-large');
     await userEvent.click(screen.getByRole('button', { name: 'Start chatting' }));
     expect(sent).toContainEqual({ type: 'addModels', providerId: 'corp', modelIds: ['coder-large'], select: 'coder-large' });
+  });
+});
+
+describe('approval shortcuts', () => {
+  const editApproval = (over: Partial<AppState> = {}) =>
+    baseState({
+      session: {
+        id: 's',
+        title: 't',
+        messages: [
+          { role: 'user', id: 'u', content: 'edit', createdAt: 0 },
+          { role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'edit_file', arguments: '{"path":"src/a.ts"}' }] },
+        ],
+      },
+      run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'src/a.ts', callId: 'c1' } },
+      approvals: [{ id: 'ap', callId: 'c1', toolName: 'edit_file', title: 'src/a.ts', detail: { kind: 'edit', path: 'src/a.ts', isNew: false, diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1 } }],
+      ...over,
+    });
+  const decisions = () => sent.filter((m) => m.type === 'approval');
+  const composer = () => screen.getByLabelText('Message Sovran');
+
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  const arm = async () => {
+    const { ARM_MS } = await import('./components/Approval');
+    act(() => {
+      vi.advanceTimersByTime(ARM_MS + 10);
+    });
+  };
+
+  it('approves with Enter in the empty chat input once the bar has been on screen briefly', async () => {
+    mount(editApproval());
+    // An Enter pressed right as the bar appears (sending a message, a key held down) does nothing.
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    expect(decisions()).toEqual([]);
+    await arm();
+    fireEvent.keyDown(composer(), { key: 'Enter', repeat: true });
+    expect(decisions()).toEqual([]);
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    expect(decisions()).toEqual([{ type: 'approval', id: 'ap', approved: true, grant: undefined, feedback: undefined }]);
+  });
+
+  it('rejects with Escape at once, and Escape no longer stops the whole run while a decision waits', async () => {
+    mount(editApproval());
+    fireEvent.keyDown(composer(), { key: 'Escape' });
+    expect(decisions()).toEqual([{ type: 'approval', id: 'ap', approved: false, grant: undefined, feedback: undefined }]);
+    expect(sent).not.toContainEqual({ type: 'cancel' });
+  });
+
+  it('leaves the keys alone while the user types, in fields, menus and on focused buttons', async () => {
+    mount(editApproval());
+    await arm();
+    fireEvent.change(composer(), { target: { value: 'actually, wait' } });
+    fireEvent.keyDown(composer(), { key: 'Enter' });
+    fireEvent.keyDown(composer(), { key: 'Escape' });
+    fireEvent.keyDown(document.body, { key: 'Enter', ctrlKey: true });
+    // Enter on a focused button presses that button, never the approval.
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Reject' }), { key: 'Enter' });
+    fireEvent.keyDown(screen.getByRole('button', { name: /Approvals: Ask/ }), { key: 'Enter' });
+    expect(decisions()).toEqual([]);
+    // Anywhere else in the chat (the transcript, the page) the keys decide.
+    fireEvent.keyDown(screen.getByLabelText('Conversation'), { key: 'Enter' });
+    expect(decisions()).toHaveLength(1);
+  });
+
+  it('applies the checkbox to Enter, and Enter on the checkbox itself approves', async () => {
+    mount(editApproval());
+    await arm();
+    const box = screen.getByRole('checkbox', { name: /without asking/ });
+    fireEvent.click(box);
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(decisions()).toEqual([{ type: 'approval', id: 'ap', approved: true, grant: 'session-edits', feedback: undefined }]);
+  });
+
+  it('shows what the keys do in the input hint and announces them', () => {
+    mount(editApproval());
+    expect(screen.getByText('approve').closest('.sv-composer__keys')).toHaveTextContent('↵ approve');
+    expect(screen.getByText('reject').closest('.sv-composer__keys')).toHaveTextContent('Esc reject');
+    expect(screen.getByText(/waiting for your approval: Apply these changes\? Press Enter to apply or Escape to reject/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply' })).toHaveAttribute('aria-keyshortcuts', 'Enter');
+  });
+
+  it('keeps the pending tool call expanded: its detail cannot be folded away', () => {
+    mount(editApproval());
+    const row = screen.getByRole('button', { name: /Editing/ });
+    expect(row).toHaveAttribute('aria-expanded', 'true');
+    expect(row).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Open diff editor' })).toBeInTheDocument();
+  });
+});
+
+describe('approvalKey', () => {
+  it('ignores modified and composing keys and text being typed', async () => {
+    const { approvalKey } = await import('./components/Approval');
+    const key = (init: KeyboardEventInit, target: Element = document.body) => {
+      const e = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true });
+      Object.defineProperty(e, 'target', { value: target });
+      return approvalKey(e);
+    };
+    expect(key({ key: 'Enter' })).toBe('approve');
+    expect(key({ key: 'Escape' })).toBe('reject');
+    expect(key({ key: 'a' })).toBeNull();
+    expect(key({ key: 'Enter', shiftKey: true })).toBeNull();
+    expect(key({ key: 'Enter', isComposing: true })).toBeNull();
+    const input = document.createElement('input');
+    expect(key({ key: 'Enter' }, input)).toBeNull();
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    const item = document.createElement('div');
+    menu.appendChild(item);
+    expect(key({ key: 'Escape' }, item)).toBeNull();
+  });
+});
+
+describe('diff view', () => {
+  it('numbers lines, keeps removed lines that look like headers and expands long diffs', async () => {
+    const { parseDiff } = await import('./components/Diff');
+    const diff = ['===', '--- a/q.sql\t', '+++ b/q.sql\t', '@@ -10,3 +10,3 @@', ' select 1;', '--- a comment', '+-- the comment', ' end;', '\\ No newline at end of file'].join('\n');
+    expect(parseDiff(diff)).toEqual([
+      { kind: 'hunk', text: '@@ -10,3 +10,3 @@' },
+      { kind: 'ctx', text: 'select 1;', line: 10 },
+      { kind: 'del', text: '-- a comment', line: 11 },
+      { kind: 'add', text: '-- the comment', line: 11 },
+      { kind: 'ctx', text: 'end;', line: 12 },
+      { kind: 'note', text: 'No newline at end of file' },
+    ]);
+
+    const long = ['@@ -1,0 +1,100 @@', ...Array.from({ length: 100 }, (_, i) => `+line ${i}`)].join('\n');
+    mount(
+      baseState({
+        session: { id: 's', title: 't', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'write_file', arguments: '{"path":"big.ts"}' }] }] },
+        run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'big.ts', callId: 'c1' } },
+        approvals: [{ id: 'ap', callId: 'c1', toolName: 'write_file', title: 'big.ts', detail: { kind: 'edit', path: 'big.ts', isNew: true, diff: long, added: 100, removed: 0 } }],
+      }),
+    );
+    expect(screen.getByRole('region', { name: 'Create this file?' })).toBeInTheDocument();
+    expect(screen.queryByText('line 99')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Show 21 more lines' }));
+    expect(screen.getByText('line 99')).toBeInTheDocument();
+  });
+});
+
+describe('chats in editor tabs', () => {
+  it('shows which chats run, wait or are open in an editor tab, and opens one in a tab', async () => {
+    mount(
+      baseState({
+        view: 'history',
+        sessions: [
+          { id: 'a', title: 'Fix login', createdAt: 0, updatedAt: Date.now(), messageCount: 4 },
+          { id: 'b', title: 'Write docs', createdAt: 0, updatedAt: Date.now(), messageCount: 2 },
+          { id: 'c', title: 'Old idea', createdAt: 0, updatedAt: Date.now(), messageCount: 1 },
+        ],
+        liveSessions: [
+          { id: 'a', inEditor: true, running: true, needsApproval: true },
+          { id: 'b', inEditor: false, running: true, needsApproval: false },
+        ],
+      }),
+    );
+    const item = (title: string) => screen.getByRole('button', { name: new RegExp(`^${title}`) });
+    expect(item('Fix login')).toHaveTextContent(/Needs approval.*In editor/);
+    expect(item('Write docs')).toHaveTextContent('Working');
+    expect(item('Old idea')).not.toHaveTextContent(/Working|In editor|Needs approval/);
+    await userEvent.click(screen.getByRole('button', { name: 'Open Old idea in an editor tab' }));
+    expect(sent).toContainEqual({ type: 'openSessionInEditor', id: 'c' });
+  });
+
+  it('remembers the chat it shows, so a restored editor tab reopens it', async () => {
+    const { getUiState } = await import('./vscode');
+    mount(baseState({ surface: 'panel', session: { id: 'chat-42', title: 'Panel chat', messages: [] } }));
+    expect(getUiState().sessionId).toBe('chat-42');
+    expect(document.querySelector('.sv-app')).toHaveAttribute('data-surface', 'panel');
   });
 });

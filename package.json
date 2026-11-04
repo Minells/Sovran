@@ -44,6 +44,9 @@
     "theme": "dark"
   },
   "main": "./dist/extension.js",
+  "activationEvents": [
+    "onWebviewPanel:sovran.chatPanel"
+  ],
   "extensionKind": [
     "workspace"
   ],
@@ -95,6 +98,32 @@
         "title": "New Chat",
         "category": "Sovran",
         "icon": "$(add)"
+      },
+      {
+        "command": "sovran.newChatInEditor",
+        "title": "New Chat in Editor",
+        "category": "Sovran",
+        "icon": "$(add)"
+      },
+      {
+        "command": "sovran.openInEditor",
+        "title": "Open Chat in Editor",
+        "category": "Sovran",
+        "icon": "$(link-external)"
+      },
+      {
+        "command": "sovran.acceptProposal",
+        "title": "Apply Proposed Change",
+        "category": "Sovran",
+        "icon": "$(check)",
+        "enablement": "sovran.approvalPending"
+      },
+      {
+        "command": "sovran.rejectProposal",
+        "title": "Reject Proposed Change",
+        "category": "Sovran",
+        "icon": "$(close)",
+        "enablement": "sovran.approvalPending"
       },
       {
         "command": "sovran.showHistory",
@@ -179,14 +208,24 @@
           "group": "navigation@1"
         },
         {
-          "command": "sovran.showHistory",
+          "command": "sovran.openInEditor",
           "when": "view == sovran.chat",
           "group": "navigation@2"
         },
         {
-          "command": "sovran.openSettings",
+          "command": "sovran.showHistory",
           "when": "view == sovran.chat",
           "group": "navigation@3"
+        },
+        {
+          "command": "sovran.openSettings",
+          "when": "view == sovran.chat",
+          "group": "navigation@4"
+        },
+        {
+          "command": "sovran.newChatInEditor",
+          "when": "view == sovran.chat",
+          "group": "0_chat@1"
         },
         {
           "command": "sovran.manageProviders",
@@ -209,6 +248,38 @@
           "group": "2_help@1"
         }
       ],
+      "editor/title": [
+        {
+          "command": "sovran.rejectProposal",
+          "when": "resourceScheme == sovran-proposal && sovran.approvalPending",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sovran.acceptProposal",
+          "when": "resourceScheme == sovran-proposal && sovran.approvalPending",
+          "group": "navigation@2"
+        },
+        {
+          "command": "sovran.newChatInEditor",
+          "when": "activeWebviewPanelId == 'sovran.chatPanel'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sovran.showHistory",
+          "when": "activeWebviewPanelId == 'sovran.chatPanel'",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "sovran.acceptProposal",
+          "when": "sovran.approvalPending"
+        },
+        {
+          "command": "sovran.rejectProposal",
+          "when": "sovran.approvalPending"
+        }
+      ],
       "editor/context": [
         {
           "command": "sovran.askAboutSelection",
@@ -228,6 +299,12 @@
         "key": "ctrl+alt+u",
         "mac": "cmd+alt+u",
         "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "sovran.acceptProposal",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "resourceScheme == sovran-proposal && sovran.approvalPending"
       }
     ],
     "configuration": [

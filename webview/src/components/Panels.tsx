@@ -377,6 +377,34 @@ export function ProvidersView() {
 
 // ------------------------------------------------------------------------------------- history
 
+/** Where a chat is and whether it needs the user, for chats open in editor tabs or running. */
+function LiveStatus({ id }: { id: string }) {
+  const { app } = useStore();
+  const live = app.liveSessions.find((l) => l.id === id);
+  if (!live) return null;
+  return (
+    <span className="sv-history-item__status">
+      {live.needsApproval ? (
+        <span className="sv-live" data-tone="attention">
+          <span className="sv-pulse" aria-hidden="true" />
+          Needs approval
+        </span>
+      ) : live.running ? (
+        <span className="sv-live">
+          <Icon name="loading" spin />
+          Working
+        </span>
+      ) : null}
+      {live.inEditor ? (
+        <span className="sv-live" title="Open in an editor tab: selecting it focuses the tab">
+          <Icon name="window" />
+          In editor
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 export function HistoryView() {
   const { app } = useStore();
   const [query, setQuery] = useState('');
@@ -429,10 +457,12 @@ export function HistoryView() {
                 <button type="button" className="sv-history-item__main" onClick={() => post({ type: 'openSession', id: s.id })}>
                   <span className="sv-history-item__title">{s.title}</span>
                   <span className="sv-history-item__meta">
+                    <LiveStatus id={s.id} />
                     {relativeTime(s.updatedAt)} · {s.messageCount} message{s.messageCount === 1 ? '' : 's'}
                   </span>
                 </button>
                 <div className="sv-history-item__actions">
+                  <IconButton icon="link-external" label={`Open ${s.title} in an editor tab`} onClick={() => post({ type: 'openSessionInEditor', id: s.id })} />
                   <IconButton icon="edit" label={`Rename ${s.title}`} onClick={() => setRenaming({ id: s.id, title: s.title })} />
                   <IconButton icon="trash" label={`Delete ${s.title}`} onClick={() => post({ type: 'deleteSession', id: s.id })} />
                 </div>

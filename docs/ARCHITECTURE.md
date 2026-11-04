@@ -3,8 +3,8 @@
 ## 1. Principles
 
 1. **The host is authoritative.** The Extension Host owns sessions, runs, approvals, credentials and
-   all network and file I/O. The webview is a disposable projection: it can be destroyed at any time
-   and rehydrates from a full state snapshot.
+   all network and file I/O. Each webview (the Activity Bar view, or a chat in an editor tab) is a disposable
+   projection: it can be destroyed at any time and rehydrates from a full state snapshot.
 2. **The core is portable.** `src/core/**` never imports `vscode` (ESLint `no-restricted-imports`).
    VS Code capabilities reach the core through **ports** (interfaces) implemented by **adapters** in
    `src/extension/adapters`.
@@ -22,6 +22,7 @@ flowchart LR
   end
   subgraph Host["Extension Host (trusted)"]
     VP[SovranViewProvider<br/>CSP · message validation] --> CTRL[SovranController]
+    PN[SovranPanels<br/>chat editor tabs · serializer] --> CTRL
     CTRL --> REPO[FsSessionRepository]
     CTRL --> SEC[SecretStorage]
     CTRL --> CFG[Settings]
@@ -40,6 +41,7 @@ flowchart LR
     TR --> SECU[security: paths · commands · redact]
   end
   Store <-- "postMessage (typed)" --> VP
+  Store <-- "postMessage (typed)" --> PN
   CTRL --> AR
   Adapters -. implement ports .-> Core
 ```
@@ -60,7 +62,7 @@ src/
     sessions/                session model, repository interface, generated titles
   shared/protocol.ts         host ⇄ webview message contracts (types + zod schemas)
   extension/                 VS Code integration (composition root)
-    extension.ts · SovranViewProvider.ts · SovranController.ts · config.ts · configFileHost.ts · statusBar.ts · logger.ts
+    extension.ts · SovranViewProvider.ts · SovranPanels.ts · webviewHtml.ts · SovranController.ts · config.ts · configFileHost.ts · services.ts
     adapters/                VscodeWorkspace · NodeProcessRunner · DiffPresenter · FsSessionRepository · MementoCapabilityStore
 webview/                     React app (Vite) → dist/webview
 tests/                       unit · integration (mock OpenAI server) · fixtures · extension (test-electron)
@@ -234,7 +236,8 @@ All contracts are in `src/shared/protocol.ts`.
 **Webview → host** messages (validated with zod and rejected if malformed):
 - Chat and runs: `ready`, `send`, `cancel`, `approval` (with an optional `allowCommand` for "Always allow", checked
   against the approved command by the host), `openApprovalDiff`, `retry`, `editMessage`, `compact`, `restoreCheckpoint`
-- Sessions: `newSession`, `openSession`, `renameSession`, `deleteSession`
+- Sessions: `newSession`, `openSession`, `openSessionInEditor`, `renameSession`, `deleteSession`
+- Surfaces: `focused` (the webview got keyboard focus; commands without a surface of their own target the last one)
 - Modes and models: `setMode`, `setApprovalMode`, `pickModel`, `selectModel`, `setModel`, `addModels`, `discoverModels`
 - Context: `attachFiles`, `attachPath`, `removeAttachment`, `setIncludeEditor`, `suggestFiles`, `listDirectory` (one workspace
   folder for the attach menu, confined like every path) and `uploadFiles` (opens the system file dialog: the only way to
@@ -245,14 +248,55 @@ All contracts are in `src/shared/protocol.ts`.
   own value schema), `openSettings`, `showLogs`, `setView`
 
 **Host → webview** messages:
-- `state`: a full snapshot (providers without secrets, `hasKey` booleans, sessions index, active
-  session, run state, approvals, approval mode, settings view, workspace and trust info)
+- `state`: a full snapshot for one surface (its kind, its chat, run, approvals, screen and composer context, plus the
+  shared state: providers without secrets, `hasKey` booleans, sessions index, live sessions, modes, settings view,
+  workspace and trust info)
 - `patch` (partial state), and the incremental `messageUpsert`, `messageDelta` and `messageRemoved`
 - `toolOutput`, `notice`, `providerTest`, `providerSaved`, `fileSuggestions` (with an `active`/`open` hint for files open in
   the editor), `directoryListing` and `focusComposer`
 
-The host batches text deltas (about 40 ms) to limit message traffic. The webview keeps only UI
-ephemera (draft text, scroll position, expanded rows) in `vscode.setState`.
+The host batches text deltas (about 40 ms) to limit message traffic, and flushes them before any full snapshot so a
+delta never adds text the snapshot already has. The webview keeps only UI ephemera (draft text, the chat it shows,
+expanded rows) in `vscode.setState`.
+
+### Surfaces
+
+The controller serves several webviews at once, called *surfaces*: the Activity Bar view (`sidebar`, always present,
+its webview attached while the view is resolved) and any number of chats in editor tabs (`panel`, from
+`SovranPanels`). Every webview → host message carries the surface it came from (`handle(msg, surfaceId)`).
+
+- **Per surface:** the chat shown, the screen (`view`), attachments and the include-editor toggle. Panels only show
+  chats: `setView` for a list or settings from a panel opens it in the sidebar.
+- **Per chat (session):** the run, pending approvals, grants and the debounced save. Chats run in parallel; one chat runs
+  at most one run, and tools within a run still execute one at a time. Each run gets its own `ApprovalPort`, so its
+  requests are tagged with the chat and reach only the surface that shows it.
+- **Shared:** providers, models, Plan/Act mode, approval mode, settings, the sessions index and `liveSessions` (chats
+  open in a tab or running, with `needsApproval`), broadcast to every surface.
+- **One place per chat.** A chat is shown by at most one surface: opening a chat that is already shown focuses that
+  surface, and moving the view's chat to an editor tab gives the view a new chat. A run continues when its tab closes;
+  an approval nobody can see raises a notification whose *Review* reopens the chat.
+- **Routing.** Chat messages (`messageUpsert`/`Delta`/`Removed`, `toolOutput`, run, approvals, usage) go to the surface
+  showing the chat; replies (`fileSuggestions`, `directoryListing`, `providerSaved`, `providerTest`) go to the
+  requester, because request ids are only unique within one webview.
+- **Editor context.** A focused chat tab is VS Code's active editor, which reports no active text editor. While a chat
+  tab is active, the last text editor counts as "the active file" as long as it is still visible (the code beside the
+  chat). Files and diffs opened from a chat tab open beside it, never over it.
+- **Restore.** The webview saves the id of the chat it shows; `registerWebviewPanelSerializer` reopens a tab with that
+  chat after a restart (the id is validated, and an unknown id gives a new chat).
+
+### Approvals in the UI
+
+The decision for a pending approval is a bar between the chat header and the conversation (`ApprovalBar`), so it never
+scrolls away. It holds every decision (approve, reject, reject with feedback, always allow, apply future edits in this
+chat) and the short facts a decision needs (the command, warnings, the reason an unattended mode still asks). A long
+proposal (the diff) is read inline under its tool call (`ApprovalDetail`), which cannot be folded while pending.
+
+Enter approves and Escape rejects (`approvalKey`). Keys already in use keep their meaning: text being typed in any
+field (the empty chat input passes them on), menus, lists and dialogs, a focused button (Enter presses it), handlers
+that called `preventDefault`, modified keys and auto-repeat. Enter is ignored for 400 ms after the bar appears so an
+Enter meant for something else cannot approve an unseen action; Escape, the safe direction, is never delayed. The
+proposal's diff editor contributes Apply and Reject (`sovran.acceptProposal`/`rejectProposal`, enabled by the
+`sovran.approvalPending` context key; Ctrl/Cmd+Enter applies), which resolve the approval named by the diff's URI.
 
 ## 11. Checkpoints, rewind and compaction (v0.2)
 
