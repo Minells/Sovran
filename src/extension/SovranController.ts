@@ -8,6 +8,7 @@ import { AgentRunner } from '../core/agent/agentRunner';
 import { CheckpointRecorder, planRestore, restoreFiles, type Checkpoint, type FileSnapshot } from '../core/checkpoints/checkpoints';
 import { expandCommand, mergeCommands, parseSlash, type SlashCommand } from '../core/commands/slashCommands';
 import { planCompaction } from '../core/context/compaction';
+import { mergeProviders, parseConfigFile, type FileConfig } from '../core/config/configFile';
 import type { AgentEvent } from '../core/agent/events';
 import { matchesAllowList, suggestAllowPrefix } from '../core/permissions/commands';
 import type { AgentMode, ApprovalMode, SessionGrants } from '../core/permissions/policy';
@@ -30,11 +31,13 @@ import {
   type SessionSummary,
   type UserMessage,
 } from '../core/sessions/model';
+import { generateTitle } from '../core/sessions/titles';
 import { createBuiltinRegistry } from '../core/tools/builtin';
 import type {
   AppState,
   ApprovalView,
   AttachmentView,
+  ConfigFileView,
   DirectoryEntryView,
   DirectoryListingView,
   EditorContextView,
@@ -62,12 +65,15 @@ import {
   readProviders,
   readSettings,
   readSettingsView,
+  readTitleModel,
   writeDefaultModel,
   writePlanModel,
   writeProviders,
   writeSetting,
+  writeTitleModel,
   type HostSettings,
 } from './config';
+import type { ConfigFileHost } from './configFileHost';
 import type { HostLogger, ProviderSecrets, SovranStatusBar } from './services';
 
 const MAX_ATTACHMENT_CHARS = 50_000;
@@ -104,6 +110,7 @@ export interface ControllerDeps {
   checkpoints: FsCheckpointRepository;
   fileIndex: FileIndex;
   commandLoader: CommandLoader;
+  configFile: ConfigFileHost;
   reveal: () => Promise<void>;
 }
 
@@ -133,10 +140,22 @@ const newSession = (mode: AgentMode): Session => {
 export class SovranController implements ApprovalPort, vscode.Disposable {
   private post: ((m: HostMessage) => void) | undefined;
   private settings: HostSettings = readSettings();
+  /** Every provider in use: Settings and config file merged (a file entry replaces the Settings one with its id). */
   private providers: ProviderConfig[] = [];
+  /** Providers from `sovran.providers`; the only ones the UI writes back. */
+  private settingsProviders: ProviderConfig[] = [];
+  /** Providers from the last valid version of the config file. */
+  private fileProviders: ProviderConfig[] = [];
+  private overridden = new Set<string>();
+  private configFileView: ConfigFileView = { path: '', state: 'missing', providers: 0, problems: [] };
+  /** In-flight title requests, aborted on dispose. */
+  private readonly titleRequests = new Set<AbortController>();
+  /** Config file loads run one after the other (a save and a Reload click must not interleave). */
+  private configLoads: Promise<void> = Promise.resolve();
   private keyStatus = new Map<string, boolean>();
   private selected: SelectedModel | null = null;
   private planModel: SelectedModel | null = null;
+  private titleModel: SelectedModel | null = null;
   private commands: SlashCommand[] = mergeCommands([]);
   private mode: AgentMode = 'act';
   /** Approval mode for this window. Starts from `sovran.approvals.mode`; the composer and Settings change it. */
@@ -170,11 +189,14 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     this.approvalMode = this.settings.agent.policy.approvalMode;
     // Choosing Auto as the start-up default in settings is itself the informed choice.
     this.autoConfirmed = this.approvalMode === 'auto';
+    this.configFileView.path = this.deps.configFile.displayPath;
     await this.reloadProviders();
+    await this.reloadConfigFile('startup');
     const def = readDefaultModel();
     const [pid, ...rest] = def.split('/');
     this.selected = this.validSelection(pid && rest.length ? { providerId: pid, modelId: rest.join('/') } : null);
     this.planModel = this.parseModelRef(readPlanModel());
+    this.titleModel = this.parseModelRef(readTitleModel());
     this.commands = await this.deps.commandLoader.load().catch(() => mergeCommands([]));
     if (!vscode.workspace.isTrusted) this.mode = 'plan';
     this.session.mode = this.mode;
@@ -195,18 +217,21 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         this.patch({ commands: this.commandViews() });
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.patch({ workspace: this.workspaceView() })),
+      this.deps.configFile.onDidChange(() => void this.reloadConfigFile('change')),
       vscode.workspace.onDidChangeConfiguration(async (e) => {
         if (!e.affectsConfiguration('sovran')) return;
         this.settings = readSettings();
         await this.reloadProviders();
         this.selected = this.validSelection(this.selected);
         this.planModel = this.parseModelRef(readPlanModel());
+        this.titleModel = this.parseModelRef(readTitleModel());
         this.updateStatusBar();
         this.updateEditorContext();
         this.patch({
           providers: this.providerViews(),
           selected: this.selected,
           planModel: this.planModel,
+          titleModel: this.titleModel,
           settings: readSettingsView(this.settings),
           context: this.contextView(),
         });
@@ -224,6 +249,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   dispose() {
     this.run?.abort.abort();
+    for (const ac of this.titleRequests) ac.abort();
     for (const d of this.disposables) d.dispose();
     clearTimeout(this.flushTimer);
     clearTimeout(this.persistTimer);
@@ -267,6 +293,10 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
           return await this.selectModel({ providerId: msg.providerId, modelId: msg.modelId });
         case 'setModel':
           return await this.setModel(msg.role, msg.providerId && msg.modelId ? { providerId: msg.providerId, modelId: msg.modelId } : null);
+        case 'openConfigFile':
+          return await this.deps.configFile.open();
+        case 'reloadConfigFile':
+          return await this.reloadConfigFile('change');
         case 'addModels':
           return await this.addModels(msg.providerId, msg.modelIds, msg.select);
         case 'discoverModels':
@@ -343,10 +373,12 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       context: this.contextView(),
       grants: { edits: this.grantsFor(this.session.id).edits },
       planModel: this.planModel,
+      titleModel: this.titleModel,
       usage: this.usageView(this.session),
       compaction: this.compactionView(this.session),
       commands: this.commandViews(),
       settings: readSettingsView(this.settings),
+      configFile: this.configFileView,
     };
   }
 
@@ -393,6 +425,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       headerName: p.auth?.headerName,
       timeoutSeconds: p.timeoutSeconds,
       hasKey: this.keyStatus.get(p.id) ?? false,
+      source: this.isFileProvider(p.id) ? 'file' : 'settings',
+      ...(this.overridden.has(p.id) ? { overridesSettings: true } : {}),
       models: (p.models ?? []).map((m) => ({
         id: m.id,
         name: m.name,
@@ -828,8 +862,14 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (pick) await this.setApprovalMode(pick.value);
   }
 
-  /** Sets the Act or Plan model explicitly (Settings view). A null Plan model means "same as Act". */
-  private async setModel(role: 'act' | 'plan', sel: SelectedModel | null) {
+  /** Sets the Act, Plan or title model explicitly (Settings view). A null Plan or title model means "the chat's model". */
+  private async setModel(role: 'act' | 'plan' | 'title', sel: SelectedModel | null) {
+    if (role === 'title') {
+      if (sel && !this.exists(sel)) return;
+      this.titleModel = sel;
+      await writeTitleModel(sel ? `${sel.providerId}/${sel.modelId}` : '');
+      return this.patch({ titleModel: sel });
+    }
     if (role === 'plan') {
       if (sel && !this.exists(sel)) return;
       this.planModel = sel;
@@ -846,13 +886,15 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
 
   /** Adds discovered or typed models to a provider (onboarding), optionally selecting one as the Act model. */
   private async addModels(providerId: string, modelIds: string[], select?: string) {
-    const provider = this.providers.find((p) => p.id === providerId);
+    if (this.isFileProvider(providerId)) return this.editInConfigFile(providerId, 'add models to');
+    const provider = this.settingsProviders.find((p) => p.id === providerId);
     if (!provider) return;
     const known = new Set((provider.models ?? []).map((m) => m.id));
     const added = [...new Set(modelIds)].filter((id) => !known.has(id));
     if (added.length) {
       provider.models = [...(provider.models ?? []), ...added.map((id) => ({ id }))];
-      await writeProviders(this.providers);
+      await writeProviders(this.settingsProviders);
+      this.mergeProviders();
     }
     if (select && provider.models?.some((m) => m.id === select)) await this.setModel('act', { providerId, modelId: select });
     this.patch({ providers: this.providerViews(), selected: this.selected });
@@ -990,8 +1032,13 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     const provider = this.providers.find((p) => p.id === pick.providerId);
     if (!provider) return;
     if (!provider.models?.some((m) => m.id === pick.modelId)) {
-      provider.models = [...(provider.models ?? []), { id: pick.modelId }];
-      await writeProviders(this.providers);
+      // A provider from the config file is changed by editing the file, never behind the user's back.
+      if (this.isFileProvider(provider.id)) return this.editInConfigFile(provider.id, `add "${pick.modelId}" to`);
+      const target = this.settingsProviders.find((p) => p.id === provider.id);
+      if (!target) return;
+      target.models = [...(target.models ?? []), { id: pick.modelId }];
+      await writeProviders(this.settingsProviders);
+      this.mergeProviders();
     }
     await this.selectModel({ providerId: provider.id, modelId: pick.modelId });
     this.patch({ providers: this.providerViews() });
@@ -1000,8 +1047,158 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   // ------------------------------------------------------------------ providers
 
   private async reloadProviders() {
-    this.providers = readProviders(this.deps.logger);
+    this.settingsProviders = readProviders(this.deps.logger);
+    this.mergeProviders();
     await Promise.all(this.providers.map(async (p) => this.keyStatus.set(p.id, await this.deps.secrets.has(p.id))));
+  }
+
+  private mergeProviders() {
+    const merged = mergeProviders(this.settingsProviders, this.fileProviders);
+    this.providers = merged.providers;
+    this.overridden = new Set(merged.overridden);
+  }
+
+  private isFileProvider(id: string): boolean {
+    return this.fileProviders.some((p) => p.id === id);
+  }
+
+  /** Providers from the config file are edited in the file: say so and open it. */
+  private async editInConfigFile(providerId: string, action: string) {
+    const name = this.providers.find((p) => p.id === providerId)?.name ?? providerId;
+    this.notice('info', `${name} comes from ${this.configFileView.path}. To ${action} it, edit the file and save.`);
+    await this.deps.configFile.open();
+  }
+
+  // ------------------------------------------------------------------ config file
+
+  private reloadConfigFile(trigger: 'startup' | 'change'): Promise<void> {
+    this.configLoads = this.configLoads.then(() =>
+      this.loadConfigFile(trigger).catch((e) => this.deps.logger.error(`Loading config.yaml failed: ${e instanceof Error ? e.message : String(e)}`)),
+    );
+    return this.configLoads;
+  }
+
+  /**
+   * Reads `config.yaml` and applies it when it is valid: its providers join the Settings ones, model choices in it are
+   * selected (once per content change) and, after a save, Sovran connects to every provider that is new or changed.
+   * When the file has problems they are shown in the editor and the last valid version stays in use.
+   */
+  private async loadConfigFile(trigger: 'startup' | 'change') {
+    const file = this.deps.configFile;
+    const read = await file.read();
+    const view = (state: ConfigFileView['state'], problems: ConfigFileView['problems'] = []): ConfigFileView => ({
+      path: file.displayPath,
+      state,
+      providers: this.fileProviders.length,
+      problems,
+    });
+
+    if (read.kind === 'missing') {
+      file.setProblems([]);
+      const had = this.fileProviders.length > 0;
+      this.fileProviders = [];
+      this.configFileView = view('missing');
+      this.mergeProviders();
+      if (had) await this.refreshProviders();
+      else this.patch({ configFile: this.configFileView });
+      return;
+    }
+
+    // Model choices may point at providers configured in Settings.
+    const otherModels = new Set(this.settingsProviders.flatMap((p) => (p.models ?? []).map((m) => `${p.id}/${m.id}`)));
+    const result =
+      read.kind === 'text'
+        ? parseConfigFile(read.text, { otherModels })
+        : { ok: false as const, problems: [{ message: read.message, line: 0, column: 0, endLine: 0, endColumn: 0 }] };
+    if (!result.ok) {
+      file.setProblems(result.problems);
+      this.configFileView = view('error', result.problems.slice(0, 5).map((p) => ({ line: p.line + 1, message: p.message })));
+      this.patch({ configFile: this.configFileView });
+      this.deps.logger.warn(`config.yaml has ${result.problems.length} problem(s); keeping the last valid version.`);
+      if (trigger === 'change') {
+        const count = result.problems.length;
+        void vscode.window
+          .showWarningMessage(
+            `Sovran: ${file.displayPath} has ${count} problem${count === 1 ? '' : 's'}. Sovran keeps using the last valid version.`,
+            'Show Problems',
+          )
+          .then((c) => c && vscode.commands.executeCommand('workbench.actions.view.problems'));
+      }
+      return;
+    }
+
+    file.setProblems([]);
+    const previous = new Map(this.fileProviders.map((p) => [p.id, JSON.stringify(p)]));
+    this.fileProviders = result.config.providers;
+    await this.reloadProviders();
+    const text = read.kind === 'text' ? read.text : '';
+    if (file.isNewContent(text)) {
+      await this.applyModelChoices(result.config);
+      await file.markApplied(text);
+    }
+    this.configFileView = view('ok');
+    await this.refreshProviders();
+    this.deps.logger.info(`config.yaml applied · ${this.fileProviders.length} provider(s)`);
+    if (trigger === 'change') {
+      vscode.window.setStatusBarMessage(`$(check) Sovran: applied ${file.displayPath}`, 4000);
+      const changed = this.fileProviders.filter((p) => previous.get(p.id) !== JSON.stringify(p));
+      for (const p of changed) void this.connectFileProvider(p);
+    }
+  }
+
+  /** Selects the models the file names. Called only when the file content is new, so later picks in the UI stick. */
+  private async applyModelChoices(config: FileConfig) {
+    const act = config.defaultModel ? this.parseModelRef(config.defaultModel) : null;
+    if (act) {
+      this.selected = act;
+      await writeDefaultModel(config.defaultModel!);
+    }
+    const plan = config.planModel ? this.parseModelRef(config.planModel) : null;
+    if (plan) {
+      this.planModel = plan;
+      await writePlanModel(config.planModel!);
+    }
+    const title = config.titleModel ? this.parseModelRef(config.titleModel) : null;
+    if (title) {
+      this.titleModel = title;
+      await writeTitleModel(config.titleModel!);
+    }
+  }
+
+  /** Re-validates the selections against the current providers and pushes them to the UI. */
+  private async refreshProviders() {
+    this.selected = this.validSelection(this.selected);
+    if (!this.exists(this.planModel)) this.planModel = null;
+    if (!this.exists(this.titleModel)) this.titleModel = null;
+    this.updateStatusBar();
+    this.patch({
+      providers: this.providerViews(),
+      selected: this.selected,
+      planModel: this.planModel,
+      titleModel: this.titleModel,
+      configFile: this.configFileView,
+    });
+  }
+
+  /** After a save: asks for a missing key, then tests the connection and reports it where the user is (the editor). */
+  private async connectFileProvider(p: ProviderConfig) {
+    const needsKey = (p.auth?.type ?? 'bearer') !== 'none';
+    if (needsKey && !this.keyStatus.get(p.id)) {
+      const choice = await vscode.window.showInformationMessage(`Sovran: ${p.name} needs an API key. Keys are kept in VS Code Secret Storage, not in the file.`, 'Set Key');
+      if (choice !== 'Set Key') return;
+      await this.promptApiKey(p.id);
+      if (!this.keyStatus.get(p.id)) return;
+    }
+    const current = this.providers.find((x) => x.id === p.id);
+    if (!current) return;
+    const result = await this.checkConnection(current);
+    this.send({ type: 'providerTest', requestId: `config-${p.id}-${Date.now()}`, providerId: p.id, result });
+    if (result.ok) {
+      const noModels = !current.models?.length && result.models?.length ? ' Add the models you want under "models:".' : '';
+      void vscode.window.showInformationMessage(`Sovran: ${p.name}: ${result.message}.${noModels}`);
+    } else {
+      void vscode.window.showWarningMessage(`Sovran: could not connect to ${p.name}. ${result.message}${result.hint ? ` ${result.hint}` : ''}`);
+    }
   }
 
   private createProvider(config: ProviderConfig) {
@@ -1023,7 +1220,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   }
 
   private async saveProvider(input: ProviderInput, requestId?: string) {
-    const existing = input.id ? this.providers.find((p) => p.id === input.id) : undefined;
+    if (input.id && this.isFileProvider(input.id)) return this.editInConfigFile(input.id, 'change');
+    const existing = input.id ? this.settingsProviders.find((p) => p.id === input.id) : undefined;
     const id = existing?.id ?? this.slug(input.name);
     const config: ProviderConfig = {
       id,
@@ -1045,8 +1243,9 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (existing && existing.baseUrl !== config.baseUrl) {
       for (const m of existing.models ?? []) this.deps.capabilities.clear(capabilityKey(id, m.id));
     }
-    this.providers = existing ? this.providers.map((p) => (p.id === id ? config : p)) : [...this.providers, config];
-    await writeProviders(this.providers);
+    this.settingsProviders = existing ? this.settingsProviders.map((p) => (p.id === id ? config : p)) : [...this.settingsProviders, config];
+    await writeProviders(this.settingsProviders);
+    this.mergeProviders();
     if (config.auth?.type !== 'none' && !(await this.deps.secrets.has(id))) await this.promptApiKey(id);
     if (!this.selected) this.selected = this.validSelection(null);
     if (this.selected) await writeDefaultModel(`${this.selected.providerId}/${this.selected.modelId}`);
@@ -1062,12 +1261,14 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   }
 
   private async deleteProvider(id: string) {
-    const p = this.providers.find((x) => x.id === id);
+    if (this.isFileProvider(id)) return this.editInConfigFile(id, 'remove');
+    const p = this.settingsProviders.find((x) => x.id === id);
     if (!p) return;
     const choice = await vscode.window.showWarningMessage(`Remove provider "${p.name}"?`, { modal: true, detail: 'Its stored API key is deleted too.' }, 'Remove');
     if (choice !== 'Remove') return;
-    this.providers = this.providers.filter((x) => x.id !== id);
-    await writeProviders(this.providers);
+    this.settingsProviders = this.settingsProviders.filter((x) => x.id !== id);
+    await writeProviders(this.settingsProviders);
+    this.mergeProviders();
     await this.deps.secrets.delete(id);
     this.keyStatus.delete(id);
     this.selected = this.validSelection(this.selected);
@@ -1102,6 +1303,11 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private async testProvider(requestId: string, providerId: string) {
     const config = this.providers.find((p) => p.id === providerId);
     if (!config) return;
+    this.send({ type: 'providerTest', requestId, providerId, result: await this.checkConnection(config) });
+  }
+
+  /** Lists the server's models, or (for gateways without /models) sends a one-token completion. */
+  private async checkConnection(config: ProviderConfig): Promise<ProviderTestResult> {
     const provider = this.createProvider(config);
     const started = Date.now();
     let result: ProviderTestResult;
@@ -1128,7 +1334,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         result = { ok: false, message: err.message, hint: err.hint };
       }
     }
-    this.send({ type: 'providerTest', requestId, providerId, result });
+    return result;
   }
 
   // ------------------------------------------------------------------ runs
@@ -1201,7 +1407,12 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     }
 
     if (!session.messages.includes(user)) session.messages.push(user);
-    if (session.title === DEFAULT_TITLE) session.title = deriveTitle(user.display ?? user.content);
+    if (session.title === DEFAULT_TITLE) {
+      // The first words are the title right away; a generated title replaces them when (and if) it arrives.
+      session.title = deriveTitle(user.display ?? user.content);
+      // The expanded text (a slash command's prompt) says more than what was typed; attachments are never sent.
+      if (this.settings.generateTitles) void this.nameSession(session, user.content, { provider, model });
+    }
     session.updatedAt = Date.now();
     session.providerId = provider.id;
     session.modelId = model.id;
@@ -1253,6 +1464,35 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       if (session.id === this.session.id) {
         this.patch({ run: null, approvals: [], grants: { edits: this.grantsFor(session.id).edits } });
       }
+    }
+  }
+
+  /**
+   * Asks the model for a short title, in parallel with the run (a few tokens, so it barely delays it). Runs on the
+   * title model when one is set, else on the chat's model. The title is kept only if the user has not renamed the chat
+   * or deleted it meanwhile; any failure keeps the first-words title.
+   */
+  private async nameSession(session: Session, text: string, chat: { provider: ProviderConfig; model: ModelConfig }) {
+    const derived = session.title;
+    const sel = this.exists(this.titleModel) ? this.titleModel : null;
+    const provider = sel ? this.providers.find((p) => p.id === sel.providerId) : chat.provider;
+    const model = sel ? provider?.models?.find((m) => m.id === sel.modelId) : chat.model;
+    if (!provider || !model) return;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 30_000);
+    this.titleRequests.add(ac);
+    try {
+      const title = await generateTitle(this.createProvider(provider), model, text, ac.signal);
+      if (!title || session.title !== derived || !this.loaded.has(session.id)) return;
+      session.title = title;
+      if (session.id === this.session.id) this.patch({ session: { id: session.id, title: session.title, messages: session.messages } });
+      await this.persist(session);
+    } catch (e) {
+      const err = e instanceof ProviderError ? e : errorFromException(e, { url: provider.baseUrl });
+      this.deps.logger.warn(`Naming the chat with ${provider.id}/${model.id} failed: ${err.message}`);
+    } finally {
+      clearTimeout(timer);
+      this.titleRequests.delete(ac);
     }
   }
 

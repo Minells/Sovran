@@ -189,6 +189,22 @@ export function SetupWizard() {
             <Icon name="shield" />
             API keys are stored in VS Code Secret Storage on this machine and are never sent to this panel.
           </p>
+          <p className="sv-fineprint">
+            <Icon name="file-code" />
+            <span>
+              Prefer a file?{' '}
+              <a
+                href="#"
+                onClick={(e) => {
+                  e.preventDefault();
+                  post({ type: 'openConfigFile' });
+                }}
+              >
+                Describe your models in config.yaml
+              </a>
+              . Sovran connects when you save it.
+            </span>
+          </p>
         </>
       ) : null}
 

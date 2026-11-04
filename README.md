@@ -124,6 +124,10 @@ Errors tell you what went wrong and how to fix it.
 
 **A model for each mode.** Plan can use a larger reasoning model while Act uses a fast coder. In Plan mode, pick the model from the composer, or choose *Same as Act model*.
 
+**Chat titles written by the model (optional).** Turn on *Settings → Models → Name chats with the model* and Sovran
+asks the model for a short title in the language you wrote in, while the answer streams. A small, fast *Title model*
+is enough. When it is off (the default), the title is the first words of your first message.
+
 ## Installation
 
 From the VS Code Marketplace (once published): search for **Sovran** in the Extensions view.
@@ -144,6 +148,8 @@ Requires VS Code 1.95 or later.
 4. **Choose a model** from the ones the server reports (or type its ID) and start chatting.
 
 Everything else (a separate Plan model, more providers, approvals and limits) lives behind the gear in the view title.
+
+Prefer a text file? Skip the setup and describe your models in [`~/.sovran/config.yaml`](#configuration-file-configyaml).
 
 <p align="center">
   <img src="media/screenshots/onboarding-dark.png" width="320" alt="Guided setup with provider presets">
@@ -183,6 +189,72 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
   "models": [{ "id": "coder-large", "contextWindow": 128000 }] }
 ```
 
+## Configuration file (`config.yaml`)
+
+You can configure providers in two ways, and use both at once:
+
+- **In the panel:** the guided setup and **Settings → Models → Manage providers** (stored in `sovran.providers`).
+- **In a YAML file:** **Settings → Models → Create config.yaml** (or `Sovran: Open Model Config File`) opens
+  `~/.sovran/config.yaml`, created from a commented template. Write your providers and save: Sovran applies the file
+  right away and connects to every provider that is new or changed, asking for a key when one is needed.
+
+```yaml
+providers:
+  - id: ollama
+    name: Ollama
+    baseUrl: http://localhost:11434/v1
+    auth: none                       # shorthand for { type: none }
+    models:
+      - id: qwen2.5-coder:14b
+        contextWindow: 32768
+      - devstral:24b                 # a plain string is a model id
+
+  - id: vllm
+    name: GPU cluster
+    baseUrl: https://vllm.internal.example/v1
+    auth: bearer                     # the key is asked for once and kept in Secret Storage
+    timeoutSeconds: 300
+    models:
+      - id: my-coder
+        contextWindow: 131072
+        toolMode: native
+
+  - id: corp
+    name: Company AI Gateway
+    baseUrl: https://ai-gateway.example.com/v1
+    auth:
+      type: header
+      headerName: api-key
+    headers:
+      X-Team: platform
+    models: [coder-large]
+
+# Optional: the models to select when this file is applied (providerId/modelId).
+defaultModel: ollama/qwen2.5-coder:14b
+planModel: vllm/my-coder
+titleModel: ollama/qwen2.5-coder:14b
+```
+
+The fields are the same as in `sovran.providers` (see the examples above and [Model options](#model-options)); `name`
+defaults to the `id`.
+
+How Sovran applies it:
+
+- **All or nothing.** The file is applied only when it is entirely valid. Mistakes are underlined in the editor and
+  listed in the Problems panel and in Settings, with hints such as *Unknown field "base_url". Did you mean "baseUrl"?*;
+  meanwhile Sovran keeps using the last valid version.
+- **Alongside Settings.** Providers from the file are added to the ones in Settings. An entry with the same `id`
+  replaces the Settings one. Providers from the file are marked *config.yaml* and are edited in the file.
+- **Model choices** (`defaultModel`, `planModel`, `titleModel`) are applied when the file content changes, so a model
+  you pick later in the composer is not reverted at the next start.
+- **No secrets.** API keys are never read from the file: a field such as `apiKey`, or a header such as `Authorization`,
+  is reported as a problem. Keys stay in VS Code Secret Storage.
+- **Never from a repository.** The file lives in your home folder, not in the workspace, so a cloned repository cannot
+  ship one (the same reason `sovran.providers` is user scope only).
+
+Changes saved in VS Code apply immediately. If you edit the file with another program and the folder did not exist
+when VS Code started, use **Reload** in Settings.
+
 ### Model options
 
 | Field | Meaning |
@@ -210,10 +282,14 @@ For native tool calling, start vLLM with tool parsing enabled (for example `--en
 | `sovran.context.autoCompact` | `true` | Summarize older messages when the context window is full |
 | `sovran.context.projectInstructions` | `true` | Use `AGENTS.md` from the workspace root (trusted workspaces only) |
 | `sovran.sessions.persist` | `true` | Save chats in VS Code workspace storage |
+| `sovran.sessions.generateTitles` | `false` | Name new chats with the model (one short extra request with the first message) instead of using its first words. User scope only |
+| `sovran.sessions.titleModel` | `""` | `providerId/modelId` that writes the titles, for example a small fast model. Empty means the chat's model |
 | `sovran.diff.openOnProposal` | `true` | Open the diff editor automatically for proposed edits |
 | `sovran.approvals.fileEdits` | `ask` | *Deprecated*: use `sovran.approvals.mode`. `auto` here still starts windows in Auto-edit |
 
-All of these can be changed from **Sovran Settings** (the gear in the view title); the VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *Context* and *Chats*.
+All of these can be changed from **Sovran Settings** (the gear in the view title). Its areas, *Models*, *Approvals*,
+*Agent*, *Context* and *Data*, stay at the top as tabs: pick one to see only its settings (arrow keys move between
+them). The VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *Context* and *Chats*.
 
 ## Security
 

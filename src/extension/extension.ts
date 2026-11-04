@@ -8,6 +8,7 @@ import { RipgrepSearch } from './adapters/RipgrepSearch';
 import { VscodeWorkspace } from './adapters/VscodeWorkspace';
 import { CommandLoader, FileIndex } from './workspaceServices';
 import { readSettings } from './config';
+import { ConfigFileHost } from './configFileHost';
 import { SovranController } from './SovranController';
 import { SovranViewProvider } from './SovranViewProvider';
 import { MementoCapabilityStore, ProviderSecrets, SovranStatusBar, createLogger } from './services';
@@ -26,6 +27,7 @@ export async function activate(context: vscode.ExtensionContext) {
   logger.info(ripgrep ? 'Using VS Code ripgrep for search.' : 'ripgrep not found; using built-in search.');
   const fileIndex = new FileIndex();
   const commandLoader = new CommandLoader();
+  const configFile = new ConfigFileHost(context.globalState);
 
   // The view provider needs the controller and the controller needs to reveal the view.
   const ref: { view?: SovranViewProvider } = {};
@@ -43,6 +45,7 @@ export async function activate(context: vscode.ExtensionContext) {
     checkpoints: new FsCheckpointRepository(path.join(storage, 'checkpoints')),
     fileIndex,
     commandLoader,
+    configFile,
     reveal,
   });
   await controller.init();
@@ -56,6 +59,7 @@ export async function activate(context: vscode.ExtensionContext) {
     mirror,
     fileIndex,
     commandLoader,
+    configFile,
     statusBar,
     controller,
     vscode.window.registerWebviewViewProvider(SovranViewProvider.viewId, viewProvider),
@@ -76,6 +80,7 @@ export async function activate(context: vscode.ExtensionContext) {
       controller.showView('settings');
       await reveal();
     }),
+    command('sovran.openConfigFile', () => configFile.open()),
     command('sovran.setApprovalMode', () => controller.pickApprovalMode()),
     command('sovran.selectModel', () => controller.pickModel()),
     command('sovran.setApiKey', () => controller.promptApiKey()),

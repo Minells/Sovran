@@ -31,6 +31,22 @@ export interface ProviderView {
   /** Whether a key is stored. The key itself never reaches the webview. */
   hasKey: boolean;
   models: ModelView[];
+  /** Where the provider is configured: Sovran Settings (editable in the panel) or the config file (edited as text). */
+  source: 'settings' | 'file';
+  /** A config file entry that replaces the Settings provider with the same id. */
+  overridesSettings?: boolean;
+}
+
+/** The optional config file (`~/.sovran/config.yaml`). */
+export interface ConfigFileView {
+  /** Where the file lives, for display (`~/.sovran/config.yaml`). */
+  path: string;
+  /** `error`: the file has problems and Sovran keeps using its last valid version (if any). */
+  state: 'missing' | 'ok' | 'error';
+  /** Providers the file contributes right now. */
+  providers: number;
+  /** The first problems, with one-based line numbers. The editor shows all of them. */
+  problems: Array<{ line: number; message: string }>;
 }
 
 export interface SelectedModel {
@@ -153,6 +169,8 @@ export interface SettingsView {
   projectInstructions: boolean;
   maxToolResultChars: number;
   persistSessions: boolean;
+  /** Ask the model for a short chat title instead of using the first words of the first message. */
+  generateTitles: boolean;
   /** Keys whose effective value comes from workspace settings, so a change here may not apply in this workspace. */
   overriddenByWorkspace: SettingKey[];
 }
@@ -164,6 +182,8 @@ export interface AppState {
   selected: SelectedModel | null;
   /** Model used in Plan mode; null means "same as Act". */
   planModel: SelectedModel | null;
+  /** Model that names new chats when titles are generated; null means "the chat's model". */
+  titleModel: SelectedModel | null;
   mode: AgentMode;
   /** How much Act mode may do without asking, for this window. */
   approvalMode: ApprovalMode;
@@ -177,6 +197,7 @@ export interface AppState {
   compaction: CompactionView | null;
   commands: SlashCommandView[];
   settings: SettingsView;
+  configFile: ConfigFileView;
 }
 
 export interface ProviderTestResult {
@@ -267,6 +288,7 @@ export const settingUpdateSchema = z.discriminatedUnion('key', [
   z.object({ key: z.literal('context.projectInstructions'), value: z.boolean() }),
   z.object({ key: z.literal('context.maxToolResultChars'), value: z.number().int().min(2000).max(200_000) }),
   z.object({ key: z.literal('sessions.persist'), value: z.boolean() }),
+  z.object({ key: z.literal('sessions.generateTitles'), value: z.boolean() }),
 ]);
 export type SettingUpdate = z.infer<typeof settingUpdateSchema>;
 export type SettingKey = SettingUpdate['key'];
@@ -293,10 +315,10 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('setApprovalMode'), mode: approvalModeSchema }),
   z.object({ type: z.literal('pickModel') }),
   z.object({ type: z.literal('selectModel'), providerId, modelId: z.string().min(1).max(200) }),
-  /** Sets the Act or Plan model explicitly; a Plan model without ids means "same as Act". */
+  /** Sets the Act, Plan or title model explicitly; a Plan or title model without ids means "same as the chat's". */
   z.object({
     type: z.literal('setModel'),
-    role: z.enum(['act', 'plan']),
+    role: z.enum(['act', 'plan', 'title']),
     providerId: providerId.optional(),
     modelId: z.string().min(1).max(200).optional(),
   }),
@@ -323,6 +345,10 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('testProvider'), requestId: id, providerId }),
   z.object({ type: z.literal('setApiKey'), providerId }),
   z.object({ type: z.literal('openSettings') }),
+  /** Opens `~/.sovran/config.yaml` in an editor, creating it from a commented template when it does not exist. */
+  z.object({ type: z.literal('openConfigFile') }),
+  /** Reads the config file again (it is also reloaded automatically when saved). */
+  z.object({ type: z.literal('reloadConfigFile') }),
   z.object({ type: z.literal('restoreCheckpoint'), messageId: id }),
   z.object({ type: z.literal('retry') }),
   z.object({ type: z.literal('editMessage'), messageId: id, text: z.string().min(1).max(200_000) }),

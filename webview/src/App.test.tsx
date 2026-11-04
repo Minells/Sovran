@@ -10,7 +10,7 @@ import { onPost, setUiState } from './vscode';
 const baseState = (over: Partial<AppState> = {}): AppState => ({
   view: 'chat',
   workspace: { name: 'w', trusted: true, hasFolder: true },
-  providers: [{ id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }] }],
+  providers: [{ id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, source: 'settings', models: [{ id: 'coder', toolMode: 'auto' }] }],
   selected: { providerId: 'local', modelId: 'coder' },
   mode: 'act',
   sessions: [],
@@ -21,6 +21,7 @@ const baseState = (over: Partial<AppState> = {}): AppState => ({
   grants: { edits: false },
   approvalMode: 'ask',
   planModel: null,
+  titleModel: null,
   usage: null,
   compaction: null,
   commands: [
@@ -41,15 +42,17 @@ const baseState = (over: Partial<AppState> = {}): AppState => ({
     projectInstructions: true,
     maxToolResultChars: 20000,
     persistSessions: true,
+    generateTitles: false,
     overriddenByWorkspace: [],
   },
+  configFile: { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] },
   ...over,
 });
 
 let sent: WebviewMessage[] = [];
 let unsubscribe: () => void;
 beforeEach(() => {
-  setUiState({ draft: '' }); // drafts persist across mounts by design; isolate tests
+  setUiState({ draft: '', settingsArea: undefined }); // drafts and the Settings area persist across mounts by design; isolate tests
   sent = [];
   unsubscribe = onPost((m) => sent.push(m));
 });
@@ -265,7 +268,7 @@ describe('v0.2 recovery & productivity', () => {
     mount(
       baseState({
         mode: 'plan',
-        providers: [{ id: 'local', name: 'Local', baseUrl: 'http://x/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] }],
+        providers: [{ id: 'local', name: 'Local', baseUrl: 'http://x/v1', authType: 'none', hasKey: false, source: 'settings', models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] }],
         planModel: { providerId: 'local', modelId: 'thinker' },
       }),
     );
@@ -684,11 +687,56 @@ describe('settings view', () => {
     baseState({
       view: 'settings',
       providers: [
-        { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] },
-        { id: 'corp', name: 'Corp', baseUrl: 'http://gw.corp.example/v1', authType: 'bearer', hasKey: true, models: [{ id: 'big', toolMode: 'auto' }] },
+        { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, source: 'settings', models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] },
+        { id: 'corp', name: 'Corp', baseUrl: 'http://gw.corp.example/v1', authType: 'bearer', hasKey: true, source: 'settings', models: [{ id: 'big', toolMode: 'auto' }] },
       ],
       ...over,
     });
+  const tab = (name: string) => screen.getByRole('tab', { name });
+  const openArea = (name: string) => userEvent.click(tab(name));
+
+  it('keeps the five areas on screen and shows only the selected one', async () => {
+    mount(settingsState());
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Models', 'Approvals', 'Agent', 'Context', 'Data']);
+    expect(tab('Models')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel', { name: 'Models' })).toContainElement(screen.getByLabelText('Act model'));
+    expect(screen.queryByLabelText('Allowed commands')).not.toBeInTheDocument();
+
+    await openArea('Approvals');
+    expect(tab('Approvals')).toHaveAttribute('aria-selected', 'true');
+    expect(tab('Models')).toHaveAttribute('aria-selected', 'false');
+    expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
+    expect(screen.getByLabelText('Allowed commands')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Act model')).not.toBeInTheDocument();
+    // The areas never scroll away or disappear: all five are still there.
+    expect(screen.getAllByRole('tab')).toHaveLength(5);
+  });
+
+  it('moves between areas with the arrow keys, Home and End, with one tab stop', async () => {
+    mount(settingsState());
+    tab('Models').focus();
+    await userEvent.keyboard('{ArrowRight}');
+    expect(tab('Approvals')).toHaveFocus();
+    expect(tab('Approvals')).toHaveAttribute('aria-selected', 'true');
+    await userEvent.keyboard('{End}');
+    expect(tab('Data')).toHaveAttribute('aria-selected', 'true');
+    await userEvent.keyboard('{ArrowRight}');
+    expect(tab('Models')).toHaveFocus();
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(tab('Data')).toHaveFocus();
+    await userEvent.keyboard('{Home}');
+    expect(tab('Models')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getAllByRole('tab').filter((t) => t.tabIndex === 0)).toEqual([tab('Models')]);
+  });
+
+  it('reopens the area the user left', async () => {
+    const first = mount(settingsState());
+    await openArea('Context');
+    first.unmount();
+    mount(settingsState());
+    expect(tab('Context')).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByLabelText(/Attach the active file/)).toBeInTheDocument();
+  });
 
   it('configures the Act and Plan models', async () => {
     mount(settingsState());
@@ -704,8 +752,47 @@ describe('settings view', () => {
     expect(screen.getByText(/key sent over http/)).toBeInTheDocument();
   });
 
+  it('turns model-generated chat titles on and picks the model that writes them', async () => {
+    const view = mount(settingsState());
+    expect(screen.queryByLabelText('Title model')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText(/Name chats with the model/));
+    expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'sessions.generateTitles', value: true } });
+
+    host({ type: 'patch', patch: { settings: { ...settingsState().settings, generateTitles: true } } });
+    const title = screen.getByLabelText('Title model');
+    expect(title).toHaveValue('');
+    expect(within(title).getByRole('option', { name: "Same as the chat's model" })).toBeInTheDocument();
+    await userEvent.selectOptions(title, within(title).getByRole('option', { name: 'coder' }));
+    expect(sent).toContainEqual({ type: 'setModel', role: 'title', providerId: 'local', modelId: 'coder' });
+    await userEvent.selectOptions(title, within(title).getByRole('option', { name: "Same as the chat's model" }));
+    expect(sent).toContainEqual({ type: 'setModel', role: 'title' });
+    view.unmount();
+  });
+
+  it('offers the configuration file and reports its state', async () => {
+    mount(settingsState());
+    expect(screen.getByText('~/.sovran/config.yaml')).toBeInTheDocument();
+    expect(screen.getByText('Not created yet.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Create config.yaml' }));
+    expect(sent).toContainEqual({ type: 'openConfigFile' });
+
+    host({
+      type: 'patch',
+      patch: {
+        configFile: { path: '~/.sovran/config.yaml', state: 'error', providers: 1, problems: [{ line: 7, message: 'Unknown field "base_url". Did you mean "baseUrl"?' }] },
+        providers: [...settingsState().providers, { id: 'gpu', name: 'GPU', baseUrl: 'https://gpu.example/v1', authType: 'bearer', hasKey: true, source: 'file', models: [{ id: 'm', toolMode: 'auto' }] }],
+      },
+    });
+    expect(screen.getByText(/still using the last valid version \(1 provider\)/)).toBeInTheDocument();
+    expect(within(screen.getByRole('list', { name: 'Problems in the configuration file' })).getByText(/Did you mean "baseUrl"/)).toBeInTheDocument();
+    expect(screen.getByText('config.yaml', { selector: '.sv-tag' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(sent).toContainEqual({ type: 'reloadConfigFile' });
+  });
+
   it('changes the approval mode for this window and the default for new windows', async () => {
     mount(settingsState());
+    await openArea('Approvals');
     await userEvent.click(screen.getByRole('radio', { name: /Auto-edit/ }));
     expect(sent).toContainEqual({ type: 'setApprovalMode', mode: 'edits' });
     await userEvent.selectOptions(screen.getByLabelText('When a window opens, start in'), 'auto');
@@ -714,6 +801,7 @@ describe('settings view', () => {
 
   it('edits the allowed commands and rejects shell operators', async () => {
     mount(settingsState());
+    await openArea('Approvals');
     const input = screen.getByLabelText('Allowed commands');
     await userEvent.type(input, 'npm test && curl x');
     expect(screen.getByText(/Shell operators such as/)).toBeInTheDocument();
@@ -726,8 +814,10 @@ describe('settings view', () => {
 
   it('toggles options, validates numbers and restores protected defaults', async () => {
     mount(settingsState());
+    await openArea('Context');
     await userEvent.click(screen.getByLabelText(/Attach the active file/));
     expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'context.includeActiveEditor', value: false } });
+    await openArea('Agent');
     const steps = screen.getByLabelText('Maximum steps per request');
     await userEvent.clear(steps);
     await userEvent.type(steps, '500');
@@ -735,13 +825,38 @@ describe('settings view', () => {
     await userEvent.clear(steps);
     await userEvent.type(steps, '40{Enter}');
     expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'agent.maxIterations', value: 40 } });
+    await openArea('Approvals');
     await userEvent.click(screen.getByRole('button', { name: 'Restore defaults' }));
     expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'security.protectedPaths', value: ['**/.env', '**/*.pem'] } });
   });
 
-  it('notes settings overridden by the workspace', () => {
+  it('notes settings overridden by the workspace', async () => {
     mount(settingsState({ settings: { ...baseState().settings, overriddenByWorkspace: ['agent.maxIterations'] } }));
+    await openArea('Agent');
     expect(screen.getAllByText(/This workspace overrides this setting/)).toHaveLength(1);
+  });
+});
+
+describe('providers from the configuration file', () => {
+  it('are edited in the file, not in the form, and say so', async () => {
+    mount(
+      baseState({
+        view: 'providers',
+        providers: [
+          { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, source: 'settings', models: [{ id: 'coder', toolMode: 'auto' }] },
+          { id: 'gpu', name: 'GPU', baseUrl: 'https://gpu.example/v1', authType: 'bearer', hasKey: true, source: 'file', overridesSettings: true, models: [{ id: 'm', toolMode: 'auto' }] },
+        ],
+      }),
+    );
+    const gpu = screen.getByRole('region', { name: 'GPU' });
+    expect(within(gpu).getByText(/config.yaml · overrides Settings/)).toBeInTheDocument();
+    expect(within(gpu).queryByRole('button', { name: 'Remove GPU' })).not.toBeInTheDocument();
+    await userEvent.click(within(gpu).getByRole('button', { name: 'Edit GPU in config.yaml' }));
+    expect(sent).toContainEqual({ type: 'openConfigFile' });
+    expect(screen.queryByRole('form')).not.toBeInTheDocument();
+    // Settings providers keep the form.
+    const local = screen.getByRole('region', { name: 'Local' });
+    expect(within(local).getByRole('button', { name: 'Remove Local' })).toBeInTheDocument();
   });
 });
 
@@ -757,7 +872,7 @@ describe('guided setup', () => {
     expect(screen.getByText('Connecting…')).toBeInTheDocument();
 
     // The host saves the provider (the app now has one), then reports the connection test.
-    host({ type: 'patch', patch: { providers: [{ id: 'ollama', name: 'Ollama', baseUrl: 'http://localhost:11434/v1', authType: 'none', hasKey: false, models: [] }] } });
+    host({ type: 'patch', patch: { providers: [{ id: 'ollama', name: 'Ollama', baseUrl: 'http://localhost:11434/v1', authType: 'none', hasKey: false, source: 'settings', models: [] }] } });
     host({ type: 'providerSaved', requestId: save.requestId!, providerId: 'ollama' });
     expect(screen.getByText('Connecting…')).toBeInTheDocument();
     host({ type: 'providerTest', requestId: save.requestId!, providerId: 'ollama', result: { ok: true, models: ['qwen2.5-coder:14b', 'llama3.1:8b'], message: 'Connected' } });

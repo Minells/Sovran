@@ -1984,7 +1984,10 @@ body.vscode-high-contrast .sv-code {
 /* Settings */
 
 .sv-settings {
+  container: sv-settings / inline-size;
   gap: var(--sv-s4);
+  /* The sticky header provides the top spacing, so nothing scrolls above it. */
+  padding-top: 0;
 }
 
 .sv-settings > * {
@@ -1993,52 +1996,141 @@ body.vscode-high-contrast .sv-code {
   margin-inline: auto;
 }
 
-.sv-settings__nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px var(--sv-s3);
-  margin-top: calc(-1 * var(--sv-s2));
-  font-size: var(--sv-text-xs);
-}
-
-.sv-settings__nav a {
-  color: var(--sv-muted);
-  text-decoration: none;
-}
-
-.sv-settings__nav a:hover {
-  color: var(--sv-fg);
-}
-
-.sv-settings__section {
+/* Header and area tabs stay on screen; only the selected area scrolls under them. */
+.sv-settings > .sv-settings__top {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  max-width: none;
+  margin-inline: calc(-1 * var(--sv-s3));
+  width: auto;
+  padding: var(--sv-s3) var(--sv-s3) 0;
   display: flex;
   flex-direction: column;
-  gap: var(--sv-s3);
-  padding-top: var(--sv-s3);
-  border-top: 1px solid var(--sv-border);
-  scroll-margin-top: var(--sv-s3);
-}
-
-.sv-settings__head {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
   gap: var(--sv-s2);
-  align-items: start;
+  background: var(--sv-bg);
 }
 
-.sv-settings__head > .codicon {
-  margin-top: 2px;
+.sv-settings__top > * {
+  width: 100%;
+  max-width: 640px;
+  margin-inline: auto;
+}
+
+/* Each tab is as wide as its content plus an equal share of the free space, so the selected (larger) tab is never
+   cut off; the others give up a few pixels when it grows. */
+.sv-settings__tabs {
+  display: flex;
+  align-items: flex-end;
+  border-bottom: 1px solid var(--sv-border);
+}
+
+.sv-settings__tab {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 6px 2px 6px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: var(--sv-radius) var(--sv-radius) 0 0;
+  background: none;
   color: var(--sv-muted);
+  font: inherit;
+  font-size: var(--sv-text-xs);
+  line-height: 1.3;
+  cursor: pointer;
+  transition:
+    color 120ms var(--sv-ease),
+    background-color 120ms var(--sv-ease),
+    font-size 160ms var(--sv-ease),
+    border-color 160ms var(--sv-ease);
 }
 
-.sv-settings__head h3 {
-  margin: 0;
+.sv-settings__tab .codicon {
+  font-size: 14px;
+  transition:
+    font-size 160ms var(--sv-ease),
+    color 160ms var(--sv-ease);
+}
+
+.sv-settings__tab-label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sv-settings__tab:hover {
+  color: var(--sv-fg);
+  background: var(--sv-hover);
+}
+
+.sv-settings__tab:focus-visible {
+  outline: 1px solid var(--sv-focus);
+  outline-offset: -1px;
+}
+
+.sv-settings__tab[aria-selected='true'] {
+  padding-top: 4px;
+  color: var(--sv-fg);
   font-size: var(--sv-text-md);
   font-weight: 600;
+  background: var(--sv-surface);
+  border-bottom-color: var(--sv-accent);
 }
 
-.sv-settings__head p {
-  margin: 2px 0 0;
+.sv-settings__tab[aria-selected='true'] .codicon {
+  font-size: 18px;
+  color: var(--sv-accent);
+}
+
+body.vscode-high-contrast .sv-settings__tab[aria-selected='true'],
+body.vscode-high-contrast-light .sv-settings__tab[aria-selected='true'] {
+  border-bottom-color: var(--vscode-contrastActiveBorder, var(--sv-focus));
+}
+
+/* Narrow sidebars: the other areas shrink to their icon, the selected one keeps its name. */
+@container sv-settings (max-width: 310px) {
+  .sv-settings__tab {
+    flex: 1 1 0;
+  }
+
+  .sv-settings__tab[aria-selected='true'] {
+    flex: 2.4 1 0;
+  }
+
+  .sv-settings__tab:not([aria-selected='true']) .sv-settings__tab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+.sv-settings__area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-s4);
+  animation: sv-area-in 160ms var(--sv-ease);
+}
+
+@keyframes sv-area-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+
+.sv-settings__intro {
+  margin: 0;
+  color: var(--sv-muted);
+  font-size: var(--sv-text-sm);
 }
 
 .sv-settings__body {
@@ -3122,4 +3214,91 @@ body.vscode-high-contrast-light .sv-starter-card {
 .sv-turn__actions .sv-icon-btn {
   width: 22px;
   height: 22px;
+}
+
+/* Settings: chat titles and the configuration file */
+
+/* A setting with a dependent one under it (not a .sv-field: its label styles would bold the checkbox row). */
+.sv-subfield {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sv-s3);
+}
+
+.sv-subfield > .sv-field {
+  padding-left: 22px;
+}
+
+.sv-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  background: var(--sv-surface-strong);
+  color: var(--sv-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 15px;
+  vertical-align: 1px;
+}
+
+.sv-config-file {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: var(--sv-s2);
+  align-items: start;
+  padding: var(--sv-s2);
+  border: 1px solid var(--sv-border);
+  border-radius: var(--sv-radius-lg);
+}
+
+.sv-config-file > .codicon {
+  margin-top: 1px;
+  color: var(--sv-muted);
+}
+
+.sv-config-file[data-state='ok'] > .codicon {
+  color: var(--sv-ok);
+}
+
+.sv-config-file[data-state='error'] {
+  border-color: color-mix(in srgb, var(--sv-err) 55%, var(--sv-border));
+}
+
+.sv-config-file[data-state='error'] > .codicon {
+  color: var(--sv-err);
+}
+
+.sv-config-file__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--sv-text-sm);
+}
+
+.sv-config-file__text code {
+  font-family: var(--sv-mono);
+  overflow-wrap: anywhere;
+}
+
+.sv-config-file__text [role='status'] {
+  color: var(--sv-muted);
+  font-size: var(--sv-text-xs);
+}
+
+.sv-config-file__problems {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--sv-err);
+  font-size: var(--sv-text-xs);
+}
+
+.sv-config-file__problems .sv-tabular {
+  margin-right: 4px;
+  color: var(--sv-muted);
 }

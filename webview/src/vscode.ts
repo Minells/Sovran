@@ -45,6 +45,8 @@ export function onPost(listener: (m: WebviewMessage) => void) {
 
 export interface UiPersistedState {
   draft?: string;
+  /** The Settings area last shown, so Settings reopens where the user left it. */
+  settingsArea?: string;
 }
 
 export function getUiState(): UiPersistedState {

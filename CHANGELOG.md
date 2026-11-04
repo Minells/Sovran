@@ -6,6 +6,8 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- **Configuration file `~/.sovran/config.yaml`** as an alternative to the panel: describe providers and models in YAML (same fields as `sovran.providers`, plus shorthands such as `auth: none` and plain model ids) and save. Sovran applies the file at once, connects to new or changed providers and asks for missing keys. Problems are underlined in the editor with fix hints, and the last valid version stays in use. Optional `defaultModel`, `planModel` and `titleModel` select models when the file changes. Open it from **Settings → Models**, the guided setup, the providers page or `Sovran: Open Model Config File`.
+- **Chat titles written by the model** (opt-in, `sovran.sessions.generateTitles`): a short title in the user's language, generated while the answer streams, optionally by a dedicated small model (`sovran.sessions.titleModel`). Falls back to the first words of the message on any failure, and never replaces a title the user set.
 - **New start page** for every chat: the animated `[•]` mark, what Sovran is connected to (workspace, model, and whether it runs on this machine), the current mode, four starters built from the active file or selection, the three latest chats and a tip. The layout centres in tall sidebars and switches to one column in narrow ones; motion stops with *reduce motion*.
 - **Attach menu** on the paperclip: search workspace files, pick from suggestions (active editor and open tabs), browse folders from the workspace root (protected files are marked), or **upload from your computer** with the system file dialog. Files toggle, so several can be added in a row; fully keyboard operable.
 - **Keyboard shortcuts popover** under the composer, listing every shortcut including the global ones.
@@ -31,6 +33,7 @@ pre-releases and even minor versions are stable releases.
 - Agent commands no longer inherit `ELECTRON_RUN_AS_NODE` from the extension host.
 
 ### Changed
+- **Settings areas are tabs.** *Models*, *Approvals*, *Agent*, *Context* and *Data* stay at the top; the selected area is larger and highlighted, and only its settings are shown. Arrow keys, Home and End move between areas, and Settings reopens on the last area. In narrow sidebars the other areas shrink to their icon.
 - **Retry** under the last response is now a quiet icon that appears on hover or keyboard focus, next to Copy. Errors keep their visible Retry button.
 - `@` with nothing typed yet suggests the active editor and open tabs first.
 - Binary files and files larger than 5 MB are refused with a notice when attached, instead of being sent as unreadable text.
