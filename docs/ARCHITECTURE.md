@@ -286,10 +286,20 @@ its webview attached while the view is resolved) and any number of chats in edit
 
 ### Approvals in the UI
 
-The decision for a pending approval is a bar between the chat header and the conversation (`ApprovalBar`), so it never
-scrolls away. It holds every decision (approve, reject, reject with feedback, always allow, apply future edits in this
+The decision for a pending approval is a card between the conversation and the chat input (`ApprovalBar`), so it never
+scrolls away, and it is where the eyes are after sending a message; it replaces the run status line while it waits. It
+uses neutral surfaces and VS Code's own button colours (`--vscode-button-*`), not the brand accent. It holds every decision (approve, reject, reject with feedback, always allow, apply future edits in this
 chat) and the short facts a decision needs (the command, warnings, the reason an unattended mode still asks). A long
 proposal (the diff) is read inline under its tool call (`ApprovalDetail`), which cannot be folded while pending.
+
+### Pinned message
+
+While the conversation scrolls, `StickyPrompt` pins the user message whose answer is being read: the last one whose top
+has reached the top of the view (`pickPinned`), so it behaves like `position: sticky` on each message, including the
+next message pushing it out. It is a separate overlay rather than CSS sticky so that a long message shows in two lines
+without anything in the conversation changing size. It listens to the scroll area itself (one animation frame per
+burst of scroll events) and applies the push-out offset directly, so the conversation is not rendered again while
+scrolling. The transcript's `scroll-padding-top` keeps revealed proposals clear of it.
 
 Enter approves and Escape rejects (`approvalKey`). Keys already in use keep their meaning: text being typed in any
 field (the empty chat input passes them on), menus, lists and dialogs, a focused button (Enter presses it), handlers

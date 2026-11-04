@@ -266,6 +266,22 @@ const doneConversation: SessionMessage[] = [
   },
 ];
 
+/** `?scenario=long`: several exchanges with long answers, to scroll through (the pinned message). */
+const longAnswer = (topic: string) =>
+  [
+    `Here is how ${topic} works, step by step.`,
+    ...Array.from({ length: 6 }, (_, i) => `**Step ${i + 1}.** The request goes through \`src/http/client.ts\`, which retries idempotent calls with exponential backoff and jitter, and gives up after the configured budget so a slow dependency cannot hold the worker.`),
+    'That covers the whole path.',
+  ].join('\n\n');
+const longConversation: SessionMessage[] = [
+  { role: 'user', id: 'l0', createdAt: now - 900_000, content: 'Explain the retry logic in http/client.ts' },
+  { role: 'assistant', id: 'l1', createdAt: now - 890_000, model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' }, content: longAnswer('the retry logic') },
+  { role: 'user', id: 'l2', createdAt: now - 600_000, content: 'And how are timeouts chosen? I want to understand why some calls wait 30 seconds and others give up after 5, and whether that is configurable per endpoint.' },
+  { role: 'assistant', id: 'l3', createdAt: now - 590_000, model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' }, content: longAnswer('timeout selection') },
+  { role: 'user', id: 'l4', createdAt: now - 300_000, content: 'Summarize it in three bullets' },
+  { role: 'assistant', id: 'l5', createdAt: now - 290_000, model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' }, content: longAnswer('the summary') },
+];
+
 /** `?scenario=bigdiff`: a proposal longer than the view, as real edits usually are. */
 const bigDiff = [
   '===================================================================',
@@ -294,7 +310,16 @@ const bigDiff = [
 const diff = `--- a/src/auth/session.ts\n+++ b/src/auth/session.ts\n@@ -1,7 +1,7 @@\n import { randomUUID } from 'node:crypto';\n import type { User } from '../users';\n \n-const TTL = 3600;\n+const TTL = Number(process.env.SESSION_TTL ?? 3600);\n \n export interface Session {\n   id: string;`;
 
 function baseState(): AppState {
-  const messages = scenario === 'conversation' || scenario === 'bigdiff' ? conversation : scenario === 'auto' ? autoConversation : scenario === 'done' ? doneConversation : [];
+  const messages =
+    scenario === 'conversation' || scenario === 'bigdiff'
+      ? conversation
+      : scenario === 'auto'
+        ? autoConversation
+        : scenario === 'done'
+          ? doneConversation
+          : scenario === 'long'
+            ? longConversation
+            : [];
   const awaitingEdit = scenario === 'conversation' || scenario === 'bigdiff';
   const approvalParam = (['ask', 'edits', 'auto'] as const).find((m) => m === params.get('approval')) ?? 'ask';
   return {

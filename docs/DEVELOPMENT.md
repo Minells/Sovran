@@ -31,7 +31,7 @@ Query parameters:
 
 | Parameter | Values |
 |---|---|
-| `scenario` | `conversation`, `bigdiff` (a proposal taller than the view), `done` (finished, no pending approval), `auto`, `empty`, `onboarding`, `providers`, `history` (with live chat status), `settings` |
+| `scenario` | `conversation`, `bigdiff` (a proposal taller than the view), `long` (several long exchanges, to scroll), `done` (finished, no pending approval), `auto`, `empty`, `onboarding`, `providers`, `history` (with live chat status), `settings` |
 | `surface` | `panel` (a chat in an editor tab: full width, editor background; default: the Activity Bar view) |
 | `editor` | `none`, `selection`, `outside` (default: an open file) |
 | `approval` | `ask`, `edits`, `auto` |

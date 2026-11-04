@@ -8,7 +8,7 @@ import { DiffView } from './Diff';
 import { Button, Icon } from './primitives';
 
 /*
- * Approvals have two parts. The bar at the top of the chat is where the user decides: it never scrolls away, holds
+ * Approvals have two parts. The bar right above the chat input is where the user decides: it never scrolls away, holds
  * every decision (with Enter and Escape as shortcuts) and shows everything a decision needs that is short (the
  * command, warnings, the path). The detail inline in the transcript is where the user reads a long proposal (the diff),
  * in the flow of the conversation. Nothing is decided in two places.
@@ -72,7 +72,7 @@ export function approvalKey(e: KeyboardEvent): 'approve' | 'reject' | null {
 
 type Step = 'decide' | 'feedback' | 'allow';
 
-/** The decision for the first pending approval, pinned above the chat. Keyed by approval id, so each starts fresh. */
+/** The decision for the first pending approval, above the chat input. Keyed by approval id, so each starts fresh. */
 export function ApprovalBar({ approval }: { approval: ApprovalView }) {
   const { app } = useStore();
   const d = approval.detail;
@@ -319,8 +319,8 @@ export function ApprovalDetail({ approval }: { approval: ApprovalView }) {
         </>
       ) : null}
       <p className="sv-approval__hint">
-        <Icon name="arrow-up" />
-        <span>Waiting for your decision at the top of the chat</span>
+        <Icon name="arrow-down" />
+        <span>Waiting for your decision above the chat input</span>
         <span className="sv-nowrap">
           · <kbd>↵</kbd> {approvalCopy(approval).verb.toLowerCase()}
         </span>
