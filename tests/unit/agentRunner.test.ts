@@ -53,6 +53,31 @@ function setup(turns: ConstructorParameters<typeof ScriptedProvider>[0], opts: {
 
 const toolMsgs = (s: Session) => s.messages.filter((m): m is ToolMessage => m.role === 'tool');
 
+describe('AgentRunner limits', () => {
+  const contextEvent = (events: AgentEvent[]) => events.find((e): e is Extract<AgentEvent, { type: 'context' }> => e.type === 'context')!;
+
+  it('uses the window the server reports when the user set none, and never sends it as max_tokens', async () => {
+    const t = setup([[text('ok')]]);
+    await t.run({ model: { id: 'm', serverLimits: { contextWindow: 131072, maxOutputTokens: 32000 } } });
+    expect(contextEvent(t.events)).toMatchObject({ contextWindow: 131072, budgetTokens: 131072 - 4096 });
+    expect(t.provider.requests[0]!.maxTokens).toBeUndefined();
+  });
+
+  it("lets the user's values win over the server's", async () => {
+    const t = setup([[text('ok')]]);
+    await t.run({ model: { id: 'm', contextWindow: 65536, maxOutputTokens: 8192, serverLimits: { contextWindow: 131072 } } });
+    expect(contextEvent(t.events)).toMatchObject({ contextWindow: 65536, budgetTokens: 65536 - 8192 });
+    expect(t.provider.requests[0]!.maxTokens).toBe(8192);
+  });
+
+  it('keeps the limits the server reported when it learns that a model needs prompted tools', async () => {
+    const t = setup([new ProviderError('tools_unsupported', 'no tools', undefined, 400), [text('ok')]]);
+    t.capabilities.set('p/m', { contextWindow: 131072, updatedAt: 1 });
+    await t.run();
+    expect(t.capabilities.get('p/m')).toMatchObject({ toolMode: 'prompted', contextWindow: 131072 });
+  });
+});
+
 describe('AgentRunner', () => {
   it('completes a multi-step read → edit flow with approval and a native diff proposal', async () => {
     const t = setup([

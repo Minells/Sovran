@@ -1,13 +1,19 @@
+import type { ModelInfo, ServerLimits } from './limits';
+
 export type ToolMode = 'auto' | 'native' | 'prompted' | 'none';
 export type ResolvedToolMode = Exclude<ToolMode, 'auto'>;
 
 export interface ModelConfig {
   id: string;
   name?: string;
+  /** Configured by the user; wins over what the server reports. */
   contextWindow?: number;
+  /** Configured by the user: reserved for the reply and sent as max_tokens. */
   maxOutputTokens?: number;
   temperature?: number;
   toolMode?: ToolMode;
+  /** What the server reports for this model. Attached at run time only, never written to settings or the file. */
+  serverLimits?: ServerLimits;
 }
 
 export interface ProviderAuth {
@@ -61,5 +67,7 @@ export type ProviderEvent =
 export interface ChatProvider {
   readonly id: string;
   listModels(signal?: AbortSignal): Promise<string[]>;
+  /** Models with the limits the server declares, when the provider can read them. */
+  listModelInfo?(signal?: AbortSignal): Promise<ModelInfo[]>;
   streamChat(request: ChatRequest, signal: AbortSignal): AsyncIterable<ProviderEvent>;
 }

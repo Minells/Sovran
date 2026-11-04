@@ -1,5 +1,6 @@
 import { parseSSE } from './sse';
 import { ProviderError, errorFromException, errorFromResponse, isRedirect, redirectError, type AuthSent } from './errors';
+import { limitsFromLiteLlmInfo, limitsFromModelEntry, type ModelInfo, type ServerLimits } from './limits';
 import type { ChatProvider, ChatRequest, ProviderConfig, ProviderEvent } from './types';
 
 export interface OpenAICompatibleOptions {
@@ -80,8 +81,9 @@ export class OpenAICompatibleProvider implements ChatProvider {
     return { headers, secret, auth: { type: auth.type, header, keySent: !!secret } };
   }
 
-  async listModels(signal?: AbortSignal): Promise<string[]> {
-    const url = this.url('/models');
+  /** GET `path` and parse JSON, with the same headers, timeout, redirect policy and error mapping as every request. */
+  private async getJson(path: string, signal?: AbortSignal): Promise<unknown> {
+    const url = this.url(path);
     const watchdog = new Watchdog(Math.min(this.timeoutMs, 30_000), signal);
     let secret: string | undefined;
     try {
@@ -91,23 +93,48 @@ export class OpenAICompatibleProvider implements ChatProvider {
       if (isRedirect(res.status)) throw redirectError(res.status, res.headers.get('location'), url);
       const text = await res.text();
       if (!res.ok) throw errorFromResponse(res.status, text, { url, secrets: [secret], auth: h.auth });
-      let json: unknown;
       try {
-        json = JSON.parse(text);
+        return JSON.parse(text);
       } catch {
-        throw new ProviderError('invalid_response', 'The /models response is not valid JSON.');
+        throw new ProviderError('invalid_response', `The ${path} response is not valid JSON.`);
       }
-      const list = isObj(json) && Array.isArray(json.data) ? json.data : isObj(json) && Array.isArray(json.models) ? json.models : Array.isArray(json) ? json : null;
-      if (!list) throw new ProviderError('invalid_response', 'The /models response has no model list.');
-      const ids = list
-        .map((m: unknown) => (typeof m === 'string' ? m : isObj(m) ? (m.id ?? m.name ?? m.model) : undefined))
-        .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
-      return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
     } catch (e) {
       throw errorFromException(e, { url, timedOut: watchdog.timedOut, secrets: [secret] });
     } finally {
       watchdog.dispose();
     }
+  }
+
+  async listModels(signal?: AbortSignal): Promise<string[]> {
+    return (await this.modelEntries(signal)).map((m) => m.id);
+  }
+
+  /**
+   * The server's models with the limits it declares (see limitsFromModelEntry). When `/models` declares none, asks
+   * LiteLLM's `/model/info` once; any failure there is ignored, since most servers do not have it.
+   */
+  async listModelInfo(signal?: AbortSignal): Promise<ModelInfo[]> {
+    const models = await this.modelEntries(signal);
+    if (models.some((m) => m.contextWindow || m.maxOutputTokens)) return models;
+    let info: Map<string, ServerLimits>;
+    try {
+      info = limitsFromLiteLlmInfo(await this.getJson('/model/info', signal));
+    } catch {
+      return models;
+    }
+    return models.map((m) => ({ ...m, ...info.get(m.id) }));
+  }
+
+  private async modelEntries(signal?: AbortSignal): Promise<ModelInfo[]> {
+    const json = await this.getJson('/models', signal);
+    const list = isObj(json) && Array.isArray(json.data) ? json.data : isObj(json) && Array.isArray(json.models) ? json.models : Array.isArray(json) ? json : null;
+    if (!list) throw new ProviderError('invalid_response', 'The /models response has no model list.');
+    const byId = new Map<string, ModelInfo>();
+    for (const m of list as unknown[]) {
+      const id = typeof m === 'string' ? m : isObj(m) ? (m.id ?? m.name ?? m.model) : undefined;
+      if (typeof id === 'string' && id.length > 0 && !byId.has(id)) byId.set(id, { id, ...limitsFromModelEntry(m) });
+    }
+    return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
   async *streamChat(request: ChatRequest, signal: AbortSignal): AsyncGenerator<ProviderEvent> {

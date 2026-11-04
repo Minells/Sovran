@@ -18,6 +18,7 @@ import { capabilityKey, type CapabilityStore } from '../core/providers/capabilit
 import { ProviderError, errorFromException } from '../core/providers/errors';
 import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
 import { normalizeApiKey, probeConnection } from '../core/providers/connection';
+import type { ModelInfo, ServerLimits } from '../core/providers/limits';
 import type { ModelConfig, ProviderConfig } from '../core/providers/types';
 import { PathError, resolveAndVerify, resolveWorkspacePath, type ResolvedPath } from '../core/security/paths';
 import { compareEntries, displayPath, looksBinary } from '../core/util/files';
@@ -153,6 +154,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   private syncing = false;
   /** Settings could not be updated from the file (for example settings.json has errors): use the file's providers. */
   private settingsStale = false;
+  /** `providerId|baseUrl` whose model limits were already read in this session. */
+  private readonly limitsChecked = new Set<string>();
   private configFileView: ConfigFileView = { path: '', state: 'missing', providers: 0, problems: [] };
   /** In-flight title requests, aborted on dispose. */
   private readonly titleRequests = new Set<AbortController>();
@@ -442,6 +445,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
         id: m.id,
         name: m.name,
         contextWindow: m.contextWindow,
+        maxOutputTokens: m.maxOutputTokens,
+        serverLimits: this.serverLimits(p.id, m.id),
         toolMode: m.toolMode ?? 'auto',
         learnedToolMode: this.deps.capabilities.get(capabilityKey(p.id, m.id))?.toolMode,
       })),
@@ -1013,11 +1018,12 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       async (_p, token) => {
         const ac = new AbortController();
         token.onCancellationRequested(() => ac.abort());
-        const results: Array<{ provider: ProviderConfig; models: string[]; error?: string }> = [];
+        const results: Array<{ provider: ProviderConfig; models: string[]; info?: ModelInfo[]; error?: string }> = [];
         await Promise.all(
           this.providers.map(async (provider) => {
             try {
-              results.push({ provider, models: await this.createProvider(provider).listModels(ac.signal) });
+              const info = await this.createProvider(provider).listModelInfo(ac.signal);
+              results.push({ provider, models: info.map((m) => m.id), info });
             } catch (e) {
               const err = e instanceof ProviderError ? e : errorFromException(e, { url: provider.baseUrl });
               results.push({ provider, models: [], error: err.message });
@@ -1041,6 +1047,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (!pick?.providerId || !pick.modelId) return;
     const provider = this.providers.find((p) => p.id === pick.providerId);
     if (!provider) return;
+    const info = found.find((r) => r.provider.id === provider.id)?.info;
+    if (info) this.storeServerLimits(provider, info, pick.modelId);
     if (!provider.models?.some((m) => m.id === pick.modelId)) {
       const target = this.settingsProviders.find((p) => p.id === provider.id);
       if (!target) return;
@@ -1058,6 +1066,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     this.settingsProviders = readProviders(this.deps.logger);
     this.useProviders();
     await Promise.all(this.providers.map(async (p) => this.keyStatus.set(p.id, await this.deps.secrets.has(p.id))));
+    this.detectServerLimits();
   }
 
   private useProviders() {
@@ -1367,11 +1376,14 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       ...(existing?.headers ? { headers: existing.headers } : {}),
       ...(input.timeoutSeconds ? { timeoutSeconds: input.timeoutSeconds } : {}),
       models: input.models.map((m) => {
-        const prev = existing?.models?.find((x) => x.id === m.id);
+        // Keep what the form does not edit (name, temperature); the form's fields replace the old values, and an
+        // emptied field removes them, so the model falls back to what the server reports or to the default.
+        const { contextWindow: _c, maxOutputTokens: _o, toolMode: _t, ...kept } = existing?.models?.find((x) => x.id === m.id) ?? { id: m.id };
         return {
-          ...prev,
+          ...kept,
           id: m.id,
           ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+          ...(m.maxOutputTokens ? { maxOutputTokens: m.maxOutputTokens } : {}),
           ...(m.toolMode && m.toolMode !== 'auto' ? { toolMode: m.toolMode } : {}),
         };
       }),
@@ -1433,6 +1445,7 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
     if (key) await this.deps.secrets.set(id, key);
     else await this.deps.secrets.delete(id);
     this.keyStatus.set(id, !!key);
+    if (key) this.detectServerLimits();
     if (key && notes.length) this.notice('info', `Saved the key for ${provider.name} without ${notes.join(', ')}.`);
     this.patch({ providers: this.providerViews() });
   }
@@ -1446,7 +1459,62 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
   /** Lists the server's models, or (for gateways without /models) sends a one-token completion. */
   /** Lists the server's models, or (for gateways without /models, or that refuse it to the key) pings the chat. */
   private async checkConnection(config: ProviderConfig): Promise<ProviderTestResult> {
-    return probeConnection(this.createProvider(config), config.models?.[0]?.id, config.baseUrl);
+    const { info, ...result } = await probeConnection(this.createProvider(config), config.models?.[0]?.id, config.baseUrl);
+    if (info && this.storeServerLimits(config, info)) this.patch({ providers: this.providerViews() });
+    return result;
+  }
+
+  // ------------------------------------------------------------------ model limits reported by servers
+
+  private serverLimits(providerId: string, modelId: string): ServerLimits | undefined {
+    const c = this.deps.capabilities.get(capabilityKey(providerId, modelId));
+    return c?.contextWindow || c?.maxOutputTokens ? { contextWindow: c.contextWindow, maxOutputTokens: c.maxOutputTokens } : undefined;
+  }
+
+  /**
+   * Remembers the limits a server declared for the provider's configured models (and `extra`). A model the server lists
+   * without limits loses the old ones, since the server changed. Returns whether anything changed.
+   */
+  private storeServerLimits(provider: ProviderConfig, info: readonly ModelInfo[], extra?: string): boolean {
+    const wanted = new Set([...(provider.models ?? []).map((m) => m.id), ...(extra ? [extra] : [])]);
+    let changed = false;
+    for (const m of info) {
+      if (!wanted.has(m.id)) continue;
+      const key = capabilityKey(provider.id, m.id);
+      const { contextWindow: oldCtx, maxOutputTokens: oldOut, ...rest } = this.deps.capabilities.get(key) ?? { updatedAt: 0 };
+      if (oldCtx === m.contextWindow && oldOut === m.maxOutputTokens) continue;
+      this.deps.capabilities.set(key, {
+        ...rest,
+        ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+        ...(m.maxOutputTokens ? { maxOutputTokens: m.maxOutputTokens } : {}),
+        updatedAt: Date.now(),
+      });
+      changed = true;
+    }
+    return changed;
+  }
+
+  /**
+   * Reads the limits of every provider once per session (and again when its URL changes), in the background. Skips
+   * providers that need a key Sovran does not have, and those whose models all have both limits set by the user.
+   */
+  private detectServerLimits() {
+    for (const p of this.providers) {
+      const key = `${p.id}|${p.baseUrl}`;
+      if (this.limitsChecked.has(key) || !p.models?.length) continue;
+      if ((p.auth?.type ?? 'bearer') !== 'none' && !this.keyStatus.get(p.id)) continue;
+      if (p.models.every((m) => m.contextWindow && m.maxOutputTokens)) continue;
+      this.limitsChecked.add(key);
+      const provider = this.createProvider(p);
+      void (async () => {
+        try {
+          const info = provider.listModelInfo ? await provider.listModelInfo(AbortSignal.timeout(15_000)) : [];
+          if (this.storeServerLimits(p, info)) this.patch({ providers: this.providerViews() });
+        } catch (e) {
+          this.deps.logger.debug(`Could not read model limits from ${p.id}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      })();
+    }
   }
 
   // ------------------------------------------------------------------ runs
@@ -1485,7 +1553,8 @@ export class SovranController implements ApprovalPort, vscode.Disposable {
       this.setView('providers');
       return undefined;
     }
-    return { provider, model };
+    // A copy: the limits the server reported are used for this run and never written back to settings or the file.
+    return { provider, model: { ...model, serverLimits: this.serverLimits(provider.id, model.id) } };
   }
 
   private createRunner(provider: ProviderConfig, workspace: WorkspacePort) {

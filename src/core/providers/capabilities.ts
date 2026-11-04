@@ -2,6 +2,9 @@ import type { ResolvedToolMode, ToolMode } from './types';
 
 export interface LearnedCapabilities {
   toolMode?: Extract<ResolvedToolMode, 'native' | 'prompted'>;
+  /** Limits the server reported for the model (see limits.ts). */
+  contextWindow?: number;
+  maxOutputTokens?: number;
   updatedAt: number;
 }
 

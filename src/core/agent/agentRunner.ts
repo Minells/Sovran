@@ -4,6 +4,7 @@ import { buildContext, estimateTokens } from '../context/contextManager';
 import { decide, type AgentMode, type PolicySettings, type SessionGrants } from '../permissions/policy';
 import type { ApprovalPort, Logger, ProcessPort, WorkspacePort } from '../ports';
 import { capabilityKey, resolveToolMode, type CapabilityStore } from '../providers/capabilities';
+import { effectiveLimits } from '../providers/limits';
 import { ProviderError, errorFromException } from '../providers/errors';
 import type { ChatProvider, ModelConfig, ResolvedToolMode } from '../providers/types';
 import { PathError } from '../security/paths';
@@ -16,6 +17,11 @@ import type { AgentEvent, RunOutcome } from './events';
 import { parseJsonLenient, parseToolCallBlock } from './promptedTools';
 import { buildSystemPrompt } from './systemPrompt';
 import { TaggedStreamParser } from './taggedStream';
+
+const defaultsOf = (s: Pick<AgentSettings, 'defaultContextWindow' | 'defaultMaxOutputTokens'>) => ({
+  contextWindow: s.defaultContextWindow,
+  maxOutputTokens: s.defaultMaxOutputTokens,
+});
 
 export interface AgentSettings {
   maxIterations: number;
@@ -127,7 +133,8 @@ export class AgentRunner {
         const err = e instanceof ProviderError ? e : errorFromException(e, { url: o.providerId, secrets: o.secrets });
         if (err.kind === 'tools_unsupported' && toolMode === 'native' && (o.model.toolMode ?? 'auto') === 'auto' && !downgraded) {
           downgraded = true;
-          this.deps.capabilities.set(key, { toolMode: 'prompted', updatedAt: this.now() });
+          // Merge: the same record also holds the limits the server reported.
+          this.deps.capabilities.set(key, { ...this.deps.capabilities.get(key), toolMode: 'prompted', updatedAt: this.now() });
           this.removeMessage(o, assistant.id);
           o.emit({
             type: 'notice',
@@ -212,8 +219,7 @@ export class AgentRunner {
       trusted: this.deps.workspace.isTrusted(),
       projectInstructions: o.projectInstructions,
     });
-    const contextWindow = o.model.contextWindow ?? o.settings.defaultContextWindow;
-    const maxOutput = o.model.maxOutputTokens ?? o.settings.defaultMaxOutputTokens;
+    const { contextWindow, reserveTokens: maxOutput } = effectiveLimits(o.model, o.model.serverLimits, defaultsOf(o.settings));
     const schemaTokens = toolMode === 'native' ? estimateTokens(JSON.stringify(schemas)) : 0;
     const budgetTokens = Math.max(1024, contextWindow - maxOutput);
     const ctx = buildContext({
@@ -251,7 +257,7 @@ export class AgentRunner {
     const firstKept = plan ? visible[plan.firstKeptIndex] : undefined;
     if (!plan || !firstKept) return false;
     o.emit({ type: 'compaction_started' });
-    const contextWindow = o.model.contextWindow ?? o.settings.defaultContextWindow;
+    const { contextWindow } = effectiveLimits(o.model, o.model.serverLimits, defaultsOf(o.settings));
     const maxChars = Math.floor(Math.max(2048, contextWindow - 1500) * 3.5 * 0.85);
     const previous = o.session.compaction;
     try {

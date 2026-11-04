@@ -126,6 +126,19 @@ Manual checks for this branch:
 - [ ] Stop using config.yaml → Keep the File: Settings keep working; Use config.yaml again joins both sides.
 - [ ] A company gateway: a wrong auth type or a missing key shows the matching hint.
 
+## Model limits (branch `feat/model-limits`)
+
+| Feature | Status | Evidence |
+|---|---|---|
+| Limits from the server (vLLM/SGLang, OpenRouter, Groq-style, LM Studio, LiteLLM `/model/info`) | ✅ Implemented | Unit tests per format and for what is ignored (Ollama, llama.cpp training context); integration tests against mock servers |
+| Precedence user > server > default, reserve capping | ✅ Implemented | Unit tests; agentRunner tests for the budget, `max_tokens` and the merged capability record |
+| Context window and max output per model in the panel | ✅ Implemented | UI tests (placeholders and sources, typed and cleared values, Settings line); visual QA at 300 and 400 px |
+
+Manual checks for this branch:
+- [ ] A vLLM or SGLang server: Test connection, then the provider form shows the server's window as *server*.
+- [ ] Ollama: the form shows the 32 768 default, not the model card's window.
+- [ ] Clearing a limit in the form and saving removes it from settings and from config.yaml.
+
 ## Manual QA checklist (first F5 session)
 
 - [ ] Onboarding: add Ollama from the preset, test the connection, add a discovered model, chat.

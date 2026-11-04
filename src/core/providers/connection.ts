@@ -1,4 +1,5 @@
 import { ProviderError, errorFromException } from './errors';
+import type { ModelInfo } from './limits';
 import type { ChatProvider } from './types';
 
 /**
@@ -35,6 +36,8 @@ export interface ConnectionResult {
   ok: boolean;
   latencyMs?: number;
   models?: string[];
+  /** The models with the limits the server declared, when it declares any. */
+  info?: ModelInfo[];
   message: string;
   hint?: string;
 }
@@ -52,11 +55,13 @@ export async function probeConnection(
   const started = Date.now();
   const asError = (e: unknown) => (e instanceof ProviderError ? e : errorFromException(e, { url }));
   try {
-    const models = await provider.listModels();
+    const info = provider.listModelInfo ? await provider.listModelInfo() : undefined;
+    const models = info ? info.map((m) => m.id) : await provider.listModels();
     return {
       ok: true,
       latencyMs: Date.now() - started,
       models,
+      ...(info?.some((m) => m.contextWindow || m.maxOutputTokens) ? { info } : {}),
       message: `Connected · ${models.length} model${models.length === 1 ? '' : 's'} available`,
     };
   } catch (e) {

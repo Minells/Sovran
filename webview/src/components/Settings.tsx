@@ -2,6 +2,7 @@ import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'rea
 import type { ApprovalMode, SelectedModel, SettingKey, SettingUpdate } from '../../../src/shared/protocol';
 import { hasShellMetacharacters } from '../../../src/core/permissions/shell';
 import { sendsKeyInsecurely } from '../../../src/shared/endpoints';
+import { effectiveLimits, type LimitSource } from '../../../src/core/providers/limits';
 import { APPROVAL_OPTIONS } from '../lib/approvals';
 import { useStore } from '../state/store';
 import { getUiState, post, setUiState } from '../vscode';
@@ -117,7 +118,28 @@ function ModelSelect({ role }: { role: 'act' | 'plan' | 'title' }) {
           ))}
       </select>
       <span className="sv-field__help">{MODEL_ROLE[role].help}</span>
+      {role !== 'title' ? <ModelLimits selection={value ?? (role === 'plan' ? app.selected : null)} /> : null}
     </div>
+  );
+}
+
+const SOURCE_LABEL: Record<LimitSource, string> = {
+  model: 'set for this model',
+  server: 'reported by the server',
+  default: 'default, the server does not report it',
+};
+
+/** The limits a request with this model will use, and where each comes from. */
+function ModelLimits({ selection }: { selection: SelectedModel | null }) {
+  const { app } = useStore();
+  const m = selection && app.providers.find((p) => p.id === selection.providerId)?.models.find((x) => x.id === selection.modelId);
+  if (!m) return null;
+  const e = effectiveLimits(m, m.serverLimits);
+  return (
+    <span className="sv-field__help sv-tabular" data-testid="model-limits">
+      Context {e.contextWindow.toLocaleString('en-US')} tokens ({SOURCE_LABEL[e.contextSource]}) · {e.reserveTokens.toLocaleString('en-US')} kept for
+      the reply ({e.reserveSource === 'model' ? 'set for this model' : e.reserveSource === 'server' ? "the server's limit" : 'default'})
+    </span>
   );
 }
 
