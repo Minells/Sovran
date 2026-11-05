@@ -11,8 +11,10 @@ import {
   toEntry,
   toolPolicy,
 } from '../../src/core/mcp/config';
-import { McpHub } from '../../src/core/mcp/hub';
+import { McpHub, tellingLine } from '../../src/core/mcp/hub';
 import {
+  commandCandidates,
+  commandNotFound,
   expandVariables,
   inheritedEnvironment,
   McpConfigError,
@@ -237,6 +239,74 @@ describe('MCP launch', () => {
     expect(() => resolveLaunch(s, vars, undefined)).toThrow(
       /No token is stored for gh.*\$\{env:NOPE\} is not set/,
     );
+  });
+});
+
+describe('MCP commands', () => {
+  it('looks a command up on PATH, or at the path it names', () => {
+    const posix = {
+      cwd: '/ws',
+      path: '/usr/local/bin:/usr/bin',
+      pathext: undefined,
+      platform: 'linux' as const,
+    };
+    expect(commandCandidates('npx', posix)).toEqual(['/usr/local/bin/npx', '/usr/bin/npx']);
+    expect(commandCandidates('./bin/server', posix)).toEqual(['/ws/bin/server']);
+    expect(commandCandidates('/opt/mcp/server', posix)).toEqual(['/opt/mcp/server']);
+    expect(commandCandidates('npx', { ...posix, path: undefined })).toEqual([]);
+  });
+
+  it('tries the PATHEXT extensions on Windows, as cmd.exe does', () => {
+    const win = {
+      cwd: 'C:\\ws',
+      path: 'C:\\Program Files\\nodejs;"C:\\Tools"',
+      pathext: '.COM;.EXE;.CMD',
+      platform: 'win32' as const,
+    };
+    expect(commandCandidates('npx', win)).toEqual([
+      'C:\\ws\\npx.COM',
+      'C:\\ws\\npx.EXE',
+      'C:\\ws\\npx.CMD',
+      'C:\\Program Files\\nodejs\\npx.COM',
+      'C:\\Program Files\\nodejs\\npx.EXE',
+      'C:\\Program Files\\nodejs\\npx.CMD',
+      'C:\\Tools\\npx.COM',
+      'C:\\Tools\\npx.EXE',
+      'C:\\Tools\\npx.CMD',
+    ]);
+    expect(commandCandidates('node.exe', { ...win, path: 'C:\\nodejs' })).toEqual([
+      'C:\\ws\\node.exe',
+      'C:\\nodejs\\node.exe',
+    ]);
+    expect(commandCandidates('C:\\nodejs\\node', win)).toEqual([
+      'C:\\nodejs\\node.COM',
+      'C:\\nodejs\\node.EXE',
+      'C:\\nodejs\\node.CMD',
+    ]);
+    expect(commandCandidates('tools\\server.cmd', win)).toEqual(['C:\\ws\\tools\\server.cmd']);
+    expect(commandNotFound('uvx')).toBe(
+      'Could not start "uvx": it was not found. Install it, or use its full path.',
+    );
+  });
+
+  it('explains a failure with the line of stderr that gives the reason', () => {
+    const node = [
+      'file:///srv/index.js:3',
+      "Error: Cannot find module '@x/sdk'",
+      '    at Module._resolveFilename (node:internal)',
+      '',
+      'Node.js v22.23.4',
+    ];
+    expect(tellingLine(node)).toBe("Error: Cannot find module '@x/sdk'");
+    expect(
+      tellingLine([
+        'Traceback (most recent call last):',
+        '  File "server.py", line 1',
+        'ModuleNotFoundError: No module named mcp',
+      ]),
+    ).toBe('ModuleNotFoundError: No module named mcp');
+    expect(tellingLine(['starting', 'listening on stdio'])).toBe('listening on stdio');
+    expect(tellingLine([])).toBeUndefined();
   });
 });
 

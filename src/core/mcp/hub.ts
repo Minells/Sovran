@@ -21,7 +21,7 @@ import { redact } from '../security/redact';
 import type { ToolSource } from '../tools/registry';
 import { ToolError, type AnyTool, type ToolResult } from '../tools/types';
 import { toolPolicy, transportOf, type McpServerConfig, type McpToolPolicy } from './config';
-import { McpConfigError } from './launch';
+import { commandNotFound, McpConfigError } from './launch';
 import { mcpToolName } from './naming';
 import { formatToolResult } from './results';
 import type { McpStatus } from './status';
@@ -123,6 +123,19 @@ function descriptionOf(tool: Tool, server: string): string {
   const text = (tool.description ?? '').trim();
   const cut = text.length > MAX_DESCRIPTION ? `${text.slice(0, MAX_DESCRIPTION - 1).trimEnd()}…` : text;
   return `${tool.title ? `${tool.title}. ` : ''}${cut || `Tool "${tool.name}".`} (MCP server "${server}")`;
+}
+
+/** Words of a line that explains a failure, in the server's own output. */
+const ERROR_LINE =
+  /\b(error|exception|fatal|panic|failed|failure|cannot|can't|unable|denied|refused|not found|no such|invalid|missing|unauthori[sz]ed|forbidden)\b/i;
+
+/**
+ * The line of a server's stderr that best explains a failure: the last that reads like an error, else the last one.
+ * A crash rarely ends on its reason (Node ends with its version, Python with the exception after the traceback).
+ */
+export function tellingLine(lines: readonly string[]): string | undefined {
+  for (let i = lines.length - 1; i >= 0; i--) if (ERROR_LINE.test(lines[i]!)) return lines[i];
+  return lines.at(-1);
 }
 
 export class McpHub implements ToolSource {
@@ -258,7 +271,7 @@ export class McpHub implements ToolSource {
 
   private onClosed(conn: Connection, generation: number) {
     if (this.stale(conn, generation) || conn.status !== 'connected') return;
-    const last = conn.stderr.at(-1);
+    const last = tellingLine(conn.stderr);
     conn.status = 'error';
     conn.error = `The server stopped${last ? `: ${last}` : '.'}`;
     conn.client = undefined;
@@ -422,12 +435,12 @@ export class McpHub implements ToolSource {
   // ------------------------------------------------------------------------------------------ messages
 
   private describeStartFailure(e: unknown, conn: Connection): string {
-    const last = conn.stderr.at(-1);
+    const last = tellingLine(conn.stderr);
     const tail = last ? ` The server said: ${last}` : '';
     if (e instanceof McpConfigError) return e.message;
     const err = e as NodeJS.ErrnoException;
     if (err?.code === 'ENOENT' && transportOf(conn.config) === 'stdio') {
-      return `Could not start "${conn.config.command}": it was not found. Install it, or use its full path.`;
+      return commandNotFound(conn.config.command ?? '');
     }
     if (SdkError.isInstance(e) && e.code === SdkErrorCode.RequestTimeout) {
       return `The server did not answer within ${CONNECT_TIMEOUT_MS / 1000} seconds.${tail}`;

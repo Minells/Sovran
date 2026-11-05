@@ -120,3 +120,46 @@ export function resolveLaunch(s: McpServerConfig, vars: McpVariables, token: str
   if (problems.length) throw new McpConfigError([...new Set(problems)].join(' '));
   return launch;
 }
+
+/** What the user reads when the command of a local server cannot be found. */
+export const commandNotFound = (command: string) =>
+  `Could not start "${command}": it was not found. Install it, or use its full path.`;
+
+export interface CommandLookup {
+  /** The server's working folder: relative paths, and on Windows bare names too, are looked up there first. */
+  cwd: string;
+  /** PATH of the environment the server starts with. */
+  path: string | undefined;
+  /** PATHEXT on Windows. */
+  pathext: string | undefined;
+  platform: NodeJS.Platform;
+}
+
+/**
+ * The files that could run `command`, in the order the system looks for them: the path itself when it names a
+ * folder, else each folder of PATH. On Windows each extension of PATHEXT is tried, as `cmd.exe` does (`npx` runs
+ * `npx.cmd`). Checking them before starting the server gives the same "not found" on every system: on Windows a
+ * missing command otherwise only shows up as a message from `cmd.exe`, in the language of the system.
+ */
+export function commandCandidates(command: string, o: CommandLookup): string[] {
+  const windows = o.platform === 'win32';
+  const p = windows ? path.win32 : path.posix;
+  const exts = (o.pathext || '.COM;.EXE;.BAT;.CMD')
+    .split(';')
+    .map((e) => e.trim())
+    .filter(Boolean);
+  const variants = (file: string) =>
+    !windows
+      ? [file]
+      : exts.some((e) => file.toLowerCase().endsWith(e.toLowerCase()))
+        ? [file]
+        : exts.map((e) => file + e);
+  if (p.isAbsolute(command) || command.includes('/') || (windows && command.includes('\\'))) {
+    return variants(p.resolve(o.cwd, command));
+  }
+  const folders = (o.path ?? '')
+    .split(windows ? ';' : ':')
+    .map((d) => d.trim().replace(/^"(.*)"$/, '$1'))
+    .filter(Boolean);
+  return (windows ? [o.cwd, ...folders] : folders).flatMap((d) => variants(p.join(d, command)));
+}
