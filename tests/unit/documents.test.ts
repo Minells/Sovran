@@ -3,7 +3,7 @@
  * conversion of each format to Markdown. Fixtures are built in code (tests/fixtures/documents.ts).
  */
 import { strToU8, zipSync } from 'fflate';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { convertDocument } from '../../src/core/documents/convert';
 import {
   decodeText,
@@ -16,7 +16,7 @@ import { DocumentError } from '../../src/core/documents/types';
 import { excelDate, isDateFormat } from '../../src/core/documents/xlsx';
 import { parseXml, type XmlEvent } from '../../src/core/documents/xml';
 import { ZipArchive } from '../../src/core/documents/zip';
-import { makeDocx, makeOdf, makePdf, makePptx, makeXlsx, pshape, wp, zip } from '../fixtures/documents';
+import { makeDocx, makeOdf, makePdf, makePptx, makeXlsx, PDFJS_WARMUP_MS, pshape, warmUpPdfJs, wp, zip } from '../fixtures/documents';
 
 const bytes = (...values: number[]) => Uint8Array.from(values);
 const ascii = (s: string) => new TextEncoder().encode(s);
@@ -269,6 +269,8 @@ describe('Markdown helpers', () => {
 });
 
 describe('convertDocument: PDF', () => {
+  beforeAll(warmUpPdfJs, PDFJS_WARMUP_MS);
+
   it('reads every page, and names pages without text', async () => {
     const r = await convertDocument(makePdf([['Relazione tecnica', 'Prezzo: 12,50 (àèìòù)'], [], ['Fine']]), {
       maxChars: 50_000,

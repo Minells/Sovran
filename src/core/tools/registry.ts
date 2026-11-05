@@ -3,8 +3,14 @@ import type { AgentMode } from '../permissions/policy';
 import type { ToolSchema } from '../providers/types';
 import type { AnyTool } from './types';
 
+/** Tools that come and go while Sovran runs (the tools of connected MCP servers). Asked again for every request. */
+export interface ToolSource {
+  tools(): readonly AnyTool[];
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, AnyTool>();
+  private readonly sources: ToolSource[] = [];
   private readonly schemaCache = new Map<string, ToolSchema>();
 
   register(tool: AnyTool): this {
@@ -14,16 +20,28 @@ export class ToolRegistry {
     return this;
   }
 
+  addSource(source: ToolSource): this {
+    this.sources.push(source);
+    return this;
+  }
+
   get(name: string): AnyTool | undefined {
-    return this.tools.get(name);
+    return this.tools.get(name) ?? this.fromSources().find((t) => t.name === name);
   }
 
   /** Tools offered to the model in a mode. Plan mode only ever sees read-only tools. */
   list(mode: AgentMode): AnyTool[] {
-    return [...this.tools.values()].filter((t) => mode === 'act' || t.risk === 'read');
+    return [...this.tools.values(), ...this.fromSources()].filter((t) => mode === 'act' || t.risk === 'read');
+  }
+
+  /** A source can never shadow a built-in tool. */
+  private fromSources(): AnyTool[] {
+    return this.sources.flatMap((s) => s.tools()).filter((t) => !this.tools.has(t.name));
   }
 
   schema(tool: AnyTool): ToolSchema {
+    // Given as JSON Schema (MCP tools): used as it is, and not cached, because a server may change it.
+    if (tool.parameters) return { type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } };
     let cached = this.schemaCache.get(tool.name);
     if (!cached) {
       const json = z.toJSONSchema(tool.schema, { io: 'input', unrepresentable: 'any' }) as Record<string, unknown>;

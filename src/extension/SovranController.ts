@@ -86,6 +86,7 @@ import {
   type HostSettings,
 } from './config';
 import { ConfigFileBusyError, type ConfigFileHost } from './configFileHost';
+import type { McpHost } from './mcpHost';
 import type { HostLogger, ProviderSecrets, SovranStatusBar } from './services';
 
 const MAX_ATTACHMENT_CHARS = 50_000;
@@ -137,6 +138,8 @@ export interface ControllerDeps {
   documents: DocumentConverterPort;
   /** Keeps the images sent in chats (on disk, or in memory when chats are not persisted). */
   images: ImageStorePort;
+  /** MCP servers: their tools join the agent's, and the Settings view manages them. Absent, Sovran has no MCP. */
+  mcp?: McpHost;
   /** Shows the Activity Bar view. */
   reveal: () => Promise<void>;
   /**
@@ -292,6 +295,7 @@ export class SovranController implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
 
   constructor(private readonly deps: ControllerDeps) {
+    if (deps.mcp) this.registry.addSource(deps.mcp.hub);
     this.sidebar = this.createSurface(SIDEBAR, 'sidebar', newSession('act'));
     this.surfaces.set(SIDEBAR, this.sidebar);
     this.loaded.set(this.sidebar.session.id, this.sidebar.session);
@@ -335,6 +339,7 @@ export class SovranController implements vscode.Disposable {
         this.patch({ commands: this.commandViews() });
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.patch({ workspace: this.workspaceView() })),
+      ...(this.deps.mcp ? [this.deps.mcp.onDidChange(() => this.patch({ mcp: this.mcpView() }))] : []),
       this.deps.configFile.onDidChange(() => void this.reloadConfigFile('change')),
       vscode.workspace.onDidChangeConfiguration(async (e) => {
         if (!e.affectsConfiguration('sovran')) return;
@@ -522,7 +527,7 @@ export class SovranController implements vscode.Disposable {
         case 'cancel':
           return this.cancel(surface.session.id);
         case 'approval':
-          return await this.resolveApproval(msg.id, { approved: msg.approved, grant: msg.grant, feedback: msg.feedback }, msg.allowCommand);
+          return await this.resolveApproval(msg.id, { approved: msg.approved, grant: msg.grant, feedback: msg.feedback }, msg.allowCommand, msg.allowTool);
         case 'openApprovalDiff':
           return await this.showApprovalDiff(msg.id);
         case 'newSession':
@@ -588,6 +593,18 @@ export class SovranController implements vscode.Disposable {
         case 'openSettings':
           await vscode.commands.executeCommand('workbench.action.openSettings', 'sovran');
           return;
+        case 'saveMcpServer':
+          return await this.deps.mcp?.save(msg.server);
+        case 'deleteMcpServer':
+          return await this.deps.mcp?.remove(msg.id);
+        case 'setMcpServerEnabled':
+          return await this.deps.mcp?.setEnabled(msg.id, msg.enabled);
+        case 'restartMcpServer':
+          return await this.deps.mcp?.restart(msg.id);
+        case 'setMcpToolPolicy':
+          return await this.deps.mcp?.setToolPolicy(msg.id, msg.tool, msg.policy);
+        case 'setMcpToken':
+          return await this.deps.mcp?.promptToken(msg.id);
         case 'restoreCheckpoint':
           return await this.restoreCheckpoint(surface, msg.messageId);
         case 'retry':
@@ -641,7 +658,12 @@ export class SovranController implements vscode.Disposable {
       commands: this.commandViews(),
       settings: readSettingsView(this.settings),
       configFile: this.configFileView,
+      mcp: this.mcpView(),
     };
+  }
+
+  private mcpView(): AppState['mcp'] {
+    return this.deps.mcp?.view() ?? { active: false, servers: [] };
   }
 
   /** Chats open in editor tabs or running, so the chat list can show where each one is and whether it needs you. */
@@ -703,6 +725,11 @@ export class SovranController implements vscode.Disposable {
   /** Each surface has its own attachments; the active editor is the same for all. */
   private patchContexts() {
     for (const s of this.surfaces.values()) this.patchSurface(s, { context: this.contextView(s) });
+  }
+
+  /** A notice for every surface, from services outside the controller (MCP servers). */
+  showNotice(level: 'info' | 'warning' | 'error', message: string) {
+    this.notice(level, message);
   }
 
   /** Shows a notice in `to`, or in every surface when it concerns them all (providers, settings, the config file). */
@@ -2159,7 +2186,8 @@ export class SovranController implements vscode.Disposable {
         signal: run.abort.signal,
         emit: (e) => this.onAgentEvent(session, e),
         projectInstructions: await this.projectInstructions(),
-        secrets: [secret],
+        // MCP tokens too: a server could echo its own token in a result, which would reach the model and the chat file.
+        secrets: [secret, ...(this.deps.mcp?.secrets() ?? [])],
         autoCompact: this.settings.autoCompact,
         // Read live: switching the approval mode or allowing a command mid-run applies to the next action.
         policy: () => ({ ...this.settings.agent.policy, approvalMode: this.approvalMode }),
@@ -2432,7 +2460,7 @@ export class SovranController implements vscode.Disposable {
         return this.scheduleFlush();
       }
       case 'tool_call_streaming':
-        return setActivity({ phase: 'streaming', label: `Preparing ${e.name.replace(/_/g, ' ')}`, toolName: e.name });
+        return setActivity({ phase: 'streaming', label: `Preparing ${this.deps.mcp?.describe(e.name) ?? e.name.replace(/_/g, ' ')}`, toolName: e.name });
       case 'message_committed':
         this.flush();
         this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: e.message });
@@ -2505,7 +2533,9 @@ export class SovranController implements vscode.Disposable {
             ? { kind: 'edit', path: d.path, isNew: d.isNew, diff: d.diff, added: d.added, removed: d.removed }
             : d.kind === 'command'
               ? { kind: 'command', command: d.command, cwd: d.cwd, warnings: d.warnings, allowPrefix: d.warnings.length ? null : suggestAllowPrefix(d.command) }
-              : { kind: 'read', path: d.path, reason: d.reason },
+              : d.kind === 'mcp'
+                ? { kind: 'mcp', server: d.server, tool: d.tool, ...(d.title ? { title: d.title } : {}), arguments: d.arguments, hints: d.hints }
+                : { kind: 'read', path: d.path, reason: d.reason },
         ...(request.reason ? { reason: request.reason } : {}),
       };
       const cleanup = () => {
@@ -2576,7 +2606,7 @@ export class SovranController implements vscode.Disposable {
     await this.resolveApproval(pending.request.id, { approved });
   }
 
-  private async resolveApproval(id: string, response: ApprovalResponse, allowCommand?: string) {
+  private async resolveApproval(id: string, response: ApprovalResponse, allowCommand?: string, allowTool?: boolean) {
     const pending = this.approvals.get(id);
     if (!pending) return;
     const detail = pending.request.detail;
@@ -2591,6 +2621,13 @@ export class SovranController implements vscode.Disposable {
       } else {
         this.deps.logger.warn('Ignored an allow-list entry that does not match the approved command.');
       }
+    }
+    // "Always allow" on an MCP tool: the tool named by the pending request, never one the webview names.
+    if (response.approved && allowTool && detail.kind === 'mcp') {
+      // The call runs either way: failing to save the choice must not leave the run waiting.
+      await this.deps.mcp?.allowTool(detail.serverId, detail.tool).catch((e: unknown) => {
+        this.notice('error', `Could not save "always allow" for ${detail.tool}: ${e instanceof Error ? e.message : String(e)}`, this.surfaceFor(pending.sessionId));
+      });
     }
     pending.settle(response);
   }

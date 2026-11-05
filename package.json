@@ -555,9 +555,122 @@
         }
       },
       {
+        "id": "sovran-mcp",
+        "title": "MCP",
+        "order": 4,
+        "properties": {
+          "sovran.mcp.servers": {
+            "type": "array",
+            "scope": "application",
+            "default": [],
+            "markdownDescription": "MCP servers whose tools the agent can use in Act mode. Each tool asks before it runs, in every approval mode, until you allow it. Manage them in **Sovran Settings → MCP**. Tokens are **not** stored here: use *Set token*, which keeps them in Secret Storage. Only user settings are honored: a workspace can never start a server.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "pattern": "^[a-z0-9][a-z0-9-]{0,31}$",
+                  "description": "Stable identifier (lowercase letters, digits and -). Tool names are mcp__<id>__<tool>."
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Display name."
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "default": true
+                },
+                "command": {
+                  "type": "string",
+                  "description": "A local server: the program to start, for example npx or uvx. Set either command or url."
+                },
+                "args": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "markdownDescription": "Arguments of `command`. `${workspaceFolder}`, `${userHome}` and `${env:NAME}` are expanded."
+                },
+                "env": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Environment variables for a local server (not secrets: use auth with type env)."
+                },
+                "cwd": {
+                  "type": "string",
+                  "description": "Working folder of a local server. Default: the first workspace folder."
+                },
+                "url": {
+                  "type": "string",
+                  "description": "A remote server: its Streamable HTTP endpoint, for example https://mcp.example.com/mcp."
+                },
+                "headers": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Headers sent to a remote server (not secrets: use auth)."
+                },
+                "auth": {
+                  "type": "object",
+                  "markdownDescription": "Where the token from Secret Storage goes: `bearer` (Authorization header) or `header` for remote servers, `env` for local ones.",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "enum": [
+                        "none",
+                        "bearer",
+                        "header",
+                        "env"
+                      ],
+                      "default": "none"
+                    },
+                    "headerName": {
+                      "type": "string",
+                      "description": "Header that carries the token when type is header."
+                    },
+                    "envName": {
+                      "type": "string",
+                      "description": "Environment variable that carries the token when type is env."
+                    }
+                  }
+                },
+                "timeoutSeconds": {
+                  "type": "number",
+                  "minimum": 5,
+                  "maximum": 3600,
+                  "default": 60,
+                  "description": "How long a request may go without an answer or progress."
+                },
+                "allowedTools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Tools that run without asking."
+                },
+                "disabledTools": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Tools never offered to the model."
+                }
+              }
+            },
+            "order": 1
+          }
+        }
+      },
+      {
         "id": "sovran-context",
         "title": "Context",
-        "order": 4,
+        "order": 5,
         "properties": {
           "sovran.context.includeActiveEditor": {
             "type": "boolean",
@@ -590,7 +703,7 @@
       {
         "id": "sovran-chats",
         "title": "Chats",
-        "order": 5,
+        "order": 6,
         "properties": {
           "sovran.sessions.persist": {
             "type": "boolean",
@@ -637,6 +750,7 @@
     "vscode:prepublish": "npm run build"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.4.0",
     "@vscode/codicons": "^0.0.46-24",
     "diff": "^8.0.4",
     "dompurify": "^3.4.17",
@@ -652,6 +766,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@modelcontextprotocol/server": "^2.4.0",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",
     "@testing-library/user-event": "^14.6.8",

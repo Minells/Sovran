@@ -48,6 +48,11 @@ It works through ten built-in tools:
 | `apply_diff` | Applies several exact edits to one file at once |
 | `execute_terminal` | Runs a shell command after you approve it |
 
+**MCP servers for more tools.** Connect [Model Context Protocol](https://modelcontextprotocol.io) servers, local
+commands or remote URLs, from **Settings → MCP**, and the agent can use their tools in Act mode: issues, databases,
+documentation, browsers, anything a server offers. Each tool asks before it runs until you allow it, in every approval
+mode. See [MCP servers](#mcp-servers).
+
 **Plan and Act modes.**
 
 | | Plan | Act |
@@ -323,6 +328,50 @@ about two seconds, since Sovran also checks the file's date and size besides wat
 is already in sync changes nothing, and a hand edit is never overwritten: if the file and Settings change at the same
 moment, the file wins and Sovran says so.
 
+## MCP servers
+
+[MCP](https://modelcontextprotocol.io) servers give the agent tools from other programs and services. Add them in
+**Sovran Settings → MCP**: pick a common server, fill in the form, or paste the JSON snippet from the server's README
+(the Claude Desktop, Cursor, Cline and VS Code formats all work, and a token in it moves to Secret Storage).
+
+- **Local servers** are commands Sovran starts, such as
+  `npx -y @modelcontextprotocol/server-filesystem ${workspaceFolder}`. They talk MCP over stdin and stdout, start in
+  the first workspace folder and receive a minimal environment (`PATH`, `HOME` and the like, plus proxy and
+  certificate variables) and what you list in `env`.
+- **Remote servers** are reached over Streamable HTTP at their URL. Redirects to another address are not followed, so
+  tokens and headers reach only the server you entered.
+- **Tokens** live in VS Code Secret Storage, never in settings: as `Authorization: Bearer`, in a header of your choice,
+  or in an environment variable for local servers. `${workspaceFolder}`, `${userHome}` and `${env:NAME}` are expanded.
+
+Every tool of a connected server is listed with what the server says about it (*read-only*, *can change data*) and a
+choice: **Off** (never offered to the model), **Ask** (the default) or **Allow** (runs without asking; also from
+*Always allow* on the approval card). The approval card shows the tool, its server and the exact arguments. Tools are
+named `mcp__<server>__<tool>`, are offered only in Act mode, and cost context in every request: Settings shows an
+estimate per server, so you can turn off what you do not need on a small local model.
+
+The same list is the `sovran.mcp.servers` user setting:
+
+```jsonc
+"sovran.mcp.servers": [
+  {
+    "id": "github",
+    "name": "GitHub",
+    "url": "https://api.githubcopilot.com/mcp/",
+    "auth": { "type": "bearer" },            // the token itself: Set token, in Settings → MCP
+    "allowedTools": ["search_issues"]
+  },
+  {
+    "id": "files",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-filesystem", "${workspaceFolder}"],
+    "disabledTools": ["move_file"]
+  }
+]
+```
+
+Servers start in the background when a window opens, only in trusted workspaces, and stop with the window. Their
+output, including errors, is in **Show logs**.
+
 ## Settings
 
 | Setting | Default | Description |
@@ -332,6 +381,7 @@ moment, the file wins and Sovran says so.
 | `sovran.planModel` | `""` | Model for Plan mode. Empty means the same as Act |
 | `sovran.configFile.enabled` | `true` | Use `~/.sovran/config.yaml` when it exists, kept in sync with `sovran.providers`. User scope only |
 | `sovran.agent.maxIterations` | `25` | Maximum model round-trips per request |
+| `sovran.mcp.servers` | `[]` | MCP servers whose tools the agent can use in Act mode (see [MCP servers](#mcp-servers)). User scope only |
 | `sovran.approvals.mode` | `ask` | Approval mode a new window starts in: `ask`, `edits` (Auto-edit) or `auto`. User scope only |
 | `sovran.approvals.allowedCommands` | `[]` | Commands that run without asking, for example `npm test`. Never applies to commands that contain shell operators or trip a guardrail |
 | `sovran.security.protectedPaths` | `.env`, keys, `.git/` and others | Always ask before reading, changing or naming these in a command, in every mode. Their contents are excluded from search |
@@ -348,8 +398,9 @@ moment, the file wins and Sovran says so.
 | `sovran.approvals.fileEdits` | `ask` | *Deprecated*: use `sovran.approvals.mode`. `auto` here still starts windows in Auto-edit |
 
 All of these can be changed from **Sovran Settings** (the gear in the view title). Its areas, *Models*, *Approvals*,
-*Agent*, *Context* and *Data*, stay at the top as tabs: pick one to see only its settings (arrow keys move between
-them). The VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *Context* and *Chats*.
+*Agent*, *MCP*, *Context* and *Data*, stay at the top as tabs: pick one to see only its settings (arrow keys move
+between them). The VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *MCP*, *Context*
+and *Chats*.
 
 ## Security
 
@@ -360,6 +411,7 @@ Sovran executes actions on your behalf, so its safety controls are enforced in c
 - **Endpoints:** requests never follow redirects, so your key and code only go to the address you configured. A key sent over plain `http` to another machine is flagged in the UI.
 - **Workspace boundary:** paths are confined to the workspace, including through symlinks. Commands run inside the workspace with a timeout and can be cancelled.
 - **Untrusted repositories:** a cloned repository cannot change your providers, approval policy or allow-list, because those settings are read from user scope only. In Restricted Mode, Sovran stays in Plan mode.
+- **MCP servers:** only you can add them (user scope), they start only in trusted workspaces, and their tools ask before each call in every approval mode until you allow a tool. Their tokens stay in Secret Storage and are masked in results and logs; what they return is treated as untrusted data.
 
 Read [SECURITY.md](SECURITY.md) for the threat model and known limitations. Choose endpoints you trust: everything the agent reads is sent to the model you configured.
 
@@ -367,7 +419,7 @@ Read [SECURITY.md](SECURITY.md) for the threat model and known limitations. Choo
 
 - **Quality depends on the model.** Tool-trained coding models work best. Small models may need `"toolMode": "prompted"`, and some still struggle with multi-step tasks.
 - **Undo covers only what the agent writes.** Changes made by terminal commands, such as code generators or `git checkout`, are not covered.
-- **No MCP support yet** (planned in v0.3).
+- **MCP covers tools.** Resources, prompts and sampling are not used yet. Remote servers must speak Streamable HTTP (the older SSE-only transport is not supported) and take a token: OAuth sign-in flows are not implemented. Images a tool returns are described to the model, not shown to it. MCP servers are configured in Settings, not in `config.yaml`.
 - **Documents arrive as text only.** The images, charts and page layout inside a document are not sent, and scanned PDFs (no text layer) cannot be read. Each attachment is cut at 50 000 characters, and the model is told when it is.
 - **Some servers ignore images instead of refusing them**, and their model then answers without having seen the image. Set `"vision": false` for such a model. BMP, TIFF and HEIC images are not sent: save them as PNG or JPEG.
 - **Search uses VS Code's bundled ripgrep.** It falls back to a slower built-in scan when ripgrep cannot be found.

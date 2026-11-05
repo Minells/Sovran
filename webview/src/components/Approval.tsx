@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
-import type { ApprovalView } from '../../../src/shared/protocol';
+import type { ApprovalView, McpToolHint } from '../../../src/shared/protocol';
 import { hasShellMetacharacters } from '../../../src/core/permissions/shell';
 import { approvalOption } from '../lib/approvals';
 import { useStore } from '../state/store';
@@ -28,6 +28,13 @@ const coversCommand = (entry: string, command: string) => {
   return e.length > 0 && (c === e || c.startsWith(`${e} `));
 };
 
+/** MCP annotations, phrased as the server's claims: Sovran cannot check them. */
+const MCP_HINTS: Record<McpToolHint, { icon: string; text: string }> = {
+  'read-only': { icon: 'eye', text: 'The server says this tool only reads data.' },
+  destructive: { icon: 'warning', text: 'The server says this tool can change or delete data.' },
+  'open-world': { icon: 'globe', text: 'The server says this tool reaches services outside your machine.' },
+};
+
 /**
  * Enter is ignored for this long after the bar appears, so an Enter pressed for something else just then (sending a
  * message, a key held down) cannot approve an action the user has not seen. Escape (reject) is never delayed.
@@ -43,6 +50,7 @@ export function approvalCopy(approval: ApprovalView) {
     return { title: d.isNew ? 'Create this file?' : 'Apply these changes?', verb: d.isNew ? 'Create' : 'Apply', icon: 'git-pull-request-go-to-changes' };
   }
   if (d.kind === 'command') return { title: 'Run this command?', verb: 'Run', icon: 'terminal' };
+  if (d.kind === 'mcp') return { title: 'Run this MCP tool?', verb: 'Run', icon: 'mcp' };
   return { title: 'Allow reading a protected file?', verb: 'Allow', icon: 'shield' };
 }
 
@@ -99,14 +107,14 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
             ? 'The entry must be the start of this command.'
             : '';
 
-  const respond = (approved: boolean, allowCommand?: string) =>
+  const respond = (approved: boolean, always?: { allowCommand: string } | { allowTool: true }) =>
     post({
       type: 'approval',
       id: approval.id,
       approved,
       grant: approved && grant && d.kind === 'edit' ? 'session-edits' : undefined,
       feedback: !approved && feedback.trim() ? feedback.trim() : undefined,
-      ...(allowCommand ? { allowCommand } : {}),
+      ...always,
     });
 
   // Enter and Escape decide while no form is open. An Effect Event reads the checkbox as it is at the key press.
@@ -132,7 +140,7 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
   // In an unattended mode the bar explains why this action still needs a human, without repeating a listed warning.
   const paused = app.approvalMode !== 'ask' && !!approval.reason;
   const reasonListed = d.kind === 'command' && !!approval.reason && d.warnings.includes(approval.reason);
-  const target = d.kind === 'command' ? null : d.path;
+  const target = d.kind === 'command' || d.kind === 'mcp' ? null : d.path;
 
   return (
     <section className="sv-approval-bar" aria-label={copy.title} data-kind={d.kind}>
@@ -151,6 +159,10 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
             ) : (
               <code className="sv-approval-bar__path">{target}</code>
             )
+          ) : d.kind === 'mcp' ? (
+            <span className="sv-approval-bar__path">
+              <code>{d.tool}</code> on {d.server}
+            </span>
           ) : null}
         </div>
         {step === 'decide' ? (
@@ -197,6 +209,22 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
         </>
       ) : d.kind === 'read' ? (
         <div className="sv-approval__meta">{d.reason}</div>
+      ) : d.kind === 'mcp' ? (
+        <>
+          {d.hints.length ? (
+            <ul className="sv-approval__hints" aria-label="What the server says about this tool">
+              {d.hints.map((h) => (
+                <li key={h} data-tone={h === 'destructive' ? 'warn' : undefined}>
+                  <Icon name={MCP_HINTS[h].icon} />
+                  {MCP_HINTS[h].text}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <pre className="sv-approval__command sv-approval__arguments" aria-label="Arguments">
+            {revealHidden(d.arguments)}
+          </pre>
+        </>
       ) : null}
 
       {step === 'decide' ? (
@@ -218,6 +246,16 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
               }}
             >
               Always allow…
+            </button>
+          ) : null}
+          {d.kind === 'mcp' ? (
+            <button
+              type="button"
+              className="sv-link-btn"
+              title={`Run now and stop asking for ${d.tool}. Change it in Settings → MCP.`}
+              onClick={() => respond(true, { allowTool: true })}
+            >
+              Always allow {d.tool}
             </button>
           ) : null}
           <button type="button" className="sv-link-btn" onClick={() => setStep('feedback')}>
@@ -271,7 +309,7 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !allowError) {
                 e.preventDefault();
-                respond(true, allowEntry.trim());
+                respond(true, { allowCommand: allowEntry.trim() });
               } else if (e.key === 'Escape') {
                 e.preventDefault();
                 setStep('decide');
@@ -285,7 +323,7 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
             <Button variant="ghost" onClick={() => setStep('decide')}>
               Back
             </Button>
-            <Button variant="primary" icon="check" disabled={!!allowError} onClick={() => respond(true, allowEntry.trim())}>
+            <Button variant="primary" icon="check" disabled={!!allowError} onClick={() => respond(true, { allowCommand: allowEntry.trim() })}>
               Run and always allow
             </Button>
           </div>
@@ -297,7 +335,7 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
 
 /**
  * The proposal inside the transcript, under the tool call that made it. File changes are read here (the bar above is
- * only a summary); commands and protected reads are short and the bar shows them whole, so this only points there.
+ * only a summary); commands, MCP calls and protected reads are short and the bar shows them whole, so this only points there.
  */
 export function ApprovalDetail({ approval }: { approval: ApprovalView }) {
   const d = approval.detail;

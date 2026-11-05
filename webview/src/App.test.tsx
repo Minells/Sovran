@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppState, HostMessage, WebviewMessage } from '../../src/shared/protocol';
+import type { AppState, HostMessage, McpServerView, WebviewMessage } from '../../src/shared/protocol';
 import { App } from './App';
 import { renderMarkdown } from './lib/markdown';
 import { reducer, initialUiState } from './state/store';
@@ -48,6 +48,7 @@ const baseState = (over: Partial<AppState> = {}): AppState => ({
     overriddenByWorkspace: [],
   },
   configFile: { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] },
+  mcp: { active: true, servers: [] },
   ...over,
 });
 
@@ -841,9 +842,9 @@ describe('settings view', () => {
   const tab = (name: string) => screen.getByRole('tab', { name });
   const openArea = (name: string) => userEvent.click(tab(name));
 
-  it('keeps the five areas on screen and shows only the selected one', async () => {
+  it('keeps the six areas on screen and shows only the selected one', async () => {
     mount(settingsState());
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Models', 'Approvals', 'Agent', 'Context', 'Data']);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Models', 'Approvals', 'Agent', 'MCP', 'Context', 'Data']);
     expect(tab('Models')).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tabpanel', { name: 'Models' })).toContainElement(screen.getByLabelText('Act model'));
     expect(screen.queryByLabelText('Allowed commands')).not.toBeInTheDocument();
@@ -854,8 +855,8 @@ describe('settings view', () => {
     expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
     expect(screen.getByLabelText('Allowed commands')).toBeInTheDocument();
     expect(screen.queryByLabelText('Act model')).not.toBeInTheDocument();
-    // The areas never scroll away or disappear: all five are still there.
-    expect(screen.getAllByRole('tab')).toHaveLength(5);
+    // The areas never scroll away or disappear: all six are still there.
+    expect(screen.getAllByRole('tab')).toHaveLength(6);
   });
 
   it('moves between areas with the arrow keys, Home and End, with one tab stop', async () => {
@@ -1373,5 +1374,211 @@ describe('pinned message', () => {
     tops = [-1400, -600];
     await scroll();
     expect(screen.getByRole('button', { name: /^Your message: \/thanks/ })).toBeInTheDocument();
+  });
+});
+
+describe('MCP servers', () => {
+  const github: McpServerView = {
+    id: 'github',
+    name: 'GitHub',
+    enabled: true,
+    transport: 'http',
+    url: 'https://api.githubcopilot.com/mcp/',
+    auth: { type: 'bearer' },
+    hasToken: true,
+    insecure: false,
+    timeoutSeconds: 60,
+    status: 'connected',
+    server: { name: 'github-mcp-server', version: '1.4.2' },
+    toolTokens: 2140,
+    tools: [
+      { name: 'search_issues', title: 'Search issues', modelName: 'mcp__github__search_issues', policy: 'allow', hints: ['read-only'], description: 'Search issues.' },
+      { name: 'merge_pull_request', modelName: 'mcp__github__merge_pull_request', policy: 'off', hints: ['destructive'], description: 'Merges a pull request.' },
+    ],
+  };
+  const jira: McpServerView = {
+    id: 'jira',
+    name: 'Jira',
+    enabled: true,
+    transport: 'stdio',
+    command: 'uvx',
+    args: ['mcp-atlassian', '--read-only mode'],
+    auth: { type: 'env', envName: 'JIRA_API_TOKEN' },
+    hasToken: false,
+    insecure: false,
+    timeoutSeconds: 120,
+    status: 'error',
+    error: 'No token is stored for Jira. Add it with Set token.',
+    toolTokens: 0,
+    tools: [],
+  };
+  const open = (servers: McpServerView[], over: Partial<AppState> = {}) => {
+    setUiState({ draft: '', settingsArea: 'mcp' });
+    return mount(baseState({ view: 'settings', mcp: { active: true, servers }, ...over }));
+  };
+
+  it('shows each server, how it is doing and what to do when it is not connected', async () => {
+    open([github, jira]);
+    const card = screen.getByRole('region', { name: 'GitHub' });
+    expect(within(card).getByText('https://api.githubcopilot.com/mcp/')).toBeInTheDocument();
+    expect(within(card).getByRole('status')).toHaveTextContent('Connected · github-mcp-server 1.4.2');
+    expect(within(card).getByText('Token stored')).toBeInTheDocument();
+    const broken = screen.getByRole('region', { name: 'Jira' });
+    expect(within(broken).getByText('uvx mcp-atlassian "--read-only mode"')).toBeInTheDocument();
+    expect(within(broken).getByRole('alert')).toHaveTextContent('No token is stored for Jira');
+    await userEvent.click(within(broken).getByRole('button', { name: 'Try again' }));
+    expect(sent).toContainEqual({ type: 'restartMcpServer', id: 'jira' });
+    await userEvent.click(within(broken).getByRole('button', { name: 'Set token' }));
+    expect(sent).toContainEqual({ type: 'setMcpToken', id: 'jira' });
+    await userEvent.click(within(card).getByRole('switch', { name: 'Use GitHub' }));
+    expect(sent).toContainEqual({ type: 'setMcpServerEnabled', id: 'github', enabled: false });
+    await userEvent.click(within(card).getByRole('button', { name: 'Remove GitHub' }));
+    expect(sent).toContainEqual({ type: 'deleteMcpServer', id: 'github' });
+  });
+
+  it('lists the tools with what the server says about them and lets the user choose what each may do', async () => {
+    open([github]);
+    expect(screen.getByText('~2.1k tokens')).toHaveAttribute('title', 'Estimated tokens the offered tools add to every request');
+    await userEvent.click(screen.getByRole('button', { name: /2 tools · 1 offered · 1 allowed/ }));
+    const tools = screen.getByRole('list', { name: 'Tools of GitHub' });
+    expect(within(tools).getByText('read-only')).toBeInTheDocument();
+    expect(within(tools).getByText('can change data')).toBeInTheDocument();
+    const merge = screen.getByRole('radiogroup', { name: 'merge_pull_request: when the agent uses it' });
+    expect(within(merge).getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true');
+    await userEvent.click(within(merge).getByRole('radio', { name: 'Ask' }));
+    expect(sent).toContainEqual({ type: 'setMcpToolPolicy', id: 'github', tool: 'merge_pull_request', policy: 'ask' });
+    const search = screen.getByRole('radiogroup', { name: 'Search issues: when the agent uses it' });
+    within(search).getByRole('radio', { name: 'Allow' }).focus();
+    await userEvent.keyboard('{ArrowLeft}');
+    expect(sent).toContainEqual({ type: 'setMcpToolPolicy', id: 'github', tool: 'search_issues', policy: 'ask' });
+  });
+
+  it('adds a server from a preset, checking the fields first', async () => {
+    open([]);
+    await userEvent.click(screen.getByRole('button', { name: /Filesystem/ }));
+    expect(screen.getByLabelText('Command')).toHaveValue('npx');
+    expect(screen.getByLabelText('Arguments')).toHaveValue('-y\n@modelcontextprotocol/server-filesystem\n${workspaceFolder}');
+    await userEvent.clear(screen.getByLabelText('Command'));
+    await userEvent.type(screen.getByLabelText('Environment'), 'bad name=1');
+    await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
+    expect(screen.getByText('Enter the command that starts the server, for example npx.')).toBeInTheDocument();
+    expect(screen.getByText(/Line 1: Use letters, digits and _/)).toBeInTheDocument();
+    expect(sent.some((m) => m.type === 'saveMcpServer')).toBe(false);
+
+    await userEvent.type(screen.getByLabelText('Command'), 'npx');
+    await userEvent.clear(screen.getByLabelText('Environment'));
+    await userEvent.type(screen.getByLabelText('Environment'), 'LOG_LEVEL=debug');
+    await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
+    expect(sent).toContainEqual({
+      type: 'saveMcpServer',
+      server: {
+        name: 'Filesystem',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-filesystem', '${workspaceFolder}'],
+        env: { LOG_LEVEL: 'debug' },
+        auth: { type: 'none' },
+      },
+    });
+  });
+
+  it('fills the form from a README snippet and moves its token to Secret Storage', async () => {
+    open([github]);
+    await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
+    await userEvent.click(screen.getByText("Paste the JSON from the server's README"));
+    const snippet = '{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_123456789" } } } }';
+    fireEvent.change(screen.getByLabelText('JSON snippet'), { target: { value: snippet } });
+    await userEvent.click(screen.getByRole('button', { name: 'Fill in the form' }));
+    expect(screen.getByLabelText('Name')).toHaveValue('github');
+    expect(screen.getByRole('list', { name: 'What the import changed' })).toHaveTextContent('GITHUB_PERSONAL_ACCESS_TOKEN moves to Secret Storage.');
+    expect(screen.getByLabelText('Environment')).toHaveValue('');
+    expect(screen.getByLabelText('Environment variable name')).toHaveValue('GITHUB_PERSONAL_ACCESS_TOKEN');
+    expect(screen.getByLabelText('Token')).toHaveAttribute('type', 'password');
+    await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
+    expect(sent).toContainEqual({
+      type: 'saveMcpServer',
+      server: {
+        name: 'github',
+        transport: 'stdio',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-github'],
+        auth: { type: 'env', envName: 'GITHUB_PERSONAL_ACCESS_TOKEN' },
+        token: 'ghp_123456789',
+      },
+    });
+  });
+
+  it('edits a remote server without showing its token, and warns about plain http', async () => {
+    open([github]);
+    await userEvent.click(screen.getByRole('button', { name: 'Edit GitHub' }));
+    expect(screen.queryByText("Paste the JSON from the server's README")).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Token')).toHaveValue('');
+    expect(screen.getByLabelText('Token')).toHaveAttribute('placeholder', 'Stored. Leave empty to keep it');
+    await userEvent.clear(screen.getByLabelText('URL'));
+    await userEvent.type(screen.getByLabelText('URL'), 'http://mcp.corp.example/mcp');
+    expect(screen.getByRole('note')).toHaveTextContent('the token would travel unencrypted');
+    await userEvent.click(screen.getByRole('radio', { name: 'Local command' }));
+    // A bearer token does not fit a local server: the choice falls back to none.
+    expect(screen.getByRole('radio', { name: 'None' })).toHaveAttribute('aria-checked', 'true');
+    await userEvent.click(screen.getByRole('radio', { name: 'Remote URL' }));
+    await userEvent.click(screen.getByRole('radio', { name: 'Bearer token' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save server' }));
+    expect(sent).toContainEqual({ type: 'saveMcpServer', server: { id: 'github', name: 'GitHub', transport: 'http', url: 'http://mcp.corp.example/mcp', auth: { type: 'bearer' } } });
+  });
+
+  it('explains Restricted Mode', () => {
+    open([jira], { workspace: { name: 'w', trusted: false, hasFolder: true }, mcp: { active: false, servers: [jira] } });
+    expect(screen.getByText(/This workspace is in Restricted Mode, so MCP servers do not start/)).toBeInTheDocument();
+  });
+
+  it('asks before an MCP tool runs, showing the arguments, and can stop asking for that tool', async () => {
+    const args = '{\n  "title": "Bug"\n}';
+    mount(
+      baseState({
+        approvalMode: 'auto',
+        mcp: { active: true, servers: [github] },
+        session: { id: 's', title: 't', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'mcp__github__create_issue', arguments: '{"title":"Bug"}' }] }] },
+        run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'Create issue · GitHub', callId: 'c1' } },
+        approvals: [
+          {
+            id: 'ap',
+            callId: 'c1',
+            toolName: 'mcp__github__create_issue',
+            title: 'Create issue · GitHub',
+            reason: 'Tools of MCP servers ask before they run, in every approval mode, until you allow them.',
+            detail: { kind: 'mcp', server: 'GitHub', tool: 'create_issue', title: 'Create issue', arguments: args, hints: ['open-world'] },
+          },
+        ],
+      }),
+    );
+    const bar = screen.getByRole('region', { name: 'Run this MCP tool?' });
+    expect(bar).toHaveTextContent('create_issue on GitHub');
+    expect(within(bar).getByText('The server says this tool reaches services outside your machine.')).toBeInTheDocument();
+    expect(within(bar).getByLabelText('Arguments')).toHaveTextContent('"title": "Bug"');
+    expect(within(bar).getByRole('note')).toHaveTextContent('Auto mode still asks here: Tools of MCP servers ask before they run');
+    // The transcript row names the tool and its server.
+    expect(screen.getByText('Create issue · GitHub', { selector: '.sv-tool__target' })).toBeInTheDocument();
+    await userEvent.click(within(bar).getByRole('button', { name: 'Always allow create_issue' }));
+    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: true, grant: undefined, feedback: undefined, allowTool: true });
+  });
+
+  it('names MCP tools in the transcript, also after their server is gone', () => {
+    mount(
+      baseState({
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            { role: 'user', id: 'u', content: 'find it', createdAt: 0 },
+            { role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'mcp__github__search_issues', arguments: '{}' }, { id: 'c2', name: 'mcp__gone__lookup', arguments: '{}' }] },
+            { role: 'tool', id: 't1', toolCallId: 'c1', toolName: 'mcp__github__search_issues', content: 'none', status: 'success', summary: 'Search issues · GitHub', createdAt: 0 },
+          ],
+        },
+        mcp: { active: true, servers: [github] },
+      }),
+    );
+    expect(screen.getByText('Search issues · GitHub', { selector: '.sv-tool__target' })).toBeInTheDocument();
+    expect(screen.getByText('lookup · gone', { selector: '.sv-tool__target' })).toBeInTheDocument();
+    expect(screen.getAllByText('Used').length).toBeGreaterThan(0);
   });
 });

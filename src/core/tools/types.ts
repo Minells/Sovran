@@ -27,6 +27,8 @@ export interface PreparedAction {
   command?: string;
   /** Context-dependent reasons the action must be confirmed even when the approval mode would allow it. */
   risks?: string[];
+  /** Set for a tool of an MCP server: it asks unless the user allowed it (see `PolicyInput.mcp`). */
+  mcp?: { server: string; allowed: boolean };
   approval?: ApprovalDetail;
   /** Tool-private state carried from prepare() to execute(). */
   state?: unknown;
@@ -43,6 +45,11 @@ export interface ToolDefinition<A = unknown> {
   name: string;
   description: string;
   schema: z.ZodType<A>;
+  /**
+   * The JSON Schema offered to the model, when it does not come from `schema`: an MCP server describes its tools in
+   * JSON Schema, and the server validates the arguments itself.
+   */
+  parameters?: Record<string, unknown>;
   risk: ToolRisk;
   /** Short human label for the UI, e.g. "src/app.ts" or "npm test". */
   label(args: A): string;

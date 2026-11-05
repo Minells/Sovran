@@ -118,7 +118,22 @@ export type ApprovalDetail =
       proposedContent: string;
     }
   | { kind: 'command'; command: string; cwd: string; warnings: string[] }
-  | { kind: 'read'; path: string; reason: string };
+  | { kind: 'read'; path: string; reason: string }
+  | {
+      kind: 'mcp';
+      serverId: string;
+      /** The server's display name. */
+      server: string;
+      tool: string;
+      title?: string;
+      /** The arguments, as indented JSON. */
+      arguments: string;
+      /** What the server says about the tool (MCP annotations). Only claims the server made explicitly. */
+      hints: McpToolHint[];
+    };
+
+/** MCP tool annotations as the user reads them. They come from the server, so they are claims, not guarantees. */
+export type McpToolHint = 'read-only' | 'destructive' | 'open-world';
 
 export interface ApprovalRequest {
   id: string;

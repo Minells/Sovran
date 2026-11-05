@@ -4,14 +4,16 @@
  * screenshotted in a browser:  npm run dev:webview → http://localhost:5173/?scenario=conversation&theme=dark
  */
 import '../../../media/sovran.css';
-import type { AppState, HostMessage, SessionMessage } from '../../../src/shared/protocol';
-import { onPost } from '../vscode';
+import type { AppState, HostMessage, McpServerView, SessionMessage } from '../../../src/shared/protocol';
+import { onPost, setUiState } from '../vscode';
 
 const params = new URLSearchParams(location.search);
 const theme = params.get('theme') === 'light' ? 'light' : 'dark';
 const scenario = params.get('scenario') ?? 'conversation';
 /** `?surface=panel` previews a chat in an editor tab (full width, editor background). */
 const surface = params.get('surface') === 'panel' ? 'panel' : 'sidebar';
+/** `?scenario=settings&area=mcp` opens Settings on one area. */
+if (params.get('area')) setUiState({ settingsArea: params.get('area') ?? undefined });
 
 const THEMES: Record<string, Record<string, string>> = {
   dark: {
@@ -156,6 +158,107 @@ const configFile: AppState['configFile'] =
           ],
         }
       : { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] };
+
+/** `?mcp=empty` previews the first-run presets; `?mcp=restricted` an untrusted workspace. */
+const mcpParam = params.get('mcp');
+const mcpServers: McpServerView[] = [
+  {
+    id: 'github',
+    name: 'GitHub',
+    enabled: true,
+    transport: 'http',
+    url: 'https://api.githubcopilot.com/mcp/',
+    auth: { type: 'bearer' },
+    hasToken: true,
+    insecure: false,
+    timeoutSeconds: 60,
+    status: 'connected',
+    server: { name: 'github-mcp-server', version: '1.4.2' },
+    toolTokens: 2140,
+    tools: [
+      { name: 'search_issues', title: 'Search issues', modelName: 'mcp__github__search_issues', policy: 'allow', hints: ['read-only'], description: 'Search issues and pull requests across GitHub repositories using the GitHub search syntax.' },
+      { name: 'get_pull_request', title: 'Get pull request', modelName: 'mcp__github__get_pull_request', policy: 'ask', hints: ['read-only'], description: 'Get the details of a pull request: title, body, state, reviewers and checks.' },
+      { name: 'create_issue', title: 'Create issue', modelName: 'mcp__github__create_issue', policy: 'ask', hints: [], description: 'Create a new issue in a GitHub repository.' },
+      { name: 'merge_pull_request', title: 'Merge pull request', modelName: 'mcp__github__merge_pull_request', policy: 'off', hints: ['destructive'], description: 'Merge a pull request into its base branch.' },
+    ],
+  },
+  {
+    id: 'filesystem',
+    name: 'Filesystem',
+    enabled: true,
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-filesystem', '${workspaceFolder}'],
+    auth: { type: 'none' },
+    hasToken: false,
+    insecure: false,
+    timeoutSeconds: 60,
+    status: 'starting',
+    toolTokens: 0,
+    tools: [],
+  },
+  {
+    id: 'jira',
+    name: 'Jira',
+    enabled: true,
+    transport: 'stdio',
+    command: 'uvx',
+    args: ['mcp-atlassian'],
+    env: { JIRA_URL: 'https://acme.atlassian.net' },
+    auth: { type: 'env', envName: 'JIRA_API_TOKEN' },
+    hasToken: false,
+    insecure: false,
+    timeoutSeconds: 120,
+    status: 'error',
+    error: 'No token is stored for Jira. Add it with Set token.',
+    toolTokens: 0,
+    tools: [],
+  },
+  {
+    id: 'fetch',
+    name: 'Fetch',
+    enabled: false,
+    transport: 'stdio',
+    command: 'uvx',
+    args: ['mcp-server-fetch'],
+    auth: { type: 'none' },
+    hasToken: false,
+    insecure: false,
+    timeoutSeconds: 60,
+    status: 'disabled',
+    toolTokens: 0,
+    tools: [],
+  },
+];
+
+/** `?scenario=mcp`: the agent wants to open a GitHub issue through MCP. */
+const issueArgs = { owner: 'acme', repo: 'acme-api', title: 'Session TTL ignores SESSION_TTL in staging', labels: ['bug', 'auth'] };
+const mcpConversation: SessionMessage[] = [
+  { role: 'user', id: 'm0', createdAt: now - 40_000, content: 'Open an issue for the session TTL bug we just found, and link the failing test.' },
+  {
+    role: 'assistant',
+    id: 'm1',
+    createdAt: now - 35_000,
+    model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
+    content: "I'll check for an existing issue first, then open one.",
+    toolCalls: [
+      { id: 'g1', name: 'mcp__github__search_issues', arguments: JSON.stringify({ q: 'repo:acme/acme-api session TTL is:open' }) },
+      { id: 'g2', name: 'mcp__github__create_issue', arguments: JSON.stringify(issueArgs) },
+    ],
+  },
+  {
+    role: 'tool',
+    id: 'm2',
+    toolCallId: 'g1',
+    toolName: 'mcp__github__search_issues',
+    createdAt: now - 33_000,
+    status: 'success',
+    summary: 'Search issues · GitHub',
+    autoApproved: 'Ran without asking (you allowed this tool of GitHub).',
+    durationMs: 640,
+    content: 'No open issues match.',
+  },
+];
 
 const editArgs = JSON.stringify({
   path: 'src/auth/session.ts',
@@ -313,7 +416,9 @@ function baseState(): AppState {
   const messages =
     scenario === 'conversation' || scenario === 'bigdiff'
       ? conversation
-      : scenario === 'auto'
+      : scenario === 'mcp'
+        ? mcpConversation
+        : scenario === 'auto'
         ? autoConversation
         : scenario === 'done'
           ? doneConversation
@@ -325,7 +430,7 @@ function baseState(): AppState {
   return {
     surface,
     view: scenario === 'providers' ? 'providers' : scenario === 'history' ? 'history' : scenario === 'settings' ? 'settings' : 'chat',
-    workspace: { name: 'acme-api', trusted: true, hasFolder: true },
+    workspace: { name: 'acme-api', trusted: mcpParam !== 'restricted', hasFolder: true },
     providers: scenario === 'onboarding' ? [] : providers,
     selected: scenario === 'onboarding' ? null : { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
     mode: params.get('mode') === 'plan' ? 'plan' : 'act',
@@ -352,7 +457,9 @@ function baseState(): AppState {
         ? { sessionId: 's1', iteration: 3, maxIterations: 25, startedAt: now - 58_000, activity: { phase: 'awaiting_approval', label: 'src/auth/session.ts', toolName: 'edit_file', callId: 't3' } }
         : scenario === 'auto'
           ? { sessionId: 's1', iteration: 4, maxIterations: 25, startedAt: now - 41_000, activity: { phase: 'awaiting_approval', label: 'git push origin main', toolName: 'execute_terminal', callId: 'x3' } }
-          : null,
+          : scenario === 'mcp'
+            ? { sessionId: 's1', iteration: 2, maxIterations: 25, startedAt: now - 40_000, activity: { phase: 'awaiting_approval', label: 'Create issue · GitHub', toolName: 'mcp__github__create_issue', callId: 'g2' } }
+            : null,
     approvals:
       awaitingEdit
         ? [
@@ -367,7 +474,18 @@ function baseState(): AppState {
                   : { kind: 'edit', path: 'src/auth/session.ts', isNew: false, diff, added: 1, removed: 1 },
             },
           ]
-        : scenario === 'auto'
+        : scenario === 'mcp'
+          ? [
+              {
+                id: 'ap3',
+                callId: 'g2',
+                toolName: 'mcp__github__create_issue',
+                title: 'Create issue · GitHub',
+                reason: 'Tools of MCP servers ask before they run, in every approval mode, until you allow them.',
+                detail: { kind: 'mcp', server: 'GitHub', tool: 'create_issue', title: 'Create issue', arguments: JSON.stringify(issueArgs, null, 2), hints: ['open-world'] },
+              },
+            ]
+          : scenario === 'auto'
           ? [
               {
                 id: 'ap2',
@@ -422,11 +540,53 @@ function baseState(): AppState {
       overriddenByWorkspace: [],
     },
     configFile: scenario === 'onboarding' ? { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] } : configFile,
+    mcp: {
+      active: mcpParam !== 'restricted',
+      // In Restricted Mode no server runs, as in the real host.
+      servers:
+        mcpParam === 'empty'
+          ? []
+          : mcpParam === 'restricted'
+            ? mcpServers.map((s) => ({ ...s, status: s.enabled ? 'stopped' : 'disabled', error: undefined, server: undefined, tools: [], toolTokens: 0 }))
+            : mcpServers,
+    },
   };
 }
 
 let state = baseState();
 const send = (m: HostMessage) => window.postMessage(m, '*');
+const patchMcp = (servers: McpServerView[]) => {
+  state = { ...state, mcp: { ...state.mcp, servers } };
+  send({ type: 'patch', patch: { mcp: state.mcp } });
+};
+const updateServer = (id: string, change: (s: McpServerView) => McpServerView) => patchMcp(state.mcp.servers.map((s) => (s.id === id ? change(s) : s)));
+/** Pretends to start a server: a moment of "Starting…", then connected with a couple of tools. */
+const connect = (id: string) => {
+  updateServer(id, (s) => ({ ...s, status: 'starting', error: undefined }));
+  setTimeout(
+    () =>
+      updateServer(id, (s) => {
+        const missing = s.auth.type !== 'none' && !s.hasToken;
+        return {
+          ...s,
+          status: missing ? 'error' : 'connected',
+          error: missing ? `No token is stored for ${s.name}. Add it with Set token.` : undefined,
+          server: { name: s.id, version: '1.0.0' },
+          tools: s.tools.length
+            ? s.tools
+            : [
+                { name: 'list_items', modelName: `mcp__${s.id}__list_items`, policy: 'ask', hints: ['read-only'], description: 'Lists the items the server knows about.' },
+                { name: 'update_item', modelName: `mcp__${s.id}__update_item`, policy: 'ask', hints: ['destructive'], description: 'Changes one item.' },
+              ],
+          toolTokens: s.toolTokens || 410,
+        };
+      }),
+    800,
+  );
+};
+// The filesystem server finishes starting shortly after the page opens.
+setTimeout(() => state.mcp.active && state.mcp.servers.some((s) => s.id === 'filesystem' && s.status === 'starting') && connect('filesystem'), 1500);
+
 
 /** A small fake repository for the attach menu. */
 const TREE: Record<string, Array<{ name: string; type: 'file' | 'directory' }>> = {
@@ -545,7 +705,46 @@ onPost((m) => {
         400,
       );
     case 'approval':
+      if (m.allowTool) send({ type: 'notice', id: `n-${Date.now()}`, level: 'info', message: 'create_issue of GitHub now runs without asking. Change it in Settings → MCP.' });
       return send({ type: 'patch', patch: { approvals: [], run: null } });
+    case 'saveMcpServer': {
+      const v = m.server;
+      const id = v.id ?? (v.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'server');
+      const old = state.mcp.servers.find((s) => s.id === id);
+      const view: McpServerView = {
+        id,
+        name: v.name,
+        enabled: old?.enabled ?? true,
+        transport: v.transport,
+        command: v.command,
+        args: v.args,
+        env: v.env,
+        cwd: v.cwd,
+        url: v.url,
+        headers: v.headers,
+        auth: v.auth,
+        hasToken: !!v.token || (old?.hasToken ?? false),
+        insecure: false,
+        timeoutSeconds: v.timeoutSeconds ?? 60,
+        status: 'stopped',
+        tools: old?.tools ?? [],
+        toolTokens: old?.toolTokens ?? 0,
+      };
+      patchMcp(old ? state.mcp.servers.map((s) => (s.id === id ? view : s)) : [...state.mcp.servers, view]);
+      return connect(id);
+    }
+    case 'deleteMcpServer':
+      return patchMcp(state.mcp.servers.filter((s) => s.id !== m.id));
+    case 'setMcpServerEnabled':
+      updateServer(m.id, (s) => ({ ...s, enabled: m.enabled, status: m.enabled ? 'stopped' : 'disabled', tools: m.enabled ? s.tools : [], toolTokens: m.enabled ? s.toolTokens : 0 }));
+      return m.enabled ? connect(m.id) : undefined;
+    case 'restartMcpServer':
+      return connect(m.id);
+    case 'setMcpToolPolicy':
+      return updateServer(m.id, (s) => ({ ...s, tools: s.tools.map((t) => (t.name === m.tool ? { ...t, policy: m.policy } : t)) }));
+    case 'setMcpToken':
+      updateServer(m.id, (s) => ({ ...s, hasToken: true }));
+      return connect(m.id);
     case 'suggestFiles': {
       const q = m.query.toLowerCase();
       const items = q

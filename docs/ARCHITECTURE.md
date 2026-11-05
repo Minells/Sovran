@@ -54,7 +54,8 @@ src/
     ports.ts                 WorkspacePort · ProcessPort · ApprovalPort · Logger
     providers/               ChatProvider, OpenAI-compatible adapter, SSE, errors, capabilities
     agent/                   AgentRunner, events, system prompt, tagged-stream parser, prompted tools
-    tools/                   registry, tool types, edit engine, builtin tools
+    tools/                   registry (built-in tools plus tool sources), tool types, edit engine, builtin tools
+    mcp/                     MCP client: settings rules and schema, launch resolution, McpHub, tool names, results
     permissions/             policy, command analysis
     security/                path confinement, secret redaction, globs
     context/                 token estimation, context budget & truncation
@@ -63,8 +64,8 @@ src/
     sessions/                session model, repository interface, generated titles
   shared/protocol.ts         host ⇄ webview message contracts (types + zod schemas)
   extension/                 VS Code integration (composition root)
-    extension.ts · SovranViewProvider.ts · SovranPanels.ts · webviewHtml.ts · SovranController.ts · config.ts · configFileHost.ts · services.ts
-    adapters/                VscodeWorkspace · NodeProcessRunner · DiffPresenter · FsSessionRepository · MementoCapabilityStore ·
+    extension.ts · SovranViewProvider.ts · SovranPanels.ts · webviewHtml.ts · SovranController.ts · config.ts · configFileHost.ts · mcpHost.ts · services.ts
+    adapters/                VscodeWorkspace · NodeProcessRunner · DiffPresenter · FsSessionRepository · MementoCapabilityStore · NodeMcpTransports ·
                              WorkerDocumentConverter + documentWorker (bundled separately as dist/documentWorker.js)
 webview/                     React app (Vite) → dist/webview
 tests/                       unit · integration (mock OpenAI server) · fixtures · extension (test-electron)
@@ -189,6 +190,11 @@ changed while it awaited approval. Writes go through `WorkspaceEdit` so they are
 
 **Plan mode** registers only `read` tools with the model, *and* the runtime rejects any non-read call.
 
+**Tool sources.** Besides the built-in tools, the registry asks its `ToolSource`s for tools on every request, so tools
+can come and go during a run (the next model round-trip sees the change). A source never shadows a built-in tool. A
+tool may give its JSON Schema directly (`ToolDefinition.parameters`) instead of deriving it from its zod schema; such
+schemas are not cached. The MCP hub is the only source today (section 12).
+
 ## 7. Permissions
 
 `PermissionPolicy.decide(tool, args, ctx) → allow | ask | deny`:
@@ -197,6 +203,7 @@ changed while it awaited approval. Writes go through `WorkspaceEdit` so they are
 |---|---|---|
 | read | allow (ask if path matches `protectedPaths`) | same |
 | write | **deny** | `ask` in Ask mode · `allow` in Auto-edit and Auto mode, or when a session grant exists. Protected paths always ask |
+| execute (MCP tool) | **deny** | `ask` in every approval mode, Auto included, unless the user allowed that tool (`allowedTools`): then `allow`, labelled *auto* |
 | execute | **deny** | Guardrails first: high-risk patterns, protected paths or paths outside the workspace named in the command, and invisible characters always **ask**. Otherwise `allow` if the command matches `approvals.allowedCommands` (no shell metacharacters `; & \| \` $ > < ( ) { }` or newlines) or the mode is Auto, else `ask` |
 
 **Approval modes** (`ask` · `edits` · `auto`) decide how much Act mode may do without asking. The mode is per window,
@@ -297,13 +304,17 @@ All contracts are in `src/shared/protocol.ts`.
   attach a file from outside the workspace, because the user picks it in a host-owned dialog)
 - Editor: `openFile`, `openExternal` (http/https only), `insertCode`
 - Providers: `saveProvider` (with an optional `requestId` for the guided setup), `deleteProvider`, `testProvider`, `setApiKey`
+- MCP servers: `saveMcpServer` (with an optional `token` for Secret Storage, never sent back), `deleteMcpServer` (the
+  host confirms), `setMcpServerEnabled`, `restartMcpServer`, `setMcpToolPolicy` (`off`, `ask` or `allow`) and
+  `setMcpToken` (a native password box). `approval` takes `allowTool` for *Always allow* on an MCP call; the host takes
+  the server and tool from the pending request, never from the webview
 - Settings and views: `updateSetting` (a discriminated union of the keys the Settings view may change, each with its
   own value schema), `openSettings`, `showLogs`, `setView`
 
 **Host → webview** messages:
 - `state`: a full snapshot for one surface (its kind, its chat, run, approvals, screen and composer context, plus the
   shared state: providers without secrets, `hasKey` booleans, sessions index, live sessions, modes, settings view,
-  workspace and trust info)
+  workspace and trust info, and the MCP servers with their status and tools, `hasToken` booleans)
 - `patch` (partial state), and the incremental `messageUpsert`, `messageDelta` and `messageRemoved`
 - `toolOutput`, `notice`, `providerTest`, `providerSaved`, `fileSuggestions` (with an `active`/`open` hint for files open in
   the editor), `directoryListing` and `focusComposer`
@@ -379,10 +390,48 @@ proposal's diff editor contributes Apply and Reject (`sovran.acceptProposal`/`re
 - **Search.** `WorkspacePort.searchText` is optional. The VS Code host implements it with the bundled ripgrep, passing
   only negative globs, because a positive `--glob` would override `.gitignore`.
 
-## 12. Extension points for the future
+## 12. MCP client
 
-- **MCP:** an `McpToolSource` that registers external tools in the `ToolRegistry` with `risk:'execute'`
-  semantics by default.
+```mermaid
+flowchart LR
+  S[(sovran.mcp.servers<br/>user scope)] --> MH[McpHost<br/>settings · Secret Storage · trust]
+  MH --> HUB[McpHub<br/>core]
+  HUB -- "create(server)" --> TF[NodeMcpTransports<br/>stdio · Streamable HTTP]
+  TF --> SRV1[local server process]
+  TF --> SRV2[remote server]
+  HUB -- ToolSource --> REG[ToolRegistry]
+  REG --> AR[AgentRunner]
+  MH -- McpView --> UI[Settings → MCP]
+```
+
+- **Core (`src/core/mcp`).** `McpHub` keeps one SDK `Client` per configured server and turns each tool of a connected
+  server into a `ToolDefinition` with `risk: 'execute'`, its JSON Schema as `parameters` and a model-facing name
+  `mcp__<server>__<tool>` (cleaned and given a short hash when it is not a valid function name or longer than 64
+  characters). Transports come from an injected `McpTransportFactory`, so the core spawns nothing itself and tests
+  connect real SDK servers in memory. Connections carry a generation number, so callbacks of a replaced or stopped
+  connection do nothing. The SDK's `listChanged` option keeps tool lists current.
+- **Settings.** `sovran.mcp.servers` follows the `command`/`url` shape every MCP host uses. Changes are applied in place:
+  names, timeouts and tool policies (`allowedTools`, `disabledTools`) never reconnect; the command, arguments,
+  environment, folder, URL, headers or auth do. Writes from Settings keep any entry Sovran could not read, unchanged
+  and in place. `rules.ts` holds what the webview form shares with the host's zod schema, without zod.
+- **Launch (`launch.ts`).** `${workspaceFolder}`, `${userHome}` and `${env:NAME}` are expanded; any other variable, or
+  one without a value, is reported instead of becoming an empty string. The token from Secret Storage goes to
+  `Authorization: Bearer`, a named header, or an environment variable. Local servers start in the first workspace
+  folder with the SDK's minimal environment plus proxy, certificate, locale and temp variables (`MCP_INHERITED_ENV`).
+- **Calls.** Arguments are shown in the approval card as indented JSON. A call has the server's timeout (reset by
+  progress, at most one hour in total) and is cancelled with the run. Results become text (`results.ts`): images, audio
+  and binary resources become labels, structured content is shown as JSON when there is no text. The runner then masks
+  secrets, including the MCP tokens, and truncates the result like any other.
+- **Policy.** MCP tools are offered in Act mode only and never in untrusted workspaces (servers do not even start there).
+  `PolicyInput.mcp` makes them ask in every approval mode until the user allows the tool; the hub reads the policy at
+  call time, so a tool turned off mid-run is refused.
+- **Lifecycle.** Servers start in the background at activation (and when the workspace is trusted), never blocking it;
+  `deactivate` awaits `McpHost.dispose()`, which ends HTTP sessions and stops local processes.
+
+## 13. Extension points for the future
+
+- **MCP:** resources and prompts (as attachments and slash commands), OAuth for remote servers, the server's
+  `instructions` in the system prompt, servers in `config.yaml`, and loading the SDK only when a server is configured.
 - **Checkpoints:** the edit engine already centralizes writes, so a snapshot store can hook in there.
 - **CLI:** a Node composition root that implements the ports with `fs`, `child_process` and a TTY approval prompt.
 - **Copilot bridge:** a `LanguageModelChatProvider` that wraps `ChatProvider`.

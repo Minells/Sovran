@@ -5,13 +5,13 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { convertDocument } from '../../src/core/documents/convert';
 import type { DirEntry, DocumentConverterPort, FileStat, WorkspaceRoot } from '../../src/core/ports';
 import type { ContextAttachment } from '../../src/core/sessions/model';
 import { displayPath } from '../../src/core/util/files';
 import type { HostMessage } from '../../src/shared/protocol';
-import { makeDocx, makePdf, wp } from '../fixtures/documents';
+import { makeDocx, makePdf, PDFJS_WARMUP_MS, warmUpPdfJs, wp } from '../fixtures/documents';
 import { makeJpeg, makePng } from '../fixtures/images';
 import type { ImageAttachment } from '../../src/core/sessions/model';
 
@@ -287,6 +287,7 @@ describe('uploadFiles', () => {
 });
 
 describe('documents', () => {
+  beforeAll(warmUpPdfJs, PDFJS_WARMUP_MS);
   it('attaches a PDF as a document and sends its text with what it is', async () => {
     await write('docs/spec.pdf', makePdf([['Requisiti del sistema'], ['Allegato A']]));
     await controller.handle({ type: 'attachPath', path: 'docs/spec.pdf' });

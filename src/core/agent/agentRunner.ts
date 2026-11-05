@@ -457,6 +457,7 @@ export class AgentRunner {
       paths: prepared.paths,
       command: prepared.command,
       risks: prepared.risks,
+      mcp: prepared.mcp,
       settings: policy,
       grants: o.grants,
     });

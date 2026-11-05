@@ -6,6 +6,7 @@ import { effectiveLimits, type LimitSource } from '../../../src/core/providers/l
 import { APPROVAL_OPTIONS } from '../lib/approvals';
 import { useStore } from '../state/store';
 import { getUiState, post, setUiState } from '../vscode';
+import { McpArea } from './McpSettings';
 import { Button, CheckRow, Icon, IconButton } from './primitives';
 
 const update = (setting: SettingUpdate) => post({ type: 'updateSetting', setting });
@@ -13,12 +14,18 @@ const ref = (s: SelectedModel | null) => (s ? `${s.providerId}\u0000${s.modelId}
 
 // --------------------------------------------------------------------------------------------- areas
 
-export type SettingsArea = 'models' | 'approvals' | 'agent' | 'context' | 'data';
+export type SettingsArea = 'models' | 'approvals' | 'agent' | 'mcp' | 'context' | 'data';
 
 const AREAS: ReadonlyArray<{ id: SettingsArea; label: string; icon: string; description: string }> = [
   { id: 'models', label: 'Models', icon: 'server-process', description: 'Which model answers in each mode, where it runs and how chats are named.' },
   { id: 'approvals', label: 'Approvals', icon: 'shield', description: 'How much Act mode may do without asking you first.' },
   { id: 'agent', label: 'Agent', icon: 'hubot', description: 'Limits and visibility for each request.' },
+  {
+    id: 'mcp',
+    label: 'MCP',
+    icon: 'mcp',
+    description: 'Connect MCP servers to give the agent tools from other programs and services. Only you can add them: a repository never can.',
+  },
   { id: 'context', label: 'Context', icon: 'book', description: 'What Sovran sends to the model with your messages.' },
   { id: 'data', label: 'Data', icon: 'lock', description: 'Sovran has no server and no telemetry. Requests go only to the endpoints you configure.' },
 ];
@@ -26,7 +33,7 @@ const AREAS: ReadonlyArray<{ id: SettingsArea; label: string; icon: string; desc
 const isArea = (v: unknown): v is SettingsArea => AREAS.some((a) => a.id === v);
 
 /**
- * The five areas as tabs that stay on screen. Follows the WAI-ARIA tabs pattern: one tab stop for the whole list
+ * The areas as tabs that stay on screen. Follows the WAI-ARIA tabs pattern: one tab stop for the whole list
  * (roving tabindex), arrows and Home/End move between areas, and the selected area is announced as selected.
  */
 function AreaTabs({ current, onSelect }: { current: SettingsArea; onSelect: (area: SettingsArea) => void }) {
@@ -542,6 +549,12 @@ export function SettingsView() {
             description="Opens VS Code's diff editor when a change waits for your approval."
             note={note('diff.openOnProposal')}
           />
+        </AreaPanel>
+      ) : null}
+
+      {area === 'mcp' ? (
+        <AreaPanel area="mcp">
+          <McpArea />
         </AreaPanel>
       ) : null}
 

@@ -3676,3 +3676,337 @@ body.vscode-high-contrast-light .sv-starter-card {
   margin-right: 4px;
   color: var(--sv-muted);
 }
+
+/* ---------------------------------------------------------------- MCP servers (Settings → MCP) */
+
+.sv-mcp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--sv-muted);
+}
+
+.sv-mcp-dot[data-state='ok'] {
+  background: var(--sv-ok);
+  box-shadow: none;
+}
+
+.sv-mcp-dot[data-state='error'] {
+  background: var(--sv-err);
+  box-shadow: none;
+}
+
+.sv-mcp-dot[data-state='busy'] {
+  box-shadow: inset 0 0 0 1.5px var(--sv-focus);
+  animation: sv-mcp-pulse 1.2s var(--sv-ease) infinite alternate;
+}
+
+@keyframes sv-mcp-pulse {
+  to {
+    opacity: 0.35;
+  }
+}
+
+.sv-mcp-card[data-status='disabled'] .sv-card__title,
+.sv-mcp-card[data-status='disabled'] .sv-card__url {
+  color: var(--sv-muted);
+}
+
+.sv-mcp-card .sv-card__url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+
+.sv-mcp-card__fix {
+  margin-top: var(--sv-s2);
+}
+
+/* Only the status icon of the error is red; the buttons under it keep their usual colours. */
+.sv-mcp-card .sv-test--err .sv-btn .codicon {
+  color: inherit;
+}
+
+/* An on/off switch: role="switch" on a button, drawn with theme colours only. */
+.sv-switch {
+  position: relative;
+  flex: none;
+  width: 28px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0;
+  border: 1px solid var(--vscode-checkbox-border, var(--sv-border));
+  border-radius: 8px;
+  background: var(--vscode-checkbox-background, var(--sv-surface));
+  cursor: pointer;
+  transition:
+    background-color 120ms var(--sv-ease),
+    border-color 120ms var(--sv-ease);
+}
+
+.sv-switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--sv-muted);
+  transition:
+    transform 120ms var(--sv-ease),
+    background-color 120ms var(--sv-ease);
+}
+
+.sv-switch[aria-checked='true'] {
+  border-color: var(--sv-button-bg);
+  background: var(--sv-button-bg);
+}
+
+.sv-switch[aria-checked='true']::after {
+  transform: translateX(12px);
+  background: var(--sv-button-fg);
+}
+
+.sv-switch:focus-visible {
+  outline: 1px solid var(--sv-focus);
+  outline-offset: 2px;
+}
+
+.sv-mcp-tools {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--sv-border);
+  margin: 0 calc(-1 * var(--sv-s3));
+  padding: 0 var(--sv-s3);
+}
+
+.sv-mcp-tools__toggle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 0 0;
+  border: 0;
+  background: none;
+  color: var(--sv-fg);
+  font-size: var(--sv-text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.sv-mcp-tools__toggle:hover > span:first-of-type {
+  text-decoration: underline;
+}
+
+.sv-mcp-tools__cost {
+  margin-left: auto;
+  padding-left: var(--sv-s2);
+  color: var(--sv-muted);
+  font-size: var(--sv-text-xs);
+  white-space: nowrap;
+}
+
+.sv-mcp-tools__list {
+  display: flex;
+  flex-direction: column;
+  margin: var(--sv-s2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sv-mcp-tool {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 0;
+  border-top: 1px solid var(--sv-border);
+}
+
+.sv-mcp-tool__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px var(--sv-s1);
+  min-width: 0;
+}
+
+.sv-mcp-tool__name {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-xs);
+  font-weight: 600;
+}
+
+.sv-mcp-tool[data-policy='off'] .sv-mcp-tool__name,
+.sv-mcp-tool[data-policy='off'] .sv-mcp-tool__description {
+  color: var(--sv-muted);
+  opacity: 0.75;
+}
+
+.sv-mcp-tool__description {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--sv-muted);
+  font-size: var(--sv-text-xs);
+}
+
+.sv-mcp-tool__description strong {
+  color: var(--sv-fg);
+  font-weight: 500;
+}
+
+.sv-mcp-policy {
+  margin-left: auto;
+}
+
+.sv-mcp-policy button {
+  padding: 0 6px;
+}
+
+.sv-textarea {
+  width: 100%;
+  min-height: 44px;
+  padding: var(--sv-s1) var(--sv-s2);
+  resize: vertical;
+  background: var(--vscode-input-background);
+  border: 1px solid var(--vscode-input-border, var(--sv-border));
+  border-radius: var(--sv-radius);
+}
+
+.sv-textarea:focus {
+  outline: none;
+  border-color: var(--sv-focus);
+}
+
+.sv-textarea--code {
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-xs);
+  line-height: 1.5;
+}
+
+.sv-mcp-form {
+  gap: var(--sv-s3);
+}
+
+.sv-field input[type='password'] {
+  font-family: var(--sv-mono);
+}
+
+.sv-mcp-import {
+  border: 1px dashed var(--sv-border);
+  border-radius: var(--sv-radius-lg);
+  padding: var(--sv-s2);
+}
+
+.sv-mcp-import > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sv-link);
+  font-size: var(--sv-text-sm);
+  cursor: pointer;
+  list-style: none;
+}
+
+.sv-mcp-import > summary::-webkit-details-marker {
+  display: none;
+}
+
+.sv-mcp-import[open] > summary {
+  margin-bottom: var(--sv-s2);
+}
+
+.sv-mcp-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: var(--sv-s2);
+  list-style: none;
+  border-radius: var(--sv-radius);
+  background: var(--sv-surface);
+  font-size: var(--sv-text-xs);
+}
+
+.sv-mcp-notes li {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.sv-mcp-notes .codicon {
+  margin-top: 1px;
+  color: var(--sv-link);
+  font-size: 12px;
+}
+
+.sv-mcp-restricted {
+  padding: var(--sv-s2);
+  border: 1px solid color-mix(in srgb, var(--sv-warn) 55%, var(--sv-border));
+  border-radius: var(--sv-radius-lg);
+  color: var(--sv-fg);
+}
+
+.sv-mcp-restricted .codicon {
+  color: var(--sv-warn);
+}
+
+/* The MCP call in the approval bar: what the server claims about the tool, then the exact arguments. */
+.sv-approval__hints {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--sv-muted);
+  font-size: var(--sv-text-xs);
+}
+
+.sv-approval__hints li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sv-approval__hints li[data-tone='warn'] {
+  color: var(--sv-warn);
+}
+
+.sv-approval__hints .codicon {
+  font-size: 12px;
+}
+
+.sv-approval-bar .sv-approval__arguments {
+  max-height: 12em;
+  overflow-y: auto;
+  font-size: var(--sv-text-xs);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sv-mcp-dot[data-state='busy'] {
+    animation: none;
+  }
+
+  .sv-switch,
+  .sv-switch::after {
+    transition: none;
+  }
+}
+
+body.vscode-high-contrast .sv-switch[aria-checked='true'],
+body.vscode-high-contrast-light .sv-switch[aria-checked='true'] {
+  border-color: var(--vscode-contrastActiveBorder, var(--sv-focus));
+}
