@@ -17,6 +17,7 @@ Please **do not** open a public issue. Use GitHub's private vulnerability report
 | VS Code SecretStorage | Trusted credential store |
 | Model output (text, tool calls, arguments) | **Untrusted** |
 | Repository files, file names, `AGENTS.md` | **Untrusted** (may contain prompt injection) |
+| Attached documents (PDF, Office, OpenDocument, ZIP) | **Untrusted**. Parsed only in an isolated worker thread |
 | Terminal output, tool results | **Untrusted** |
 | Webview | Sandboxed. Its messages are **validated** as untrusted input |
 | Workspace settings (`.vscode/settings.json`) | **Untrusted** for security-relevant keys |
@@ -40,6 +41,7 @@ Please **do not** open a public issue. Use GitHub's private vulnerability report
 | T13 | Credentials or code forwarded by an HTTP redirect | Provider requests never follow redirects. `fetch` would keep custom auth headers such as `api-key` and re-send the body to another origin on a 307/308; Sovran reports the redirect target instead |
 | T14 | Files outside the workspace sent as context | The active file is attached automatically only when it is inside the workspace and not protected; otherwise its chip says it is not shared. `@` mentions and attached files are re-verified through `realpath` at send time, so a symbolic link cannot pull in a file from outside |
 | T15 | Untrusted text breaking out of its data wrapper | In the prompted tool protocol and in attached files, closing tags such as `</tool_result>`, `</file>` and `</context>` inside the content are neutralized, and wrapper attributes are escaped |
+| T16 | Malicious documents: parser exploits, ZIP bombs, entity expansion, pathological sizes | Documents are parsed only in a worker thread (`dist/documentWorker.js`) with its own heap limit (768 MB) and a 60 s timeout, started per conversion with no inherited command-line options and terminated when it answers; the parsers never load in the extension host (an ESLint rule enforces it). pdf.js runs with `isEvalSupported: false` (the CVE-2024-4367 fix), no font loading and no rendering. The ZIP reader checks each entry's declared size (64 MB) and the total (160 MB) before inflating, and never inflates past the declared size. The XML reader skips DTDs and decodes only the predefined entities, so documents cannot define or fetch entities. Repeated spreadsheet rows and columns are expanded only up to a bound. Files are classified by signature, not extension, and protected files ask before they are read |
 
 ## Known limitations
 
@@ -54,3 +56,6 @@ Please **do not** open a public issue. Use GitHub's private vulnerability report
   (`http.systemCertificates`). Corporate proxies use VS Code's `http.proxy` settings.
 - Session files are not encrypted at rest.
 - Prompt injection cannot be fully prevented at the model level. The controls above limit its impact.
+- A converted document can carry text you never saw: white or hidden text, text behind an image, a hidden sheet or
+  slide. It reaches the model like the rest of the document (hidden sheets and slides are labelled). Treat documents
+  from others like any untrusted file, especially in Auto mode.

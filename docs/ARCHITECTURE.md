@@ -58,12 +58,14 @@ src/
     permissions/             policy, command analysis
     security/                path confinement, secret redaction, globs
     context/                 token estimation, context budget & truncation
+    documents/               document attachments: signature sniffing, safe ZIP/XML readers, converters to Markdown
     config/                  config.yaml parsing and validation (positions for diagnostics), provider merging
     sessions/                session model, repository interface, generated titles
   shared/protocol.ts         host ⇄ webview message contracts (types + zod schemas)
   extension/                 VS Code integration (composition root)
     extension.ts · SovranViewProvider.ts · SovranPanels.ts · webviewHtml.ts · SovranController.ts · config.ts · configFileHost.ts · services.ts
-    adapters/                VscodeWorkspace · NodeProcessRunner · DiffPresenter · FsSessionRepository · MementoCapabilityStore
+    adapters/                VscodeWorkspace · NodeProcessRunner · DiffPresenter · FsSessionRepository · MementoCapabilityStore ·
+                             WorkerDocumentConverter + documentWorker (bundled separately as dist/documentWorker.js)
 webview/                     React app (Vite) → dist/webview
 tests/                       unit · integration (mock OpenAI server) · fixtures · extension (test-electron)
 ```
@@ -211,6 +213,34 @@ Act mode is unavailable when the workspace is untrusted (Restricted Mode).
   2. Drop the oldest whole turns, never splitting an assistant tool-call message from its tool results.
   3. Middle-truncate the largest remaining tool results.
 - Individual tool results are capped at `context.maxToolResultChars` (20 000) with head and tail kept.
+
+### Document attachments
+
+Attached files are classified by their first bytes (`sniffFile`), never by extension: text (UTF-8, or UTF-16 with a
+byte-order mark), a document container (PDF, ZIP) or an unsupported family (image, audio, video, legacy Office,
+archive, executable), each refused with its own message.
+
+```mermaid
+flowchart LR
+  A[attach] --> C{checkFile<br/>size · signature}
+  C -- text --> T[read at send time]
+  C -- document --> P{protected?}
+  P -- confirmed --> W["WorkerDocumentConverter<br/>(worker thread: heap limit, 60 s)"]
+  W --> K[(cache: path · size · mtime)]
+  K --> M["&lt;file format=… detail=… note=…&gt;"]
+```
+
+- **Converters** (`src/core/documents`): `pdf.ts` (pdf.js, text layer only, `## Page N`), `docx.ts`, `xlsx.ts`,
+  `pptx.ts` (following OPC relationships, not fixed paths), `odf.ts` (all three OpenDocument kinds) and a listing for
+  plain ZIP archives. They write into a `MarkdownBudget` and stop reading once it is full, so a 300-page PDF costs
+  only the pages that are sent; the result says how far it got (`pages 1–40 of 300`).
+- **Isolation.** `convert.ts` is the only entry point and runs only in `documentWorker.ts` (ESLint forbids importing
+  the parsers elsewhere in `src/extension`). The host talks to it through `DocumentConverterPort`.
+- **When.** A document is converted when it is attached (so problems show at once) and checked again at send time;
+  an unchanged file comes from a small cache keyed by path, size and mtime. Protected files ask before anything is read.
+- **For the model.** The attachment carries `format`, `detail` and a `note` saying the text was extracted and that
+  images, charts and layout are not included. A file that only looked like a document (it is not a valid PDF or ZIP)
+  and has no binary content is attached as text, as before.
 
 ## 9. Sessions and persistence
 

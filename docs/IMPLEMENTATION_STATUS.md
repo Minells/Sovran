@@ -3,7 +3,7 @@
 This is the source of truth for progress. *Verified* means checked by an automated test or a build step that was
 actually run. Anything else is labelled.
 
-_Last updated: 2026-11-03 · version 0.1.0 (preview)_
+_Last updated: 2026-11-05 · version 0.1.0 (preview)_
 
 ## Milestones
 
@@ -96,6 +96,20 @@ Manual checks for this branch (first F5 session):
 - [ ] Guided setup with a bearer-key provider: the key prompt appears, the test runs, the discovered models are offered.
 - [ ] Opening `~/.aws/credentials` shows a locked chip, and sending a message does not attach it.
 - [ ] A provider that answers with a redirect shows the redirect error and its hint.
+
+## Document attachments (branch `feat/document-attachments`)
+
+| Feature | Status | Evidence |
+|---|---|---|
+| PDF, Word, Excel, PowerPoint, OpenDocument and ZIP attachments converted to Markdown | ✅ Implemented | 33 core tests, 9 host tests through the real controller on disk, 6 integration tests on the bundled worker. The shipped `dist/documentWorker.js` was run under Electron 32.2.1 (Node 20.18, as in VS Code 1.95) both as Node and in a utility process |
+| Recognition by signature, UTF-16 text, specific refusals | ✅ Implemented | Unit tests per family; host tests for the messages |
+| Format and detail on chips | ✅ Implemented | Component tests for composer and transcript chips |
+
+Manual checks for this branch (first F5 session):
+- [ ] Attach a real PDF of a few hundred pages: the status bar shows *Reading…* briefly, the chip says *pages 1–N of M*, and the answer cites page numbers.
+- [ ] Attach an Excel workbook with dates and several sheets: dates appear as dates, hidden sheets are labelled.
+- [ ] Attach a scanned PDF: the notice explains it has no text. Attach a `.png`: the image message appears.
+- [ ] Attach a document from outside the workspace with *Upload from computer*, then send: the model receives its text.
 
 ## Settings tabs, config.yaml and chat titles (branch `feat/settings-yaml-autotitle`)
 
