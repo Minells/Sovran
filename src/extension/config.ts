@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { z } from 'zod';
 import type { AgentSettings } from '../core/agent/agentRunner';
+import { mergeMcpEntries, parseMcpServers, type McpServerConfig } from '../core/mcp/config';
 import type { ApprovalMode } from '../core/permissions/policy';
 import type { Logger } from '../core/ports';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_OUTPUT_TOKENS } from '../core/providers/limits';
@@ -61,6 +62,19 @@ export function readProviders(logger?: Logger): ProviderConfig[] {
 
 export async function writeProviders(providers: ProviderConfig[]): Promise<void> {
   await vscode.workspace.getConfiguration(SECTION).update('providers', providers, vscode.ConfigurationTarget.Global);
+}
+
+/** MCP servers (`sovran.mcp.servers`), user scope only: a repository must never be able to start a process (T18). */
+export function readMcpServers(logger?: Logger): McpServerConfig[] {
+  const { servers, problems } = parseMcpServers(userSetting<unknown[]>('mcp.servers', []));
+  for (const p of problems) logger?.warn(`Ignoring an invalid entry in sovran.mcp.servers: ${p}`);
+  return servers;
+}
+
+/** Writes the servers to user settings, keeping in place any entry Sovran could not read. */
+export async function writeMcpServers(servers: readonly McpServerConfig[]): Promise<void> {
+  const next = mergeMcpEntries(userSetting<unknown[]>('mcp.servers', []), servers);
+  await vscode.workspace.getConfiguration(SECTION).update('mcp.servers', next.length ? next : undefined, vscode.ConfigurationTarget.Global);
 }
 
 export function readDefaultModel(): string {

@@ -20,7 +20,25 @@ const TOOLS: Record<string, ToolInfo> = {
   execute_terminal: { icon: 'terminal', done: 'Ran', doing: 'Running' },
 };
 
-export const toolInfo = (name: string): ToolInfo => TOOLS[name] ?? { icon: 'tools', done: name.replace(/_/g, ' '), doing: name.replace(/_/g, ' ') };
+const MCP_TOOL: ToolInfo = { icon: 'mcp', done: 'Used', doing: 'Using' };
+
+export const isMcpTool = (name: string) => name.startsWith('mcp__');
+
+export const toolInfo = (name: string): ToolInfo =>
+  TOOLS[name] ?? (isMcpTool(name) ? MCP_TOOL : { icon: 'tools', done: name.replace(/_/g, ' '), doing: name.replace(/_/g, ' ') });
+
+/**
+ * "create_issue · GitHub" for an MCP tool: from the connected servers when it is still there, else from its name
+ * (`mcp__<server>__<tool>`), which is how a chat from before the server was removed still reads well.
+ */
+export function mcpToolLabel(name: string, servers: ReadonlyArray<{ name: string; tools: ReadonlyArray<{ name: string; title?: string; modelName: string }> }>): string {
+  for (const s of servers) {
+    const t = s.tools.find((x) => x.modelName === name);
+    if (t) return `${t.title ?? t.name} · ${s.name}`;
+  }
+  const m = /^mcp__([a-z0-9-]+)__(.+)$/.exec(name);
+  return m ? `${m[2]} · ${m[1]}` : name;
+}
 
 /** Human target of a tool call (path, pattern, query, command) from its raw JSON arguments. */
 export function toolTarget(name: string, rawArgs: string): string {
@@ -45,7 +63,8 @@ export function toolTarget(name: string, rawArgs: string): string {
     case 'list_directory':
       return pick('path') || '.';
     default:
-      return pick('path');
+      // MCP tools have no common argument to show; the row names the tool and its server instead.
+      return isMcpTool(name) ? '' : pick('path');
   }
 }
 

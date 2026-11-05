@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Mouse
 import type { ApprovalView, AssistantMessageView, RunViewT, ToolCallView, ToolMessageView } from './types';
 import type { SessionMessage } from '../../../src/shared/protocol';
 import { renderMarkdown } from '../lib/markdown';
-import { documentInfo, imageDescription, toolInfo, toolTarget } from '../lib/format';
+import { documentInfo, imageDescription, isMcpTool, mcpToolLabel, toolInfo, toolTarget } from '../lib/format';
 import { post } from '../vscode';
 import { useStore } from '../state/store';
 import { ApprovalDetail, approvalAnchor } from './Approval';
@@ -79,6 +79,7 @@ export function ToolRow({
   run: RunViewT | null;
   output?: string;
 }) {
+  const { app } = useStore();
   const info = toolInfo(call.name);
   const status: RowStatus = result
     ? result.status
@@ -92,7 +93,8 @@ export function ToolRow({
   const [open, setOpen] = useState<boolean | null>(null);
   // A pending approval always shows its detail: the bar above links to it, so it must not be folded away.
   const expanded = status === 'awaiting' || (open ?? (status === 'running' && call.name === 'execute_terminal'));
-  const target = toolTarget(call.name, call.arguments) || result?.summary || '';
+  const target =
+    toolTarget(call.name, call.arguments) || result?.summary || (isMcpTool(call.name) ? (approval?.title ?? mcpToolLabel(call.name, app.mcp.servers)) : '');
   const display = result?.display;
   const verb = status === 'running' || status === 'awaiting' || status === 'queued' ? info.doing : info.done;
   const st = STATUS_ICON[status];

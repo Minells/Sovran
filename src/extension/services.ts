@@ -23,6 +23,23 @@ export class ProviderSecrets {
   }
 }
 
+/** Tokens of MCP servers, in Secret Storage like the API keys, keyed by server id. */
+export class McpSecrets {
+  constructor(private readonly storage: vscode.SecretStorage) {}
+  private key(id: string) {
+    return `sovran.mcp.${id}.token`;
+  }
+  get(id: string) {
+    return this.storage.get(this.key(id));
+  }
+  set(id: string, value: string) {
+    return this.storage.store(this.key(id), value);
+  }
+  delete(id: string) {
+    return this.storage.delete(this.key(id));
+  }
+}
+
 export class MementoCapabilityStore implements CapabilityStore {
   private static readonly KEY = 'sovran.capabilities.v1';
   constructor(private readonly memento: vscode.Memento) {}

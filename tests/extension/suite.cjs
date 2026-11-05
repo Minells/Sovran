@@ -54,7 +54,8 @@ exports.run = async function run() {
     assert.ok(cfg.get('security.protectedPaths').includes('**/.env'));
     // Chats are named by the model by default (owner decision, ADR-023); the first-words title shows until it arrives.
     assert.strictEqual(cfg.get('sessions.generateTitles'), true);
-    // Security-relevant settings ignore workspace values.
+    assert.deepStrictEqual(cfg.get('mcp.servers'), []);
+    // Security-relevant settings ignore workspace values. A repository must never be able to start an MCP server.
     const scope = (key) => ext.packageJSON.contributes.configuration.flatMap((g) => Object.entries(g.properties)).find(([k]) => k === key)?.[1].scope;
     for (const key of [
       'sovran.approvals.mode',
@@ -63,6 +64,7 @@ exports.run = async function run() {
       'sovran.terminal.mirrorToTerminal',
       'sovran.sessions.generateTitles',
       'sovran.sessions.titleModel',
+      'sovran.mcp.servers',
     ]) {
       assert.strictEqual(scope(key), 'application', `${key} must be application-scoped`);
     }

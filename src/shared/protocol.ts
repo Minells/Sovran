@@ -9,8 +9,22 @@ import type { ToolMode } from '../core/providers/types';
 import type { SessionMessage, SessionSummary } from '../core/sessions/model';
 import type { DocumentFormat } from '../core/documents/types';
 import { IMAGE_LIMITS, type ImageMime } from '../core/images/images';
+import {
+  MCP_ID_PATTERN,
+  MCP_TIMEOUT_SECONDS,
+  mcpAuthSchema,
+  mcpEnvName,
+  mcpHeaderName,
+  mcpHttpUrl,
+  transportProblems,
+  type McpAuth,
+  type McpToolPolicy,
+  type McpTransportKind,
+} from '../core/mcp/config';
+import type { McpStatus } from '../core/mcp/status';
+import type { McpToolHint } from '../core/ports';
 
-export type { SessionMessage, SessionSummary, AgentMode, ApprovalMode, ToolMode };
+export type { SessionMessage, SessionSummary, AgentMode, ApprovalMode, ToolMode, McpAuth, McpStatus, McpToolHint, McpToolPolicy, McpTransportKind };
 
 export type View = 'chat' | 'history' | 'providers' | 'settings';
 
@@ -74,7 +88,8 @@ export type ApprovalDetailView =
   | { kind: 'edit'; path: string; isNew: boolean; diff: string; added: number; removed: number }
   /** `allowPrefix` is the suggested "always allow" entry, or null when this command can never be allow-listed. */
   | { kind: 'command'; command: string; cwd: string; warnings: string[]; allowPrefix: string | null }
-  | { kind: 'read'; path: string; reason: string };
+  | { kind: 'read'; path: string; reason: string }
+  | { kind: 'mcp'; server: string; tool: string; title?: string; arguments: string; hints: McpToolHint[] };
 
 export interface ApprovalView {
   id: string;
@@ -199,6 +214,47 @@ export interface SettingsView {
   overriddenByWorkspace: SettingKey[];
 }
 
+export interface McpToolView {
+  name: string;
+  title?: string;
+  description?: string;
+  /** The name the model calls it by (and the transcript shows). */
+  modelName: string;
+  policy: McpToolPolicy;
+  hints: McpToolHint[];
+}
+
+/** A configured MCP server and how it is doing. Tokens never reach the webview: only `hasToken`. */
+export interface McpServerView {
+  id: string;
+  name: string;
+  enabled: boolean;
+  transport: McpTransportKind;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  auth: McpAuth;
+  hasToken: boolean;
+  /** The token travels over plain http to another machine. */
+  insecure: boolean;
+  timeoutSeconds: number;
+  status: McpStatus;
+  error?: string;
+  server?: { name: string; version: string };
+  tools: McpToolView[];
+  /** Estimated tokens the definitions of its offered tools add to every request. */
+  toolTokens: number;
+}
+
+export interface McpView {
+  /** False in Restricted Mode: servers do not start, and MCP tools are never offered. */
+  active: boolean;
+  servers: McpServerView[];
+}
+
 export interface AppState {
   /** The webview this state is for. A chat in an editor tab only shows chats; lists and settings live in the view. */
   surface: SurfaceKind;
@@ -226,6 +282,7 @@ export interface AppState {
   commands: SlashCommandView[];
   settings: SettingsView;
   configFile: ConfigFileView;
+  mcp: McpView;
 }
 
 export interface ProviderTestResult {
@@ -258,6 +315,33 @@ export type HostMessage =
 
 const id = z.string().min(1).max(200);
 const providerId = z.string().regex(/^[a-z0-9][a-z0-9_-]{0,47}$/);
+
+const mcpId = z.string().regex(MCP_ID_PATTERN);
+
+/** A server from the Settings form. Only the fields of its transport are sent; the host checks them again. */
+export const mcpServerInputSchema = z
+  .object({
+    /** Absent for a new server: the host derives one from the name. */
+    id: mcpId.optional(),
+    name: z.string().trim().min(1, 'Give this server a name.').max(80),
+    transport: z.enum(['stdio', 'http']),
+    command: z.string().trim().min(1).max(1000).optional(),
+    args: z.array(z.string().max(4000)).max(100).optional(),
+    env: z.record(mcpEnvName, z.string().max(8000)).optional(),
+    cwd: z.string().trim().min(1).max(1000).optional(),
+    url: mcpHttpUrl.optional(),
+    headers: z.record(mcpHeaderName, z.string().max(8000)).optional(),
+    auth: mcpAuthSchema,
+    timeoutSeconds: z.number().int().min(MCP_TIMEOUT_SECONDS.min).max(MCP_TIMEOUT_SECONDS.max).optional(),
+    /** A new token for Secret Storage. It is never sent back to the webview. */
+    token: z.string().max(8000).optional(),
+  })
+  .superRefine((s, ctx) => {
+    if (s.transport === 'stdio' && !s.command) ctx.addIssue({ code: 'custom', path: ['command'], message: 'Enter the command that starts the server.' });
+    else if (s.transport === 'http' && !s.url) ctx.addIssue({ code: 'custom', path: ['url'], message: 'Enter the URL of the server.' });
+    else for (const message of transportProblems(s)) ctx.addIssue({ code: 'custom', message });
+  });
+export type McpServerInput = z.infer<typeof mcpServerInputSchema>;
 
 export const providerInputSchema = z.object({
   id: providerId.optional(),
@@ -334,6 +418,8 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
     feedback: z.string().max(4000).optional(),
     /** Adds this prefix to the allowed commands before running (the host checks it matches the command). */
     allowCommand: allowEntry.optional(),
+    /** Runs the MCP tool and stops asking for it ("Always allow"). */
+    allowTool: z.literal(true).optional(),
   }),
   z.object({ type: z.literal('openApprovalDiff'), id }),
   z.object({ type: z.literal('newSession') }),
@@ -386,6 +472,15 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('stopConfigFile') }),
   /** Uses an ignored config file again; Settings win where both define the same provider. */
   z.object({ type: z.literal('useConfigFile') }),
+  /** Adds a server (no id) or replaces one, keeping its tool policies. */
+  z.object({ type: z.literal('saveMcpServer'), server: mcpServerInputSchema }),
+  /** The host confirms first: the server's stored token is deleted too. */
+  z.object({ type: z.literal('deleteMcpServer'), id: mcpId }),
+  z.object({ type: z.literal('setMcpServerEnabled'), id: mcpId, enabled: z.boolean() }),
+  z.object({ type: z.literal('restartMcpServer'), id: mcpId }),
+  z.object({ type: z.literal('setMcpToolPolicy'), id: mcpId, tool: z.string().min(1).max(200), policy: z.enum(['off', 'ask', 'allow']) }),
+  /** Asks for the server's token in a password box (Secret Storage). */
+  z.object({ type: z.literal('setMcpToken'), id: mcpId }),
   z.object({ type: z.literal('restoreCheckpoint'), messageId: id }),
   z.object({ type: z.literal('retry') }),
   z.object({ type: z.literal('editMessage'), messageId: id, text: z.string().min(1).max(200_000) }),

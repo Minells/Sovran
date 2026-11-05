@@ -36,6 +36,11 @@ export interface PolicyInput {
   command?: string;
   /** Context-dependent reasons that require confirmation (e.g. a command that names a protected file). */
   risks?: readonly string[];
+  /**
+   * A tool of an MCP server. It acts outside the workspace (another program or service), where no guardrail can see
+   * what it does and no checkpoint can undo it, so it asks in every approval mode unless the user allowed that tool.
+   */
+  mcp?: { server: string; allowed: boolean };
   settings: PolicySettings;
   grants: SessionGrants;
 }
@@ -75,6 +80,11 @@ export function decide(input: PolicyInput): PolicyDecision {
       if (input.grants.edits) return { action: 'allow', reason: 'Applied without asking (allowed for this chat).' };
       return { action: 'ask', reason: 'File edits require approval.' };
     case 'execute': {
+      if (input.mcp) {
+        return input.mcp.allowed
+          ? { action: 'allow', reason: `Ran without asking (you allowed this tool of ${input.mcp.server}).` }
+          : { action: 'ask', reason: 'Tools of MCP servers ask before they run, in every approval mode, until you allow them.' };
+      }
       // Guardrails win over the allow-list and over Auto mode: these commands always need a human.
       const guardrails = [...commandGuardrails(input.command ?? ''), ...(input.risks ?? [])];
       if (guardrails.length) return { action: 'ask', reason: guardrails[0]! };
