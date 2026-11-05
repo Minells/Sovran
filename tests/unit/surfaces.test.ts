@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { AppState, HostMessage } from '../../src/shared/protocol';
 import { MemoryWorkspace } from '../fixtures/fakes';
 import { MockOpenAIServer, sse } from '../fixtures/mockOpenAIServer';
+import { makePng } from '../fixtures/images';
 
 const h = vi.hoisted(() => ({
   config: {} as Record<string, unknown>,
@@ -58,6 +59,7 @@ vi.mock('vscode', async () => {
 
 const { SovranController } = await import('../../src/extension/SovranController');
 const { MemorySessionRepository } = await import('../../src/extension/adapters/FsSessionRepository');
+const { MemoryImageStore } = await import('../../src/extension/adapters/FsImageStore');
 const { mergeCommands } = await import('../../src/core/commands/slashCommands');
 type Controller = InstanceType<typeof SovranController>;
 type Panel = { reveal: ReturnType<typeof vi.fn>; setTitle: ReturnType<typeof vi.fn>; active: boolean; visible: boolean; viewColumn: number };
@@ -135,6 +137,7 @@ beforeEach(async () => {
     statusBar: { update() {} },
     repo: (repo = new MemorySessionRepository()),
     checkpoints: { save: async () => undefined, load: async () => undefined, deleteForSession: async () => undefined },
+    images: new MemoryImageStore(),
     fileIndex: { suggest: async () => [] },
     commandLoader: { load: async () => mergeCommands([]), onDidChange: noop },
     configFile: { displayPath: '~/.sovran/config.yaml', read: async () => ({ kind: 'missing' }), setProblems() {}, setSynced: async () => undefined, onDidChange: noop },
@@ -293,5 +296,60 @@ describe('surfaces', () => {
     expect((await repo.list()).map((x) => x.id)).not.toContain(chat);
     // The tab that showed it starts a new chat.
     expect(sessionOf(tabs.tab1!.messages)).not.toBe(chat);
+  });
+});
+
+describe('images in a chat', () => {
+  type Part = { type: string; text?: string; image_url?: { url: string } };
+  const userContent = (body: { messages?: Array<{ role: string; content: unknown }> }) => body.messages?.filter((m) => m.role === 'user').at(-1)?.content;
+
+  it('sends a pasted image to the model as an image part after its label, and keeps only its metadata in the chat', async () => {
+    const original = server.handler;
+    const bodies: Array<{ messages?: Array<{ role: string; content: unknown }> }> = [];
+    server.handler = (req, res) => {
+      if (!req.url.endsWith('/chat/completions')) return original(req, res);
+      bodies.push(req.body as never);
+      return sse(res, [delta({ content: 'A login form.' }), delta({}, 'stop')]);
+    };
+    try {
+      const png = makePng(20, 10);
+      await controller.handle({ type: 'attachImage', data: Buffer.from(png).toString('base64') });
+      await controller.handle({ type: 'send', text: 'what is this?' });
+      const parts = userContent(bodies[0]!) as Part[];
+      expect(parts).toEqual([
+        { type: 'text', text: '<image name="Pasted image 1" type="PNG image" size="20×10"/>' },
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from(png).toString('base64')}` } },
+        { type: 'text', text: 'what is this?' },
+      ]);
+      // The saved chat names the image; its bytes stay in the image store.
+      const saved = await repo.load(sessionOf(sidebar)!);
+      const message = saved?.messages.find((m) => m.role === 'user');
+      expect(message).toMatchObject({ images: [{ name: 'Pasted image 1', source: 'pasted', mime: 'image/png', width: 20, height: 10 }] });
+      expect(JSON.stringify(saved)).not.toContain('base64');
+    } finally {
+      server.handler = original;
+    }
+  });
+
+  it('retries with the image names when the server refuses images', async () => {
+    const original = server.handler;
+    const bodies: Array<{ messages?: Array<{ role: string; content: unknown }> }> = [];
+    server.handler = (req, res) => {
+      if (!req.url.endsWith('/chat/completions')) return original(req, res);
+      bodies.push(req.body as never);
+      if (bodies.length === 1) return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: { message: 'm is not a multimodal model' } }));
+      return sse(res, [delta({ content: 'I cannot see it.' }), delta({}, 'stop')]);
+    };
+    try {
+      await controller.handle({ type: 'attachImage', data: Buffer.from(makePng(4, 4)).toString('base64') });
+      await controller.handle({ type: 'send', text: 'look' });
+      expect(bodies).toHaveLength(2);
+      expect(userContent(bodies[1]!)).toBe(
+        '<image name="Pasted image 1" type="PNG image" size="4×4" note="Not sent: this model does not accept images. Say so if the answer depends on it."/>\n\nlook',
+      );
+      expect(sidebar.some((m) => m.type === 'notice' && /m does not accept images\. Sovran sent their names instead and retried/.test(m.message))).toBe(true);
+    } finally {
+      server.handler = original;
+    }
   });
 });

@@ -406,6 +406,10 @@
                           "none"
                         ],
                         "default": "auto"
+                      },
+                      "vision": {
+                        "type": "boolean",
+                        "markdownDescription": "Whether the model accepts images. `true` always sends attached images, `false` sends only their names. Leave it unset and Sovran sends them, and stops if the server refuses."
                       }
                     }
                   }
@@ -636,8 +640,10 @@
     "@vscode/codicons": "^0.0.46-24",
     "diff": "^8.0.4",
     "dompurify": "^3.4.17",
+    "fflate": "^0.8.3",
     "highlight.js": "^11.12.0",
     "markdown-it": "^14.3.3",
+    "pdfjs-dist": "~5.4.624",
     "picomatch": "^4.0.7",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

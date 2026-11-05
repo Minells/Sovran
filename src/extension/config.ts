@@ -29,6 +29,7 @@ const modelSchema = z.object({
   maxOutputTokens: z.number().int().positive().optional(),
   temperature: z.number().min(0).max(2).optional(),
   toolMode: z.enum(['auto', 'native', 'prompted', 'none']).optional(),
+  vision: z.boolean().optional(),
 });
 
 const providerSchema = z.object({

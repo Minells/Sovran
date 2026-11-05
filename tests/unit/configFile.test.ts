@@ -350,3 +350,29 @@ describe('sync with Settings', () => {
     expect(updateConfigText(once, settings)).toBe(once);
   });
 });
+
+describe('vision in the config file', () => {
+  const file = (vision: string) => `providers:
+  - id: local
+    name: Local
+    baseUrl: http://localhost:11434/v1
+    auth: none
+    models:
+      - id: qwen2.5-vl
+        ${vision}
+`;
+
+  it('reads it, keeps it through Settings and back, and suggests its spelling', () => {
+    const r = parseConfigFile(file('vision: true'));
+    if (!r.ok) throw new Error('expected a valid file');
+    const parsed = r.config.providers;
+    expect(parsed[0]!.models).toEqual([{ id: 'qwen2.5-vl', vision: true }]);
+    const settings: ProviderConfig = { ...parsed[0]!, models: [{ id: 'qwen2.5-vl', vision: true }] };
+    expect(sameProviders(parsed, [settings])).toBe(true);
+    expect(sameProviders(parsed, [{ ...settings, models: [{ id: 'qwen2.5-vl' }] }])).toBe(false);
+    expect(canonicalProvider(settings).models).toEqual([{ id: 'qwen2.5-vl', vision: true }]);
+    expect(configFileTemplate([settings])).toContain('vision: true');
+    expect(problems(file('Vision: true'))[0]?.message).toBe('Unknown field "Vision". Did you mean "vision"?');
+    expect(problems(file('vision: maybe')).length).toBeGreaterThan(0);
+  });
+});

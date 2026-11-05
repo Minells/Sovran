@@ -1,4 +1,6 @@
 import type { AgentMode } from '../permissions/policy';
+import type { DocumentFormat } from '../documents/types';
+import type { ImageMime } from '../images/images';
 
 export interface ToolCall {
   id: string;
@@ -15,6 +17,10 @@ export interface ContextAttachment {
   external?: boolean;
   startLine?: number;
   endLine?: number;
+  /** Markdown converted from a document of this format (PDF, Word…) rather than the file's own text. */
+  format?: DocumentFormat;
+  /** Facts about the document for the model, such as "12 pages". */
+  detail?: string;
   content: string;
   truncated?: boolean;
 }
@@ -46,8 +52,22 @@ export interface UserMessage {
   /** What the user typed, when it differs from `content` (e.g. "/review src/a.ts"). */
   display?: string;
   attachments?: ContextAttachment[];
+  /** Images for a vision model. Their bytes live in the image store, never in the session file. */
+  images?: ImageAttachment[];
   checkpoint?: CheckpointRef;
   createdAt: number;
+}
+
+export interface ImageAttachment {
+  /** SHA-256 of the bytes: the image's name in the image store of its chat. */
+  id: string;
+  /** Workspace-relative path, `~/…` for a file from the computer, or "Pasted image 1". */
+  name: string;
+  source: 'workspace' | 'external' | 'pasted';
+  mime: ImageMime;
+  bytes: number;
+  width?: number;
+  height?: number;
 }
 
 export interface AssistantMessage {

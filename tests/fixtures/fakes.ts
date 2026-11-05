@@ -18,6 +18,8 @@ import type { ChatProvider, ChatRequest, ProviderEvent } from '../../src/core/pr
 export class MemoryWorkspace implements WorkspacePort {
   readonly root = path.resolve('/ws');
   readonly files = new Map<string, string>();
+  /** Files set with `setBytes`: their bytes, while `files` holds what reading them as UTF-8 gives, as on disk. */
+  readonly bytes = new Map<string, Uint8Array>();
   readonly dirs = new Set<string>([this.root]);
   /** absolute path prefix → real target (for symlink tests). */
   readonly links = new Map<string, string>();
@@ -40,10 +42,17 @@ export class MemoryWorkspace implements WorkspacePort {
   set(rel: string, content: string) {
     const abs = this.abs(rel);
     this.files.set(abs, content);
+    this.bytes.delete(abs);
     for (let d = path.dirname(abs); d.startsWith(this.root); d = path.dirname(d)) {
       this.dirs.add(d);
       if (d === this.root) break;
     }
+  }
+
+  /** A binary file (a document, an image): `readFile` decodes it as UTF-8 like VS Code does, `readBytes` returns it. */
+  setBytes(rel: string, data: Uint8Array) {
+    this.set(rel, new TextDecoder('utf-8').decode(data));
+    this.bytes.set(this.abs(rel), data);
   }
 
   get(rel: string) {
@@ -57,7 +66,7 @@ export class MemoryWorkspace implements WorkspacePort {
     return this.trusted;
   }
   async stat(abs: string): Promise<FileStat | null> {
-    if (this.files.has(abs)) return { type: 'file', size: this.files.get(abs)!.length, mtimeMs: 0 };
+    if (this.files.has(abs)) return { type: 'file', size: this.bytes.get(abs)?.length ?? this.files.get(abs)!.length, mtimeMs: 0 };
     if (this.dirs.has(abs)) return { type: 'directory', size: 0, mtimeMs: 0 };
     if (this.broken.has(abs)) return { type: 'other', size: 0, mtimeMs: 0 };
     return null;
@@ -73,6 +82,11 @@ export class MemoryWorkspace implements WorkspacePort {
     const v = this.files.get(abs);
     if (v === undefined) throw Object.assign(new Error(`ENOENT: ${abs}`), { code: 'ENOENT' });
     return v;
+  }
+  async readBytes(abs: string) {
+    const data = this.bytes.get(abs);
+    if (data) return data;
+    return new TextEncoder().encode(await this.readFile(abs));
   }
   async readDirectory(abs: string): Promise<DirEntry[]> {
     const out = new Map<string, DirEntry>();
@@ -96,6 +110,7 @@ export class MemoryWorkspace implements WorkspacePort {
   }
   async deleteFile(abs: string) {
     this.files.delete(abs);
+    this.bytes.delete(abs);
   }
   activeEditor() {
     return this.active;

@@ -4,10 +4,14 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const tree = JSON.parse(execSync('npm ls --omit=dev --all --json', { encoding: 'utf8' }));
+// Optional modules pdfjs-dist loads at run time only if they are installed. They are never bundled (esbuild follows
+// static imports only, and the VSIX ships no node_modules), and the canvas brings a native package per platform,
+// which would make this file differ between machines. Their own dependencies are skipped with them.
+const NOT_BUNDLED = new Set(['@napi-rs/canvas', 'node-readable-to-web-readable-stream']);
 const seen = new Map();
 (function walk(deps = {}) {
   for (const [name, info] of Object.entries(deps)) {
-    if (!info.version || seen.has(name)) continue;
+    if (!info.version || seen.has(name) || NOT_BUNDLED.has(name)) continue;
     seen.set(name, info.version);
     walk(info.dependencies);
   }

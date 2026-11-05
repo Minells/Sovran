@@ -1,3 +1,6 @@
+import { FORMAT_LABELS, type DocumentFormat } from '../../../src/core/documents/types';
+import { dimensions, IMAGE_LABELS, type ImageMime } from '../../../src/core/images/images';
+
 export interface ToolInfo {
   icon: string;
   done: string;
@@ -67,4 +70,32 @@ export function dayGroup(ts: number, now = new Date()): string {
 export function elapsed(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000));
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+const DOCUMENT_ICONS: Record<DocumentFormat, string> = {
+  pdf: 'file-pdf',
+  docx: 'file-text',
+  odt: 'file-text',
+  xlsx: 'table',
+  ods: 'table',
+  pptx: 'preview',
+  odp: 'preview',
+  zip: 'file-zip',
+};
+
+/**
+ * The icon and description of an attachment converted from a document ("PDF document, 12 pages"), or undefined for a
+ * text file. Saved chats may name a format this version does not know, which counts as text.
+ */
+export function documentInfo(format: string | undefined, detail?: string): { icon: string; description: string } | undefined {
+  if (!format || !Object.hasOwn(FORMAT_LABELS, format)) return undefined;
+  const label = FORMAT_LABELS[format as DocumentFormat];
+  return { icon: DOCUMENT_ICONS[format as DocumentFormat], description: detail ? `${label}, ${detail}` : label };
+}
+
+/** The icon and description of an image attachment ("PNG image, 1280×720"). */
+export function imageDescription(image: { mime: ImageMime; width?: number; height?: number }): { icon: string; description: string } {
+  const label = IMAGE_LABELS[image.mime] ?? 'Image';
+  const size = dimensions(image);
+  return { icon: 'file-media', description: size ? `${label}, ${size}` : label };
 }

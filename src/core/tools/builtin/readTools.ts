@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import * as path from 'node:path';
 import { resolveAndVerify, resolveWorkspacePath } from '../../security/paths';
+import { decodeText, describeDocumentError, sniffFile } from '../../documents/detect';
+import { DOCUMENT_LIMITS, DocumentError, FORMAT_LABELS } from '../../documents/types';
+import { dimensions, IMAGE_LABELS, imageInfo } from '../../images/images';
 import { isProbablyBinary } from '../edits';
 import { isProtectedPath } from '../../permissions/policy';
 import { ToolError, defineTool, type ToolContext } from '../types';
@@ -17,11 +20,78 @@ function relativeOf(ctx: ToolContext, absolute: string): string {
   }
 }
 
+/** Characters of Markdown a document is converted to for read_file, which the agent then pages through by line. */
+const DOCUMENT_CHARS = 400_000;
+/**
+ * Above MAX_READ_BYTES only a document can be read, so only files named like one are loaded to check their content:
+ * a 40 MB log is refused at once, as before, instead of being read first.
+ */
+const DOCUMENT_NAME = /\.(pdf|docx|docm|dotx|xlsx|xlsm|xltx|pptx|pptm|ppsx|potx|odt|ott|ods|ots|odp|otp|zip)$/i;
+
+interface ReadText {
+  text: string;
+  /** Set for a converted document: what it was ("PDF document, 12 pages"), shown in the result's header. */
+  source?: string;
+  /** The conversion stopped before the end of the document. */
+  cut?: boolean;
+}
+
+/**
+ * The text of a file for read_file. Text is returned as it always was; a file that looks binary is read again as
+ * bytes, when the host can, and is converted (a document), decoded (UTF-16 text) or explained (an image).
+ */
+async function readText(absolute: string, relative: string, size: number, ctx: ToolContext): Promise<ReadText> {
+  const readBytes = ctx.workspace.readBytes?.bind(ctx.workspace);
+  const documents = ctx.documents;
+  if (size > MAX_READ_BYTES && !DOCUMENT_NAME.test(absolute)) {
+    throw new ToolError(`${relative} is too large (${Math.round(size / 1024)} KB) to read.`);
+  }
+  const text = size <= MAX_READ_BYTES ? await ctx.workspace.readFile(absolute) : undefined;
+  // A PDF or ZIP with no NUL in its first bytes would otherwise read as (useless) text.
+  const suspicious = text === undefined || isProbablyBinary(text) || text.startsWith('%PDF-') || text.startsWith('PK\u0003\u0004');
+  if (!suspicious) return { text };
+  // Without a document reader, read_file behaves exactly as before documents were supported.
+  if (!readBytes || !documents) {
+    if (text === undefined) throw new ToolError(`${relative} is too large (${Math.round(size / 1024)} KB) to read.`);
+    if (isProbablyBinary(text)) throw new ToolError(`${relative} appears to be a binary file.`);
+    return { text };
+  }
+  let bytes: Uint8Array | undefined;
+  const load = async () => (bytes ??= await readBytes(absolute));
+  const sniffed = sniffFile((await load()).subarray(0, 8000));
+  if (sniffed.kind === 'document') {
+    try {
+      const stat = await ctx.workspace.stat(absolute);
+      const doc = await documents.read(absolute, stat ?? { size, mtimeMs: 0 }, load, DOCUMENT_CHARS, ctx.signal);
+      const label = FORMAT_LABELS[doc.format];
+      return { text: doc.markdown, source: doc.detail ? `${label}, ${doc.detail}` : label, cut: doc.truncated };
+    } catch (e) {
+      const notADocument = e instanceof DocumentError && (e.code === 'corrupt' || e.code === 'unsupported');
+      if (!(notADocument && sniffed.textFallback && text !== undefined)) {
+        throw new ToolError(describeDocumentError(e, relative, sniffed.container === 'pdf' ? 'pdf' : undefined));
+      }
+      return { text };
+    }
+  }
+  if (sniffed.kind === 'text' && sniffed.encoding !== 'utf-8' && size <= MAX_READ_BYTES) {
+    return { text: decodeText(await load(), sniffed.encoding) };
+  }
+  if (sniffed.kind === 'image') {
+    const info = imageInfo((await load()).subarray(0, 65_536));
+    const dims = info ? dimensions(info) : '';
+    throw new ToolError(
+      `${relative} is a ${IMAGE_LABELS[sniffed.mime]}${dims ? ` (${dims})` : ''}. read_file returns text only: if you need to see it, ask the user to attach it to a message.`,
+    );
+  }
+  if (text === undefined) throw new ToolError(`${relative} is too large (${Math.round(size / 1024)} KB) to read.`);
+  throw new ToolError(`${relative} appears to be a binary file.`);
+}
+
 export const readFileTool = defineTool({
   name: 'read_file',
   risk: 'read',
   description:
-    'Read a text file from the workspace. Use start_line/end_line (1-based, inclusive) for large files. Returns the raw text without line numbers.',
+    'Read a text file from the workspace, or a document (PDF, Word, Excel, PowerPoint, OpenDocument) as Markdown. Use start_line/end_line (1-based, inclusive) for large files. Returns the raw text without line numbers.',
   schema: z.object({
     path: z.string().min(1).describe('Workspace-relative file path'),
     start_line: z.number().int().min(1).optional(),
@@ -37,9 +107,12 @@ export const readFileTool = defineTool({
     const stat = await ctx.workspace.stat(resolved.absolute);
     if (!stat) throw new ToolError(`File not found: ${resolved.relative}. Use find_files to locate it.`);
     if (stat.type === 'directory') throw new ToolError(`${resolved.relative} is a directory. Use list_directory.`);
-    if (stat.size > MAX_READ_BYTES) throw new ToolError(`${resolved.relative} is too large (${Math.round(stat.size / 1024)} KB) to read.`);
-    const text = await ctx.workspace.readFile(resolved.absolute);
-    if (isProbablyBinary(text)) throw new ToolError(`${resolved.relative} appears to be a binary file.`);
+    // Documents may be larger than text files: they are converted, and only the Markdown is returned.
+    const canConvert = !!ctx.documents && !!ctx.workspace.readBytes;
+    if (stat.size > (canConvert ? DOCUMENT_LIMITS.maxFileBytes : MAX_READ_BYTES)) {
+      throw new ToolError(`${resolved.relative} is too large (${Math.round(stat.size / 1024)} KB) to read.`);
+    }
+    const { text, source, cut } = await readText(resolved.absolute, resolved.relative, stat.size, ctx);
 
     const lines = text.split(/\r?\n/);
     const total = lines.length;
@@ -59,9 +132,14 @@ export const readFileTool = defineTool({
     }
     const body = lines.slice(start - 1, end).join('\n');
     const partial = start > 1 || end < total;
-    const header = partial ? `${resolved.relative} (lines ${start}-${end} of ${total})` : `${resolved.relative} (${total} lines)`;
+    const what = source ? `${source}, converted to Markdown without images or layout; ` : '';
+    const header = partial ? `${resolved.relative} (${what}lines ${start}-${end} of ${total})` : `${resolved.relative} (${what}${total} lines)`;
     const more = end < total ? `\n\n[Showing lines ${start}-${end} of ${total}. Use start_line=${end + 1} to continue.]` : '';
-    return { content: `${header}\n${body}${more}`, summary: partial ? `lines ${start}–${end} of ${total}` : `${total} lines` };
+    const stop = cut && end >= total ? '\n\n[The conversion stops here: the rest of the document is longer than Sovran converts at once.]' : '';
+    return {
+      content: `${header}\n${body}${more}${stop}`,
+      summary: `${source ? `${source} · ` : ''}${partial ? `lines ${start}–${end} of ${total}` : `${total} lines`}`,
+    };
   },
 });
 

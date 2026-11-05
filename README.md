@@ -103,7 +103,11 @@ Errors tell you what went wrong and how to fix it.
 - **A start page for every chat:** the model and where it runs, the current mode, starters built from the active file or selection, your latest chats and a tip.
 - **Settings in the panel.** The gear in the view title opens Sovran Settings: Act and Plan models, providers, approvals, allowed commands, protected files, limits and context options, without editing JSON.
 
-**Context you can see.** The active file or selection is attached as a chip you can toggle. Files outside the workspace and protected files are never attached automatically, and their chip says so. The paperclip opens the **attach menu**: search the workspace, pick a suggested file (the active editor and open tabs), browse folders from the workspace root, or **upload from your computer** through the system file dialog. Protected files ask before they are attached, and binary files are refused. Large files are paged and long conversations are trimmed to the model's context window.
+**Context you can see.** The active file or selection is attached as a chip you can toggle. Files outside the workspace and protected files are never attached automatically, and their chip says so. The paperclip opens the **attach menu**: search the workspace, pick a suggested file (the active editor and open tabs), browse folders from the workspace root, or **upload from your computer** through the system file dialog. Protected files ask before they are attached. Large files are paged and long conversations are trimmed to the model's context window.
+
+**Documents, not just code.** Attach a **PDF**, **Word**, **Excel** or **PowerPoint** file, an **OpenDocument** file (`.odt`, `.ods`, `.odp`) or a **ZIP** archive and Sovran sends the model its text as Markdown: headings, lists, tables, links, every sheet and slide, speaker notes and Excel dates as dates. A ZIP is listed, not extracted. The conversion runs on your machine, in a separate thread with memory and time limits, and nothing is uploaded anywhere. Files are recognized by their content, not their name, and UTF-16 text (what Windows PowerShell writes with `>`) is read too. The chip shows what Sovran found (*PDF document, 12 pages*). The agent reads documents in the workspace the same way: `read_file` returns a PDF or an Office file as Markdown and pages through it. Audio, video and old binary Office files (`.doc`, `.xls`, `.ppt`) are refused with a message that says what to do instead.
+
+**Screenshots for vision models.** Paste a screenshot into the chat input (<kbd>Ctrl+V</kbd>), or attach a PNG, JPEG, WebP or GIF file, and a vision model sees it with your question: each image is sent after its name, so the model can tell several apart. Up to 8 images of 8 MB each per message. Sovran finds out by itself whether a model accepts images: if the server refuses them, it remembers the model as text-only, says so and sends only the images' names (set `"vision"` on the model to decide yourself). Images are kept with the chat in the workspace storage, never in the chat file, and are deleted with the chat.
 
 <p align="center">
   <img src="media/screenshots/start-dark.png" width="320" alt="The start page of a new chat: model, mode, starters and recent chats">
@@ -228,6 +232,7 @@ curl -sS https://your-gateway.example/v1/chat/completions -H "Authorization: Bea
 | `contextWindow` | Tokens the model accepts (prompt and reply). When unset, Sovran uses what the server reports, else 32 768 |
 | `maxOutputTokens` | Tokens kept for the reply, also sent as `max_tokens`. When unset, 4 096 are kept (less if the server's cap or a quarter of the window is smaller) and `max_tokens` is not sent |
 | `toolMode` | `auto` (detect, the default), `native`, `prompted` or `none` |
+| `vision` | `true` sends attached images, `false` sends only their names. Unset (the default), Sovran sends them and stops if the server refuses |
 | `temperature` | Sent only when set |
 
 Both limits can be set per model in **Manage providers** (the *Context* and *Max output* fields), in `config.yaml` or in
@@ -363,6 +368,8 @@ Read [SECURITY.md](SECURITY.md) for the threat model and known limitations. Choo
 - **Quality depends on the model.** Tool-trained coding models work best. Small models may need `"toolMode": "prompted"`, and some still struggle with multi-step tasks.
 - **Undo covers only what the agent writes.** Changes made by terminal commands, such as code generators or `git checkout`, are not covered.
 - **No MCP support yet** (planned in v0.3).
+- **Documents arrive as text only.** The images, charts and page layout inside a document are not sent, and scanned PDFs (no text layer) cannot be read. Each attachment is cut at 50 000 characters, and the model is told when it is.
+- **Some servers ignore images instead of refusing them**, and their model then answers without having seen the image. Set `"vision": false` for such a model. BMP, TIFF and HEIC images are not sent: save them as PNG or JPEG.
 - **Search uses VS Code's bundled ripgrep.** It falls back to a slower built-in scan when ripgrep cannot be found.
 - **Long-running commands time out.** Watchers and dev servers are not supported as agent commands.
 - **Parallel chats share the workspace.** Two chats can edit the same file; a change made while another waits for approval is detected and refused rather than overwritten, but Sovran does not coordinate the chats' plans.

@@ -6,6 +6,7 @@ export type ProviderErrorKind =
   | 'rate_limit'
   | 'context_length'
   | 'tools_unsupported'
+  | 'vision_unsupported'
   | 'bad_request'
   | 'server'
   | 'network'
@@ -39,6 +40,8 @@ export interface AuthSent {
 interface ErrorContext {
   url: string;
   toolsSent?: boolean;
+  /** The request carried images, so a refusal that mentions them means the model does not accept images. */
+  imagesSent?: boolean;
   secrets?: readonly (string | undefined)[];
   auth?: AuthSent;
 }
@@ -67,6 +70,13 @@ export function authHint(auth: AuthSent | undefined): string {
 const CONTEXT_RE =
   /context[ _]length|maximum context|context window|too many tokens|prompt is too long|exceeds? the (?:model'?s? )?(?:maximum )?context|max_tokens.*exceed/i;
 const TOOLS_RE = /\btools?\b|function[ _]?call|tool_choice|does not support tools|--jinja/i;
+/**
+ * How servers refuse images: vLLM ("not a multimodal model"), llama.cpp ("image input is not supported"), LM Studio
+ * and pydantic-based servers that expect `content` to be a string ("Input should be a valid string").
+ */
+const IMAGES_RE = /\bimages?\b|image_url|vision|multi-?modal|mm_processor|valid string|content.{0,40}(?:must|should) be.{0,20}(?:string|text)|unsupported content/i;
+/** Refusals of these images, not of images as such (too large, too many): the model does take images. */
+const IMAGE_LIMIT_RE = /too (?:large|big|many)|exceed|at most|maximum|limit|\bsize\b|resolution|dimension/i;
 
 export function extractErrorMessage(body: string): string {
   try {
@@ -110,6 +120,15 @@ export function errorFromResponse(status: number, body: string, ctx: ErrorContex
       'context_length',
       detail,
       "The conversation exceeds the model's context window. Start a new chat or set a smaller contextWindow for this model.",
+      status,
+    );
+  }
+  const imageStatus = status === 400 || status === 415 || status === 422 || status === 500 || status === 501;
+  if (ctx.imagesSent && imageStatus && IMAGES_RE.test(message) && !IMAGE_LIMIT_RE.test(message)) {
+    return new ProviderError(
+      'vision_unsupported',
+      detail,
+      'The server refused the images. Use a vision model, or set "vision": false for this model so Sovran sends their names only.',
       status,
     );
   }

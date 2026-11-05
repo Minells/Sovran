@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { planCompaction, renderForSummary, summarize } from '../context/compaction';
+import type { DocumentReader } from '../documents/reader';
 import { buildContext, estimateTokens } from '../context/contextManager';
 import { decide, type AgentMode, type PolicySettings, type SessionGrants } from '../permissions/policy';
 import type { ApprovalPort, Logger, ProcessPort, WorkspacePort } from '../ports';
-import { capabilityKey, resolveToolMode, type CapabilityStore } from '../providers/capabilities';
+import { capabilityKey, resolveToolMode, resolveVision, type CapabilityStore } from '../providers/capabilities';
 import { effectiveLimits } from '../providers/limits';
 import { ProviderError, errorFromException } from '../providers/errors';
 import type { ChatProvider, ModelConfig, ResolvedToolMode } from '../providers/types';
@@ -39,6 +40,8 @@ export interface AgentDeps {
   approvals: ApprovalPort;
   capabilities: CapabilityStore;
   logger: Logger;
+  /** Lets `read_file` read PDF, Office and OpenDocument files (see ToolContext.documents). */
+  documents?: DocumentReader;
   newId?: () => string;
   now?: () => number;
 }
@@ -62,6 +65,8 @@ export interface RunOptions {
    * approval mode, "always allow" on a command) apply to the next action. Defaults to `settings.policy`.
    */
   policy?: () => PolicySettings;
+  /** Data URLs of the images in the chat's messages, by image id (see `UserMessage.images`). */
+  images?: ReadonlyMap<string, string>;
 }
 
 export type CompactOptions = Pick<RunOptions, 'session' | 'model' | 'settings' | 'signal' | 'emit' | 'secrets'>;
@@ -91,13 +96,25 @@ export class AgentRunner {
     const key = capabilityKey(o.providerId, o.model.id);
     const failures = new Map<string, number>();
     let downgraded = false;
+    let visionRefused = false;
     let compactedThisRun = false;
     let iteration = 0;
+
+    const latest = [...o.session.messages].reverse().find((m) => m.role === 'user');
+    if (latest?.role === 'user' && latest.images?.length && !resolveVision(o.model.vision, this.deps.capabilities.get(key))) {
+      o.emit({
+        type: 'notice',
+        level: 'info',
+        message: `${o.model.name ?? o.model.id} does not accept images, so it receives only their names. Choose a vision model to show it the images.`,
+      });
+    }
 
     while (iteration < o.settings.maxIterations) {
       if (o.signal.aborted) return { reason: 'cancelled' };
       iteration++;
       const toolMode = resolveToolMode(o.model.toolMode, this.deps.capabilities.get(key));
+      // A refusal in this run counts at once, whether or not the capability store kept it.
+      const vision = !visionRefused && resolveVision(o.model.vision, this.deps.capabilities.get(key));
       o.emit({ type: 'iteration', iteration, maxIterations: o.settings.maxIterations });
 
       const assistant: AssistantMessage = {
@@ -111,10 +128,10 @@ export class AgentRunner {
 
       let turn: TurnResult;
       try {
-        let built = this.buildRequest(o, toolMode);
+        let built = this.buildRequest(o, toolMode, vision);
         if (built.droppedTurns > 0 && o.autoCompact && !compactedThisRun) {
           compactedThisRun = true;
-          if (await this.compact(o)) built = this.buildRequest(o, toolMode);
+          if (await this.compact(o)) built = this.buildRequest(o, toolMode, vision);
           if (o.signal.aborted) return { reason: 'cancelled' };
         }
         if (built.droppedTurns > 0) {
@@ -131,6 +148,20 @@ export class AgentRunner {
         turn = await this.streamTurn(assistant, request, toolMode, o);
       } catch (e) {
         const err = e instanceof ProviderError ? e : errorFromException(e, { url: o.providerId, secrets: o.secrets });
+        // Like tools: an unconfigured model that refuses images is remembered as text-only, and the step is retried
+        // with each image's name in its place. A model configured with `vision: true` reports the error instead.
+        if (err.kind === 'vision_unsupported' && vision && o.model.vision === undefined && !visionRefused) {
+          visionRefused = true;
+          this.deps.capabilities.set(key, { ...this.deps.capabilities.get(key), vision: false, updatedAt: this.now() });
+          this.removeMessage(o, assistant.id);
+          o.emit({
+            type: 'notice',
+            level: 'info',
+            message: `${o.model.name ?? o.model.id} does not accept images. Sovran sent their names instead and retried; it will not send images to this model again.`,
+          });
+          iteration--;
+          continue;
+        }
         if (err.kind === 'tools_unsupported' && toolMode === 'native' && (o.model.toolMode ?? 'auto') === 'auto' && !downgraded) {
           downgraded = true;
           // Merge: the same record also holds the limits the server reported.
@@ -204,7 +235,7 @@ export class AgentRunner {
     return { reason: 'max_iterations' };
   }
 
-  private buildRequest(o: RunOptions, toolMode: ResolvedToolMode) {
+  private buildRequest(o: RunOptions, toolMode: ResolvedToolMode, vision = false) {
     const tools = toolMode === 'none' ? [] : this.deps.registry.list(o.mode);
     const schemas = this.deps.registry.schemas(tools);
     const env = this.deps.workspace.environment();
@@ -230,6 +261,8 @@ export class AgentRunner {
       toolSchemaTokens: schemaTokens,
       maxToolResultChars: o.settings.tools.maxToolResultChars,
       summary: o.session.compaction?.summary,
+      images: o.images,
+      vision,
     });
     return {
       request: {
@@ -406,6 +439,7 @@ export class AgentRunner {
       signal: o.signal,
       settings: o.settings.tools,
       onOutput: (chunk) => o.emit({ type: 'tool_output', callId: call.id, chunk }),
+      ...(this.deps.documents ? { documents: this.deps.documents } : {}),
     };
 
     let prepared;
