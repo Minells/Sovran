@@ -6,9 +6,12 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DirEntry, FileStat, WorkspaceRoot } from '../../src/core/ports';
+import { convertDocument } from '../../src/core/documents/convert';
+import type { DirEntry, DocumentConverterPort, FileStat, WorkspaceRoot } from '../../src/core/ports';
+import type { ContextAttachment } from '../../src/core/sessions/model';
 import { displayPath } from '../../src/core/util/files';
 import type { HostMessage } from '../../src/shared/protocol';
+import { makeDocx, makePdf, wp } from '../fixtures/documents';
 
 const h = vi.hoisted(() => ({
   root: '',
@@ -66,7 +69,9 @@ vi.mock('vscode', async () => {
         return h.warningAnswer;
       },
       showOpenDialog: async () => h.dialog?.map(Uri.file),
+      withProgress: async (_options: unknown, task: () => Promise<unknown>) => task(),
     },
+    ProgressLocation: { Window: 10 },
   };
 });
 
@@ -110,6 +115,19 @@ let tmp: string;
 let outside: string;
 let messages: HostMessage[];
 let controller: Controller;
+/** The conversions the controller asked for. The tests convert in-process; the extension uses the worker. */
+let conversions: string[];
+const documents: DocumentConverterPort = {
+  convert: async (data, options) => {
+    conversions.push(new TextDecoder().decode(data.subarray(0, 5)));
+    return convertDocument(data, options);
+  },
+};
+/** What the next message would carry: the controller's own send-time read of the sidebar's attachments. */
+const collect = () => {
+  const c = controller as unknown as { sidebar: unknown; collectAttachments(s: unknown): Promise<ContextAttachment[]> };
+  return c.collectAttachments(c.sidebar);
+};
 
 const write = async (rel: string, content: string | Uint8Array, base = h.root) => {
   const f = path.join(base, rel);
@@ -151,9 +169,11 @@ beforeEach(async () => {
   await fs.symlink(outside, path.join(h.root, 'escape'), 'junction');
 
   messages = [];
+  conversions = [];
   controller = new SovranController({
     workspace: new DiskWorkspace(),
     fileIndex: new FileIndex(),
+    documents,
     logger: { debug() {}, info() {}, warn() {}, error() {}, show() {}, addSecret() {}, dispose() {} },
   } as never);
   controller.attach((m) => messages.push(m));
@@ -217,7 +237,7 @@ describe('attachPath', () => {
     await controller.handle({ type: 'attachPath', path: 'escape/notes.md' });
     expect(attachments()).toEqual([]);
     expect(notices()).toEqual([
-      'logo.png looks like a binary file. Sovran can attach text files only.',
+      'logo.png is an image. Sovran cannot send images to the model yet: describe what matters in your message, or attach the text it shows.',
       'src is not a file.',
       expect.stringMatching(/outside the workspace|escapes/),
     ]);
@@ -248,5 +268,88 @@ describe('uploadFiles', () => {
   it('does nothing when the dialog is cancelled', async () => {
     await controller.handle({ type: 'uploadFiles' });
     expect(messages).toEqual([]);
+  });
+});
+
+describe('documents', () => {
+  it('attaches a PDF as a document and sends its text with what it is', async () => {
+    await write('docs/spec.pdf', makePdf([['Requisiti del sistema'], ['Allegato A']]));
+    await controller.handle({ type: 'attachPath', path: 'docs/spec.pdf' });
+    expect(attachments()).toEqual([{ id: expect.any(String), path: 'docs/spec.pdf', label: 'spec.pdf', format: 'pdf', detail: '2 pages' }]);
+    expect(await collect()).toEqual([
+      { kind: 'file', path: 'docs/spec.pdf', format: 'pdf', detail: '2 pages', content: '## Page 1\n\nRequisiti del sistema\n\n## Page 2\n\nAllegato A' },
+    ]);
+    // The send reused the conversion made when the file was attached.
+    expect(conversions).toHaveLength(1);
+  });
+
+  it('converts a document again only when it changed', async () => {
+    const file = await write('report.docx', makeDocx(wp('Prima versione')));
+    await controller.handle({ type: 'attachPath', path: 'report.docx' });
+    expect((await collect())[0]?.content).toBe('Prima versione');
+    expect(conversions).toHaveLength(1);
+    await fs.writeFile(file, makeDocx(wp('Seconda versione, più lunga')));
+    expect((await collect())[0]).toMatchObject({ format: 'docx', content: 'Seconda versione, più lunga' });
+    expect(conversions).toHaveLength(2);
+  });
+
+  it('recognizes a document by its content, not its name', async () => {
+    await write('renamed.bin', makeDocx(wp('Contenuto')));
+    await controller.handle({ type: 'attachPath', path: 'renamed.bin' });
+    expect(attachments()).toEqual([expect.objectContaining({ path: 'renamed.bin', format: 'docx' })]);
+  });
+
+  it('says why a document cannot be read', async () => {
+    await write('scan.pdf', makePdf([[]]));
+    await write('broken.docx', Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0, 0, 1, 2, 3]));
+    await controller.handle({ type: 'attachPath', path: 'scan.pdf' });
+    await controller.handle({ type: 'attachPath', path: 'broken.docx' });
+    expect(attachments()).toEqual([]);
+    expect(notices()).toEqual([
+      'scan.pdf has no text to read: it is probably a scanned image. Attach a PDF with selectable text, or paste the text you need.',
+      'broken.docx could not be read as a document: the file may be damaged.',
+    ]);
+  });
+
+  it('still attaches as text a text file that only looks like a PDF', async () => {
+    await write('notes/pdf-header.md', '%PDF- is how every PDF starts.\n');
+    await controller.handle({ type: 'attachPath', path: 'notes/pdf-header.md' });
+    expect(attachments()).toEqual([{ id: expect.any(String), path: 'notes/pdf-header.md', label: 'pdf-header.md' }]);
+    expect(await collect()).toEqual([{ kind: 'file', path: 'notes/pdf-header.md', content: '%PDF- is how every PDF starts.\n' }]);
+  });
+
+  it('attaches UTF-16 text (Windows PowerShell output) decoded', async () => {
+    const text = 'Name  Status\r\nsvc   Running\r\n';
+    await write('out.txt', Uint8Array.from([0xff, 0xfe, ...Buffer.from(text, 'utf16le')]));
+    await controller.handle({ type: 'attachPath', path: 'out.txt' });
+    expect(attachments()).toEqual([{ id: expect.any(String), path: 'out.txt', label: 'out.txt' }]);
+    expect(await collect()).toEqual([{ kind: 'file', path: 'out.txt', content: text }]);
+  });
+
+  it('asks before reading a protected document, and reads nothing when declined', async () => {
+    // A PDF under a protected name (`**/*.pem` in this workspace): the signature decides what it is.
+    await write('keys/cert.pem', makePdf([['Riservato']]));
+    await controller.handle({ type: 'attachPath', path: 'keys/cert.pem' });
+    expect(h.warnings).toEqual(['Attach cert.pem?']);
+    expect(conversions).toEqual([]);
+    expect(attachments()).toEqual([]);
+    h.warningAnswer = 'Attach';
+    await controller.handle({ type: 'attachPath', path: 'keys/cert.pem' });
+    expect(conversions).toHaveLength(1);
+    expect(attachments()).toEqual([expect.objectContaining({ path: 'keys/cert.pem', format: 'pdf' })]);
+  });
+
+  it('attaches documents picked from the computer, and checks them again when sending', async () => {
+    const file = path.join(outside, 'budget.pdf');
+    await write('budget.pdf', makePdf([['Budget 2026']]), outside);
+    h.dialog = [file];
+    await controller.handle({ type: 'uploadFiles' });
+    const shown = displayPath(file, os.homedir());
+    expect(attachments()).toEqual([{ id: expect.any(String), path: shown, label: 'budget.pdf', external: true, format: 'pdf', detail: '1 page' }]);
+    expect(await collect()).toEqual([{ kind: 'file', path: shown, external: true, format: 'pdf', detail: '1 page', content: '## Page 1\n\nBudget 2026' }]);
+    // Replaced by an image after it was attached: the send leaves it out and says why.
+    await fs.writeFile(file, Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]));
+    expect(await collect()).toEqual([]);
+    expect(notices().at(-1)).toMatch(/budget\.pdf is an image/);
   });
 });

@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Mouse
 import type { ApprovalView, AssistantMessageView, RunViewT, ToolCallView, ToolMessageView } from './types';
 import type { SessionMessage } from '../../../src/shared/protocol';
 import { renderMarkdown } from '../lib/markdown';
-import { toolInfo, toolTarget } from '../lib/format';
+import { documentInfo, toolInfo, toolTarget } from '../lib/format';
 import { post } from '../vscode';
 import { useStore } from '../state/store';
 import { ApprovalDetail, approvalAnchor } from './Approval';
@@ -446,11 +446,12 @@ function UserBlock({ message, canEdit }: { message: UserMessageView; canEdit: bo
     <div className="sv-user" data-user-message={message.id}>
       {message.attachments?.length ? (
         <div className="sv-user__context">
-          {message.attachments.map((a) =>
-            a.external ? (
+          {message.attachments.map((a) => {
+            const doc = documentInfo(a.format, a.detail);
+            return a.external ? (
               // Files from the computer are outside the workspace, so they cannot be opened from here.
-              <span key={a.path} className="sv-chip sv-chip--static" title={`${a.path} (from your computer)`}>
-                <Icon name="device-desktop" />
+              <span key={a.path} className="sv-chip sv-chip--static" title={`${a.path} (from your computer)${doc ? ` · ${doc.description}` : ''}`}>
+                <Icon name={doc?.icon ?? 'device-desktop'} />
                 <span>{a.path.split('/').pop()}</span>
               </span>
             ) : (
@@ -458,16 +459,17 @@ function UserBlock({ message, canEdit }: { message: UserMessageView; canEdit: bo
                 key={`${a.path}:${a.startLine ?? ''}`}
                 type="button"
                 className="sv-chip"
+                title={doc?.description}
                 onClick={() => post({ type: 'openFile', path: a.path, line: a.startLine })}
               >
-                <Icon name={a.kind === 'selection' ? 'selection' : 'file'} />
+                <Icon name={doc?.icon ?? (a.kind === 'selection' ? 'selection' : 'file')} />
                 <span>
                   {a.path.split('/').pop()}
                   {a.startLine ? `:${a.startLine}-${a.endLine}` : ''}
                 </span>
               </button>
-            ),
-          )}
+            );
+          })}
         </div>
       ) : null}
       {shown}

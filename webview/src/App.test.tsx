@@ -514,6 +514,57 @@ describe('attach menu', () => {
     expect(screen.getByRole('button', { name: 'Remove spec.md' })).toHaveAttribute('title', expect.stringContaining('from your computer'));
   });
 
+  it('says which documents Sovran will send as converted text', () => {
+    mount(
+      baseState({
+        context: {
+          editor: null,
+          includeEditor: true,
+          attachments: [
+            { id: 'p', path: 'docs/spec.pdf', label: 'spec.pdf', format: 'pdf', detail: '12 pages' },
+            { id: 'x', path: '~/Downloads/budget.xlsx', label: 'budget.xlsx', external: true, format: 'xlsx', detail: '3 sheets' },
+            { id: 't', path: 'notes.md', label: 'notes.md' },
+          ],
+        },
+      }),
+    );
+    const pdf = screen.getByRole('button', { name: 'Remove spec.pdf' });
+    expect(pdf).toHaveAttribute('title', 'docs/spec.pdf · PDF document, 12 pages · click to remove');
+    expect(pdf.querySelector('.codicon-file-pdf')).not.toBeNull();
+    const sheet = screen.getByRole('button', { name: 'Remove budget.xlsx' });
+    expect(sheet).toHaveAttribute('title', '~/Downloads/budget.xlsx (from your computer) · Excel workbook, 3 sheets · click to remove');
+    expect(sheet.querySelector('.codicon-table')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Remove notes.md' }).querySelector('.codicon-file')).not.toBeNull();
+  });
+
+  it('shows the documents a sent message carried', () => {
+    mount(
+      baseState({
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            {
+              role: 'user',
+              id: 'u1',
+              content: 'summarize',
+              createdAt: 0,
+              attachments: [
+                { kind: 'file', path: 'docs/deck.pptx', content: '## Slide 1', format: 'pptx', detail: '8 slides' },
+                // A saved chat from a later version may name a format this one does not know: it shows as a file.
+                { kind: 'file', path: 'docs/new.xyz', content: 'x', format: 'xyz' as never },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    const deck = screen.getByRole('button', { name: 'deck.pptx' });
+    expect(deck).toHaveAttribute('title', 'PowerPoint presentation, 8 slides');
+    expect(deck.querySelector('.codicon-preview')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'new.xyz' }).querySelector('.codicon-file')).not.toBeNull();
+  });
+
   it('shows the folder error from the host', async () => {
     mount(baseState());
     await userEvent.click(screen.getByRole('button', { name: 'Attach files' }));

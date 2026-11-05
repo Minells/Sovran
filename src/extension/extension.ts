@@ -6,6 +6,7 @@ import { FsSessionRepository, MemorySessionRepository } from './adapters/FsSessi
 import { NodeProcessRunner, TerminalMirror } from './adapters/NodeProcessRunner';
 import { RipgrepSearch } from './adapters/RipgrepSearch';
 import { VscodeWorkspace } from './adapters/VscodeWorkspace';
+import { WorkerDocumentConverter } from './adapters/WorkerDocumentConverter';
 import { CommandLoader, FileIndex } from './workspaceServices';
 import { readSettings } from './config';
 import { ConfigFileHost } from './configFileHost';
@@ -50,6 +51,8 @@ export async function activate(context: vscode.ExtensionContext) {
     fileIndex,
     commandLoader,
     configFile,
+    // Bundled next to extension.js by scripts/build-host.mjs; parsers never load in the extension host itself.
+    documents: new WorkerDocumentConverter(path.join(context.extensionPath, 'dist', 'documentWorker.js')),
     reveal,
     openPanel: async (sessionId, title) => ref.panels?.open(sessionId, title),
   });

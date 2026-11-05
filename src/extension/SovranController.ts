@@ -13,7 +13,7 @@ import type { AgentEvent } from '../core/agent/events';
 import { matchesAllowList, suggestAllowPrefix } from '../core/permissions/commands';
 import type { AgentMode, ApprovalMode, SessionGrants } from '../core/permissions/policy';
 import { isProtectedPath } from '../core/permissions/policy';
-import type { ApprovalPort, ApprovalRequest, ApprovalResponse, DirEntry, WorkspacePort, WorkspaceRoot } from '../core/ports';
+import type { ApprovalPort, ApprovalRequest, ApprovalResponse, DirEntry, DocumentConverterPort, FileStat, WorkspacePort, WorkspaceRoot } from '../core/ports';
 import { capabilityKey, type CapabilityStore } from '../core/providers/capabilities';
 import { ProviderError, errorFromException } from '../core/providers/errors';
 import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
@@ -21,7 +21,9 @@ import { normalizeApiKey, probeConnection } from '../core/providers/connection';
 import type { ModelInfo, ServerLimits } from '../core/providers/limits';
 import type { ModelConfig, ProviderConfig } from '../core/providers/types';
 import { PathError, resolveAndVerify, resolveWorkspacePath, type ResolvedPath } from '../core/security/paths';
-import { compareEntries, displayPath, looksBinary } from '../core/util/files';
+import { compareEntries, displayPath } from '../core/util/files';
+import { decodeText, describeDocumentError, describeUnsupported, sniffFile, type TextEncodingName } from '../core/documents/detect';
+import { DOCUMENT_LIMITS, DocumentError, type DocumentResult } from '../core/documents/types';
 import {
   DEFAULT_TITLE,
   deriveTitle,
@@ -86,6 +88,8 @@ const MAX_ATTACHMENT_CHARS = 50_000;
 const MAX_EDITOR_FILE_CHARS = 12_000;
 /** Larger files are refused rather than read into memory only to be truncated to MAX_ATTACHMENT_CHARS. */
 const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+/** Converted documents kept for the send (and for files attached again), keyed by path and checked by size and mtime. */
+const DOCUMENT_CACHE_SIZE = 16;
 /** Entries sent per folder to the attach menu. */
 const MAX_LISTING = 500;
 /** Never shown in the attach menu: version-control internals and dependency folders. */
@@ -117,6 +121,8 @@ export interface ControllerDeps {
   fileIndex: FileIndex;
   commandLoader: CommandLoader;
   configFile: ConfigFileHost;
+  /** Converts PDF, Office and OpenDocument attachments to Markdown, isolated from the extension host. */
+  documents: DocumentConverterPort;
   /** Shows the Activity Bar view. */
   reveal: () => Promise<void>;
   /**
@@ -162,10 +168,28 @@ interface Surface {
   session: Session;
   /** Panels always show the chat; lists and settings open in the sidebar. */
   view: View;
-  attachments: Array<AttachmentView & { absolute: string }>;
+  attachments: AttachedFile[];
   includeEditor: boolean;
   panel?: PanelHost;
 }
+
+/**
+ * A file for the next message. `format` marks a document (converted to Markdown when the message is sent);
+ * `encoding` a text file that is not UTF-8. Plain UTF-8 text has neither.
+ */
+type AttachedFile = AttachmentView & { absolute: string; encoding?: Exclude<TextEncodingName, 'utf-8'> };
+
+/** Whether a file can be attached, from its size and first bytes. A document still has to be converted. */
+type FileCheck =
+  | { problem: string }
+  | { problem?: undefined; kind: 'text'; encoding: TextEncodingName }
+  | { problem?: undefined; kind: 'document'; container: 'pdf' | 'zip'; textFallback: boolean; stat: FileStat };
+
+/** What a checked file becomes in the message: text in some encoding, or a converted document. */
+type FileContent =
+  | { problem: string }
+  | { problem?: undefined; encoding: TextEncodingName; document?: undefined }
+  | { problem?: undefined; encoding?: undefined; document: DocumentResult };
 
 const SIDEBAR = 'sidebar';
 /** Editor tab titles longer than this are shortened; the full title is in the chat header. */
@@ -203,6 +227,8 @@ export class SovranController implements vscode.Disposable {
   private configFileView: ConfigFileView = { path: '', state: 'missing', providers: 0, problems: [] };
   /** In-flight title requests, aborted on dispose. */
   private readonly titleRequests = new Set<AbortController>();
+  /** Recent document conversions, oldest first (see DOCUMENT_CACHE_SIZE). */
+  private readonly documentCache = new Map<string, { size: number; mtimeMs: number; result: DocumentResult }>();
   /** Config file loads and writes run one after the other (a save and a Settings change must not interleave). */
   private configQueue: Promise<void> = Promise.resolve();
   private keyStatus = new Map<string, boolean>();
@@ -694,7 +720,14 @@ export class SovranController implements vscode.Disposable {
     return {
       editor: this.editor,
       includeEditor: surface.includeEditor,
-      attachments: surface.attachments.map(({ id, path: p, label, external }) => ({ id, path: p, label, ...(external ? { external } : {}) })),
+      attachments: surface.attachments.map(({ id, path: p, label, external, format, detail }) => ({
+        id,
+        path: p,
+        label,
+        ...(external ? { external } : {}),
+        ...(format ? { format } : {}),
+        ...(detail ? { detail } : {}),
+      })),
     };
   }
 
@@ -802,18 +835,36 @@ export class SovranController implements vscode.Disposable {
     for (const a of surface.attachments) {
       if (out.some((o) => o.path === a.path && o.kind === 'file')) continue;
       try {
-        if (a.external) {
-          // Picked by the user in the system dialog. It may have changed since: check it is still a text file.
-          const problem = await this.fileProblem(a.absolute, a.path);
-          if (problem) {
-            this.notice('warning', problem, surface);
+        let content: FileContent = { encoding: 'utf-8' };
+        if (a.external || a.format || a.encoding) {
+          // Re-verified at send time: a symbolic link must not smuggle a file from outside the workspace.
+          if (!a.external) await resolveAndVerify(a.absolute, this.deps.workspace);
+          // Picked from the computer, a document or text that is not UTF-8: it may have changed since it was attached,
+          // so it is checked again (an unchanged document comes from the cache, not converted twice).
+          const check = await this.checkFile(a.absolute, a.path);
+          content = check.problem !== undefined ? check : await this.readChecked(a.absolute, a.path, check);
+          if (content.problem !== undefined) {
+            this.notice('warning', content.problem, surface);
             continue;
           }
         } else {
-          // Re-verified at send time: a symbolic link must not smuggle a file from outside the workspace.
           await resolveAndVerify(a.absolute, this.deps.workspace);
         }
-        const text = await this.deps.workspace.readFile(a.absolute);
+        if (content.document) {
+          const { markdown, truncated, format, detail } = content.document;
+          out.push({
+            kind: 'file',
+            path: a.path,
+            content: markdown.slice(0, MAX_ATTACHMENT_CHARS),
+            truncated: truncated || markdown.length > MAX_ATTACHMENT_CHARS || undefined,
+            format,
+            ...(detail ? { detail } : {}),
+            ...(a.external ? { external: true } : {}),
+          });
+          continue;
+        }
+        // UTF-8 goes through the workspace, which prefers the unsaved text of an open editor.
+        const text = content.encoding === 'utf-8' ? await this.deps.workspace.readFile(a.absolute) : decodeText(await fs.readFile(a.absolute), content.encoding);
         out.push({
           kind: 'file',
           path: a.path,
@@ -869,31 +920,70 @@ export class SovranController implements vscode.Disposable {
         await this.attachPath(surface, uri.fsPath, false);
         continue;
       }
-      const shown = displayPath(uri.fsPath, os.homedir());
-      const problem = await this.fileProblem(uri.fsPath, shown);
-      if (problem) {
-        this.notice('warning', problem, surface);
-        continue;
-      }
-      await this.addAttachment(surface, uri.fsPath, shown, true);
+      await this.addAttachment(surface, uri.fsPath, displayPath(uri.fsPath, os.homedir()), true);
     }
     this.patchSurface(surface, { context: this.contextView(surface) });
   }
 
-  /** Why a file cannot be attached (missing, too large or binary), or undefined when it can. */
-  private async fileProblem(absolute: string, shown: string): Promise<string | undefined> {
+  /**
+   * Whether a file can be attached (it exists, is not too large, and is text or a document Sovran converts), from its
+   * size and first bytes. The signature decides, not the extension.
+   */
+  private async checkFile(absolute: string, shown: string): Promise<FileCheck> {
     const stat = await this.deps.workspace.stat(absolute);
-    if (stat?.type !== 'file') return `${shown} is not a file.`;
-    if (stat.size > MAX_ATTACHMENT_BYTES) return `${shown} is larger than 5 MB. Attach an excerpt, or ask Sovran to read the part you need.`;
+    if (stat?.type !== 'file') return { problem: `${shown} is not a file.` };
     const head = await readHead(absolute).catch(() => null);
-    if (!head) return `${shown} could not be read.`;
-    if (looksBinary(head)) return `${shown} looks like a binary file. Sovran can attach text files only.`;
-    return undefined;
+    if (!head) return { problem: `${shown} could not be read.` };
+    const sniffed = sniffFile(head);
+    if (sniffed.kind === 'unsupported') return { problem: describeUnsupported(sniffed.family, shown) };
+    if (sniffed.kind === 'document') {
+      if (stat.size <= DOCUMENT_LIMITS.maxFileBytes) return { kind: 'document', container: sniffed.container, textFallback: sniffed.textFallback, stat };
+      if (!sniffed.textFallback) return { problem: `${shown} is larger than ${DOCUMENT_LIMITS.maxFileBytes / 1024 / 1024} MB. Attach a smaller excerpt of it.` };
+    }
+    if (stat.size > MAX_ATTACHMENT_BYTES) return { problem: `${shown} is larger than 5 MB. Attach an excerpt, or ask Sovran to read the part you need.` };
+    return { kind: 'text', encoding: sniffed.kind === 'text' ? sniffed.encoding : 'utf-8' };
   }
 
-  /** Adds a checked file to the next message. Protected files ask first, as they would when the agent reads them. */
+  /**
+   * What a checked file becomes in the message. Documents are converted (or taken from the cache). A file that only
+   * looked like one (it is not a valid PDF or ZIP) and has no binary content is attached as text, as it was before
+   * documents were supported; a valid document that cannot be read (no text, a password) is refused with the reason.
+   */
+  private async readChecked(absolute: string, shown: string, check: Exclude<FileCheck, { problem: string }>): Promise<FileContent> {
+    if (check.kind === 'text') return { encoding: check.encoding };
+    try {
+      return { document: await this.convertDocument(absolute, check.stat) };
+    } catch (e) {
+      this.deps.logger.warn(`Could not convert ${shown}: ${e instanceof Error ? e.message : String(e)}`);
+      const notADocument = e instanceof DocumentError && (e.code === 'corrupt' || e.code === 'unsupported');
+      if (notADocument && check.textFallback && check.stat.size <= MAX_ATTACHMENT_BYTES) return { encoding: 'utf-8' };
+      return { problem: describeDocumentError(e, shown, check.container === 'pdf' ? 'pdf' : undefined) };
+    }
+  }
+
+  /** Converts a document in the worker, or returns the conversion of the same unchanged file. */
+  private async convertDocument(absolute: string, stat: FileStat): Promise<DocumentResult> {
+    const cached = this.documentCache.get(absolute);
+    if (cached && cached.size === stat.size && cached.mtimeMs === stat.mtimeMs) return cached.result;
+    const data = await fs.readFile(absolute);
+    const result = await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: `Sovran: Reading ${path.basename(absolute)}…` },
+      () => this.deps.documents.convert(new Uint8Array(data.buffer, data.byteOffset, data.byteLength), { maxChars: MAX_ATTACHMENT_CHARS }),
+    );
+    this.documentCache.delete(absolute);
+    this.documentCache.set(absolute, { size: stat.size, mtimeMs: stat.mtimeMs, result });
+    if (this.documentCache.size > DOCUMENT_CACHE_SIZE) this.documentCache.delete(this.documentCache.keys().next().value!);
+    return result;
+  }
+
+  /**
+   * Adds a file to the next message after checking it. Protected files ask first, as they would when the agent reads
+   * them, and before a document is converted, so nothing is read from one the user did not confirm.
+   */
   private async addAttachment(surface: Surface, absolute: string, shown: string, external = false) {
     if (surface.attachments.some((a) => a.absolute === absolute)) return;
+    const check = await this.checkFile(absolute, shown);
+    if (check.problem !== undefined) return this.notice('warning', check.problem, surface);
     const label = path.basename(absolute);
     if (isProtectedPath(shown, this.settings.agent.policy.protectedPaths)) {
       const choice = await vscode.window.showWarningMessage(
@@ -903,7 +993,18 @@ export class SovranController implements vscode.Disposable {
       );
       if (choice !== 'Attach' || surface.attachments.some((a) => a.absolute === absolute)) return;
     }
-    surface.attachments.push({ id: randomUUID(), path: shown, label, absolute, ...(external ? { external: true } : {}) });
+    const content = await this.readChecked(absolute, shown, check);
+    if (content.problem !== undefined) return this.notice('warning', content.problem, surface);
+    if (surface.attachments.some((a) => a.absolute === absolute)) return;
+    surface.attachments.push({
+      id: randomUUID(),
+      path: shown,
+      label,
+      absolute,
+      ...(external ? { external: true } : {}),
+      ...(content.document ? { format: content.document.format, ...(content.document.detail ? { detail: content.document.detail } : {}) } : {}),
+      ...(content.encoding && content.encoding !== 'utf-8' ? { encoding: content.encoding } : {}),
+    });
   }
 
   /** `@` and attach-menu suggestions. Before anything is typed, the active editor and the open tabs come first. */
@@ -2147,8 +2248,6 @@ export class SovranController implements vscode.Disposable {
     } catch (e) {
       return this.notice('warning', e instanceof PathError ? e.message : `${p} is not inside the workspace.`, surface);
     }
-    const problem = await this.fileProblem(resolved.absolute, resolved.relative);
-    if (problem) return this.notice('warning', problem, surface);
     await this.addAttachment(surface, resolved.absolute, resolved.relative);
     if (push) this.patchSurface(surface, { context: this.contextView(surface) });
   }

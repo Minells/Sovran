@@ -2,6 +2,10 @@ import { escapeAttribute, formatToolResult, neutralizeClosingTags, serializeTool
 import type { ResolvedToolMode, WireMessage } from '../providers/types';
 import type { ContextAttachment, SessionMessage, ToolMessage } from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
+import { FORMAT_LABELS } from '../documents/types';
+
+/** Tells the model what a converted document's Markdown is (the value of the `note` attribute). */
+export const DOCUMENT_NOTE = 'Text extracted from the file by Sovran. Images, charts and page layout are not included.';
 
 /** Conservative estimate: code tokenizes densely, so ~3.5 chars/token rather than the usual 4. */
 export const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
@@ -18,8 +22,14 @@ export function renderAttachments(attachments: readonly ContextAttachment[] | un
   if (!attachments?.length) return '';
   const blocks = attachments.map((a) => {
     const lines = a.startLine ? ` lines="${a.startLine}-${a.endLine ?? a.startLine}"` : '';
+    // A converted document says what it was and what the conversion leaves out, so the model neither mistakes the
+    // Markdown for the file's own text nor guesses at figures it cannot see.
+    const label = a.format ? FORMAT_LABELS[a.format] : undefined;
+    const doc = label
+      ? ` format="${escapeAttribute(label)}"${a.detail ? ` detail="${escapeAttribute(a.detail)}"` : ''} note="${DOCUMENT_NOTE}"`
+      : '';
     const note = a.truncated ? ' truncated="true"' : '';
-    return `<file path="${escapeAttribute(a.path)}"${lines}${note}>\n${neutralizeClosingTags(a.content, ['file', 'context'])}\n</file>`;
+    return `<file path="${escapeAttribute(a.path)}"${lines}${doc}${note}>\n${neutralizeClosingTags(a.content, ['file', 'context'])}\n</file>`;
   });
   return `<context>\n${blocks.join('\n')}\n</context>\n\n`;
 }

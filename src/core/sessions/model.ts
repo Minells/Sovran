@@ -1,4 +1,5 @@
 import type { AgentMode } from '../permissions/policy';
+import type { DocumentFormat } from '../documents/types';
 
 export interface ToolCall {
   id: string;
@@ -15,6 +16,10 @@ export interface ContextAttachment {
   external?: boolean;
   startLine?: number;
   endLine?: number;
+  /** Markdown converted from a document of this format (PDF, Word…) rather than the file's own text. */
+  format?: DocumentFormat;
+  /** Facts about the document for the model, such as "12 pages". */
+  detail?: string;
   content: string;
   truncated?: boolean;
 }

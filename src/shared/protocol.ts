@@ -7,6 +7,7 @@ import { hasShellMetacharacters } from '../core/permissions/shell';
 import type { AgentMode, ApprovalMode } from '../core/permissions/policy';
 import type { ToolMode } from '../core/providers/types';
 import type { SessionMessage, SessionSummary } from '../core/sessions/model';
+import type { DocumentFormat } from '../core/documents/types';
 
 export type { SessionMessage, SessionSummary, AgentMode, ApprovalMode, ToolMode };
 
@@ -90,6 +91,9 @@ export interface AttachmentView {
   label: string;
   /** Picked from the computer with the system dialog: the file is outside the workspace. */
   external?: boolean;
+  /** A document converted to Markdown for the model, and what Sovran found in it ("12 pages"). */
+  format?: DocumentFormat;
+  detail?: string;
 }
 
 export interface FileSuggestionView {

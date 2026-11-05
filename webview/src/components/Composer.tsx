@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { EditorContextView, RunView } from '../../../src/shared/protocol';
 import { APPROVAL_OPTIONS, approvalOption, nextApprovalMode } from '../lib/approvals';
-import { elapsed, toolInfo } from '../lib/format';
+import { documentInfo, elapsed, toolInfo } from '../lib/format';
 import { altLabel, shortcutList } from '../lib/keys';
 import { useStore } from '../state/store';
 import { getUiState, post, setUiState } from '../vscode';
@@ -425,21 +425,24 @@ export function Composer() {
         {editor || app.context.attachments.length ? (
           <div className="sv-chips" aria-label="Context for the next message">
             {editor ? <EditorChip editor={editor} included={app.context.includeEditor} /> : null}
-            {app.context.attachments.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                className="sv-chip"
-                data-external={a.external || undefined}
-                title={`${a.path}${a.external ? ' (from your computer)' : ''} · click to remove`}
-                aria-label={`Remove ${a.label}`}
-                onClick={() => post({ type: 'removeAttachment', id: a.id })}
-              >
-                <Icon name={a.external ? 'device-desktop' : 'file'} />
-                <span>{a.label}</span>
-                <Icon name="close" />
-              </button>
-            ))}
+            {app.context.attachments.map((a) => {
+              const doc = documentInfo(a.format, a.detail);
+              return (
+                <button
+                  key={a.id}
+                  type="button"
+                  className="sv-chip"
+                  data-external={a.external || undefined}
+                  title={`${a.path}${a.external ? ' (from your computer)' : ''}${doc ? ` · ${doc.description}` : ''} · click to remove`}
+                  aria-label={`Remove ${a.label}`}
+                  onClick={() => post({ type: 'removeAttachment', id: a.id })}
+                >
+                  <Icon name={doc?.icon ?? (a.external ? 'device-desktop' : 'file')} />
+                  <span>{a.label}</span>
+                  <Icon name="close" />
+                </button>
+              );
+            })}
           </div>
         ) : null}
         <textarea

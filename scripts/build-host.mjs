@@ -1,16 +1,20 @@
-// Bundles the extension host (core + extension + shared) into a single CommonJS file.
+// Bundles the extension host (core + extension + shared) into a single CommonJS file, and the document worker (the
+// document parsers, pdf.js included) into a second one, so the parsers never load in the extension host itself.
 import * as esbuild from 'esbuild';
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
 
 const ctx = await esbuild.context({
-  entryPoints: ['src/extension/extension.ts'],
+  entryPoints: {
+    extension: 'src/extension/extension.ts',
+    documentWorker: 'src/extension/adapters/documentWorker.ts',
+  },
   bundle: true,
   format: 'cjs',
   platform: 'node',
   target: 'node20',
-  outfile: 'dist/extension.js',
+  outdir: 'dist',
   external: ['vscode'],
   sourcemap: !production,
   minify: production,
