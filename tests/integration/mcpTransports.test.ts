@@ -37,7 +37,8 @@ function makeHub(token: string | undefined, env: Record<string, string> = {}, lo
   }));
 }
 
-describe('stdio transport', () => {
+// Real processes and sockets: a busy CI machine needs more than the default 5 s per test.
+describe('stdio transport', { timeout: 30_000 }, () => {
   it('starts the server with its token, its variables and only the environment it needs', async () => {
     const lines: string[] = [];
     const logger = { ...nullLogger, debug: (m: string) => void lines.push(m) };
@@ -108,7 +109,7 @@ describe('stdio transport', () => {
   });
 });
 
-describe('Streamable HTTP transport', () => {
+describe('Streamable HTTP transport', { timeout: 30_000 }, () => {
   let web: http.Server;
   let base = '';
   const seen: http.IncomingHttpHeaders[] = [];

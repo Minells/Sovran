@@ -2,7 +2,7 @@
  * Images for vision models in the core (recognition, the request content, refusals and what the agent learns), and
  * read_file on documents through the shared document reader.
  */
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { AgentRunner, type AgentSettings } from '../../src/core/agent/agentRunner';
 import type { AgentEvent } from '../../src/core/agent/events';
 import { CheckpointRecorder } from '../../src/core/checkpoints/checkpoints';
@@ -22,7 +22,7 @@ import type { ImageAttachment, Session, SessionMessage, UserMessage } from '../.
 import { createBuiltinRegistry } from '../../src/core/tools/builtin';
 import { readFileTool } from '../../src/core/tools/builtin/readTools';
 import type { ToolContext } from '../../src/core/tools/types';
-import { makePdf } from '../fixtures/documents';
+import { makePdf, PDFJS_WARMUP_MS, warmUpPdfJs } from '../fixtures/documents';
 import { FakeProcess, MemoryWorkspace, ScriptedApprovals, ScriptedProvider, text } from '../fixtures/fakes';
 import { makeGif, makeJpeg, makePng, makeWebp } from '../fixtures/images';
 
@@ -326,6 +326,7 @@ describe('DocumentReader', () => {
 });
 
 describe('read_file on documents', () => {
+  beforeAll(warmUpPdfJs, PDFJS_WARMUP_MS);
   const inProcess: DocumentConverterPort = { convert: (data, o) => convertDocument(data, o) };
   // null: no document reader, as for a host that does not provide one.
   const ctxFor = (

@@ -16,7 +16,7 @@ import { DocumentError } from '../../src/core/documents/types';
 import { excelDate, isDateFormat } from '../../src/core/documents/xlsx';
 import { parseXml, type XmlEvent } from '../../src/core/documents/xml';
 import { ZipArchive } from '../../src/core/documents/zip';
-import { makeDocx, makeOdf, makePdf, makePptx, makeXlsx, pshape, wp, zip } from '../fixtures/documents';
+import { makeDocx, makeOdf, makePdf, makePptx, makeXlsx, PDFJS_WARMUP_MS, pshape, warmUpPdfJs, wp, zip } from '../fixtures/documents';
 
 const bytes = (...values: number[]) => Uint8Array.from(values);
 const ascii = (s: string) => new TextEncoder().encode(s);
@@ -269,9 +269,7 @@ describe('Markdown helpers', () => {
 });
 
 describe('convertDocument: PDF', () => {
-  // pdf.js (about 1.5 MB) loads on the first conversion. Loading it here, with time to spare on a busy CI machine, keeps
-  // that out of the first test, so each test measures only its own conversion.
-  beforeAll(() => convertDocument(makePdf([['warm-up']]), { maxChars: 1000 }), 60_000);
+  beforeAll(warmUpPdfJs, PDFJS_WARMUP_MS);
 
   it('reads every page, and names pages without text', async () => {
     const r = await convertDocument(makePdf([['Relazione tecnica', 'Prezzo: 12,50 (àèìòù)'], [], ['Fine']]), {

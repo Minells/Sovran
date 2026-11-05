@@ -3,6 +3,17 @@
  * entry, and Office Open XML / OpenDocument packages assembled with fflate.
  */
 import { strToU8, zipSync, type Zippable } from 'fflate';
+import { convertDocument } from '../../src/core/documents/convert';
+
+/**
+ * pdf.js (about 1.5 MB) is imported by the first PDF conversion in each test file. A test block that converts PDFs
+ * loads it first with `beforeAll(warmUpPdfJs, PDFJS_WARMUP_MS)`, so on a busy CI machine the import never counts
+ * against one test's 5 s (it took 3 to 6 s on Windows runners).
+ */
+export const PDFJS_WARMUP_MS = 60_000;
+export const warmUpPdfJs = async (): Promise<void> => {
+  await convertDocument(makePdf([['warm-up']]), { maxChars: 1000 });
+};
 
 /** A PDF with one page per entry; each string is a line of Helvetica text (WinAnsi, so Latin accents work). */
 export function makePdf(pages: string[][], options: { prefix?: string } = {}): Uint8Array {
