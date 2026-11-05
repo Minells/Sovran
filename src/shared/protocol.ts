@@ -8,6 +8,7 @@ import type { AgentMode, ApprovalMode } from '../core/permissions/policy';
 import type { ToolMode } from '../core/providers/types';
 import type { SessionMessage, SessionSummary } from '../core/sessions/model';
 import type { DocumentFormat } from '../core/documents/types';
+import { IMAGE_LIMITS, type ImageMime } from '../core/images/images';
 
 export type { SessionMessage, SessionSummary, AgentMode, ApprovalMode, ToolMode };
 
@@ -94,6 +95,8 @@ export interface AttachmentView {
   /** A document converted to Markdown for the model, and what Sovran found in it ("12 pages"). */
   format?: DocumentFormat;
   detail?: string;
+  /** An image for a vision model (from the workspace, the computer or the clipboard). */
+  image?: { mime: ImageMime; width?: number; height?: number; pasted?: boolean };
 }
 
 export interface FileSuggestionView {
@@ -393,6 +396,18 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('listDirectory'), requestId: id, path: z.string().max(2000) }),
   /** Opens the system file dialog. Only files the user picks there may come from outside the workspace. */
   z.object({ type: z.literal('uploadFiles') }),
+  /**
+   * An image pasted into the chat input, base64-encoded. The host checks its signature and size itself; the bound here
+   * only keeps an oversized message from being decoded at all.
+   */
+  z.object({
+    type: z.literal('attachImage'),
+    data: z
+      .string()
+      .min(16)
+      .max(Math.ceil(IMAGE_LIMITS.maxBytes / 3) * 4)
+      .regex(/^[A-Za-z0-9+/]+={0,2}$/),
+  }),
 ]);
 
 export type WebviewMessage = z.infer<typeof webviewMessageSchema>;

@@ -5,6 +5,7 @@
  */
 
 import type { DocumentResult } from './documents/types';
+import type { ImageMime } from './images/images';
 
 export interface WorkspaceRoot {
   /** Display name (folder name in multi-root workspaces). */
@@ -65,6 +66,8 @@ export interface WorkspacePort {
   realpath(absPath: string): Promise<string>;
   /** Returns the current text, preferring unsaved editor buffers when the file is open. */
   readFile(absPath: string): Promise<string>;
+  /** The file's bytes as saved on disk (documents, images, text that is not UTF-8). Optional for hosts without it. */
+  readBytes?(absPath: string): Promise<Uint8Array>;
   readDirectory(absPath: string): Promise<DirEntry[]>;
   /** Glob search relative to the workspace roots. Returns absolute paths. */
   findFiles(include: string, options: { maxResults: number; signal?: AbortSignal }): Promise<string[]>;
@@ -137,6 +140,17 @@ export interface ApprovalResponse {
 export interface ApprovalPort {
   /** Resolves when the user decides. Must reject (or resolve unapproved) when `signal` aborts. */
   request(request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalResponse>;
+}
+
+/**
+ * Where the images of a chat are kept, by their SHA-256 id: out of the session file (they can be megabytes) and
+ * deleted with the chat.
+ */
+export interface ImageStorePort {
+  save(sessionId: string, id: string, mime: ImageMime, data: Uint8Array): Promise<void>;
+  /** The image's bytes, or undefined when it is gone. */
+  load(sessionId: string, id: string, mime: ImageMime): Promise<Uint8Array | undefined>;
+  deleteForSession(sessionId: string): Promise<void>;
 }
 
 export interface DocumentConverterPort {

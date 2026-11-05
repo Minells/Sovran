@@ -12,6 +12,8 @@ import type { ContextAttachment } from '../../src/core/sessions/model';
 import { displayPath } from '../../src/core/util/files';
 import type { HostMessage } from '../../src/shared/protocol';
 import { makeDocx, makePdf, wp } from '../fixtures/documents';
+import { makeJpeg, makePng } from '../fixtures/images';
+import type { ImageAttachment } from '../../src/core/sessions/model';
 
 const h = vi.hoisted(() => ({
   root: '',
@@ -77,6 +79,7 @@ vi.mock('vscode', async () => {
 
 const { SovranController } = await import('../../src/extension/SovranController');
 const { FileIndex } = await import('../../src/extension/workspaceServices');
+const { MemoryImageStore } = await import('../../src/extension/adapters/FsImageStore');
 type Controller = InstanceType<typeof SovranController>;
 
 /** WorkspacePort over the real disk, rooted at the temporary project. */
@@ -128,6 +131,13 @@ const collect = () => {
   const c = controller as unknown as { sidebar: unknown; collectAttachments(s: unknown): Promise<ContextAttachment[]> };
   return c.collectAttachments(c.sidebar);
 };
+/** The images the next message would carry, stored for chat `s1`. */
+const collectImages = () => {
+  const c = controller as unknown as { sidebar: unknown; collectImages(s: unknown, id: string): Promise<ImageAttachment[]> };
+  return c.collectImages(c.sidebar, 's1');
+};
+let store: InstanceType<typeof MemoryImageStore>;
+const base64 = (b: Uint8Array) => Buffer.from(b).toString('base64');
 
 const write = async (rel: string, content: string | Uint8Array, base = h.root) => {
   const f = path.join(base, rel);
@@ -160,7 +170,7 @@ beforeEach(async () => {
   await write('.env', 'TOKEN=secret\n');
   await write('debug.log', 'noise\n');
   await write('kept/x.txt', 'x\n');
-  await write('logo.png', Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x00, 0x00, 0x00, 0x0d]));
+  await write('logo.png', makePng(64, 32));
   await write('node_modules/dep/index.js', '');
   await write('.git/HEAD', 'ref: refs/heads/main\n');
   await write('notes.md', '# notes from elsewhere\n', outside);
@@ -174,6 +184,7 @@ beforeEach(async () => {
     workspace: new DiskWorkspace(),
     fileIndex: new FileIndex(),
     documents,
+    images: (store = new MemoryImageStore()),
     logger: { debug() {}, info() {}, warn() {}, error() {}, show() {}, addSecret() {}, dispose() {} },
   } as never);
   controller.attach((m) => messages.push(m));
@@ -232,12 +243,16 @@ describe('attachPath', () => {
   });
 
   it('refuses binary files, folders and paths outside the workspace', async () => {
-    await controller.handle({ type: 'attachPath', path: 'logo.png' });
+    await write('scan.bmp', Uint8Array.from([0x42, 0x4d, 0x36, 0, 0, 0, 0, 0]));
+    await write('tool.bin', Uint8Array.from([0, 1, 2, 3]));
+    await controller.handle({ type: 'attachPath', path: 'scan.bmp' });
+    await controller.handle({ type: 'attachPath', path: 'tool.bin' });
     await controller.handle({ type: 'attachPath', path: 'src' });
     await controller.handle({ type: 'attachPath', path: 'escape/notes.md' });
     expect(attachments()).toEqual([]);
     expect(notices()).toEqual([
-      'logo.png is an image. Sovran cannot send images to the model yet: describe what matters in your message, or attach the text it shows.',
+      'scan.bmp is an image in a format models do not accept. Save it as PNG or JPEG, then attach that.',
+      expect.stringMatching(/^tool\.bin looks like a binary file\./),
       'src is not a file.',
       expect.stringMatching(/outside the workspace|escapes/),
     ]);
@@ -350,6 +365,48 @@ describe('documents', () => {
     // Replaced by an image after it was attached: the send leaves it out and says why.
     await fs.writeFile(file, Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]));
     expect(await collect()).toEqual([]);
-    expect(notices().at(-1)).toMatch(/budget\.pdf is an image/);
+    expect(notices().at(-1)).toBe(`${shown} is now an image. Attach it again to send it as one.`);
+  });
+});
+
+describe('images', () => {
+  it('attaches a workspace image with its size and stores it when the message is sent', async () => {
+    await controller.handle({ type: 'attachPath', path: 'logo.png' });
+    expect(attachments()).toEqual([{ id: expect.any(String), path: 'logo.png', label: 'logo.png', image: { mime: 'image/png', width: 64, height: 32 } }]);
+    // Images travel apart from the text context.
+    expect(await collect()).toEqual([]);
+    const [image] = await collectImages();
+    expect(image).toEqual({ id: expect.stringMatching(/^[a-f0-9]{64}$/), name: 'logo.png', source: 'workspace', mime: 'image/png', bytes: makePng(64, 32).length, width: 64, height: 32 });
+    expect(await store.load('s1', image!.id)).toEqual(makePng(64, 32));
+  });
+
+  it('attaches pasted images once each, named in order', async () => {
+    await controller.handle({ type: 'attachImage', data: base64(makePng(10, 10, 1)) });
+    await controller.handle({ type: 'attachImage', data: base64(makePng(10, 10, 1)) });
+    await controller.handle({ type: 'attachImage', data: base64(makeJpeg(1920, 1080)) });
+    expect(attachments()).toEqual([
+      { id: expect.any(String), path: 'Pasted image 1', label: 'Pasted image 1', image: { mime: 'image/png', width: 10, height: 10, pasted: true } },
+      { id: expect.any(String), path: 'Pasted image 2', label: 'Pasted image 2', image: { mime: 'image/jpeg', width: 1920, height: 1080, pasted: true } },
+    ]);
+    expect((await collectImages()).map((i) => [i.name, i.source, i.mime])).toEqual([
+      ['Pasted image 1', 'pasted', 'image/png'],
+      ['Pasted image 2', 'pasted', 'image/jpeg'],
+    ]);
+  });
+
+  it('refuses a paste that is not an image, and more images than a message can carry', async () => {
+    await controller.handle({ type: 'attachImage', data: base64(new TextEncoder().encode('not an image at all')) });
+    expect(notices()).toEqual(['The pasted content is not an image Sovran can send. Paste a PNG, JPEG, WebP or GIF image.']);
+    for (let i = 0; i < 9; i++) await controller.handle({ type: 'attachImage', data: base64(makePng(4, 4, i)) });
+    expect(attachments()).toHaveLength(8);
+    expect(notices().at(-1)).toBe('A message can carry up to 8 images. Send these first, then attach more.');
+  });
+
+  it('leaves out an image that is no longer one when the message is sent', async () => {
+    const file = await write('shot.png', makePng(8, 8));
+    await controller.handle({ type: 'attachPath', path: 'shot.png' });
+    await fs.writeFile(file, 'now it is text');
+    expect(await collectImages()).toEqual([]);
+    expect(notices().at(-1)).toBe('shot.png is no longer an image, so it was not attached.');
   });
 });

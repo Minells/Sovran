@@ -2,6 +2,8 @@ import type { ResolvedToolMode, ToolMode } from './types';
 
 export interface LearnedCapabilities {
   toolMode?: Extract<ResolvedToolMode, 'native' | 'prompted'>;
+  /** False once the server refused images for this model. */
+  vision?: boolean;
   /** Limits the server reported for the model (see limits.ts). */
   contextWindow?: number;
   maxOutputTokens?: number;
@@ -34,4 +36,9 @@ export const capabilityKey = (providerId: string, modelId: string) => `${provide
 export function resolveToolMode(configured: ToolMode | undefined, learned?: LearnedCapabilities): ResolvedToolMode {
   if (configured && configured !== 'auto') return configured;
   return learned?.toolMode ?? 'native';
+}
+
+/** Whether to send images: the configured value, else what was learned; models are tried until a server refuses. */
+export function resolveVision(configured: boolean | undefined, learned?: LearnedCapabilities): boolean {
+  return configured ?? learned?.vision ?? true;
 }

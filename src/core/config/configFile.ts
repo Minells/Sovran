@@ -75,6 +75,7 @@ const modelSchema = z.strictObject({
   maxOutputTokens: z.number().int().min(64).max(1_000_000).optional(),
   temperature: z.number().min(0).max(2).optional(),
   toolMode: z.enum(['auto', 'native', 'prompted', 'none']).optional(),
+  vision: z.boolean().optional(),
 });
 
 // Cross-field checks live on the smallest schema that owns the fields: Zod skips an object's refinements when any of
@@ -189,7 +190,7 @@ const KNOWN_FIELDS = {
   file: ['providers', 'defaultModel', 'planModel', 'titleModel'],
   provider: ['id', 'name', 'baseUrl', 'auth', 'headers', 'timeoutSeconds', 'models'],
   auth: ['type', 'headerName'],
-  model: ['id', 'name', 'contextWindow', 'maxOutputTokens', 'temperature', 'toolMode'],
+  model: ['id', 'name', 'contextWindow', 'maxOutputTokens', 'temperature', 'toolMode', 'vision'],
 };
 
 function knownFieldsAt(path: readonly PropertyKey[]): string[] {
@@ -400,6 +401,7 @@ export function canonicalProvider(p: ProviderConfig): ProviderConfig {
       ...(m.maxOutputTokens ? { maxOutputTokens: m.maxOutputTokens } : {}),
       ...(m.temperature !== undefined ? { temperature: m.temperature } : {}),
       ...(m.toolMode && m.toolMode !== 'auto' ? { toolMode: m.toolMode } : {}),
+      ...(m.vision !== undefined ? { vision: m.vision } : {}),
     })),
   };
 }
@@ -549,6 +551,10 @@ const CONFIG_FILE_EXAMPLES = `  # Examples (uncomment and adapt):
   #       maxOutputTokens: 8192
   #       temperature: 0.4
   #       toolMode: native
+  #     # vision: true always sends attached images, false sends only their names;
+  #     # without it Sovran sends them and stops if the server refuses.
+  #     - id: qwen2.5-vl-72b
+  #       vision: true
   #
   # Gateway that reads the key from its own header, plus extra non-secret headers
   # - id: corp

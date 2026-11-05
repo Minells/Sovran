@@ -30,7 +30,7 @@ export function renderForSummary(messages: readonly SessionMessage[], previousSu
   if (previousSummary) lines.push(`PREVIOUS SUMMARY:\n${previousSummary}\n`);
   for (const m of messages) {
     if (m.role === 'user') {
-      const files = m.attachments?.map((a) => a.path).join(', ');
+      const files = [...(m.attachments?.map((a) => a.path) ?? []), ...(m.images?.map((i) => `${i.name} (image)`) ?? [])].join(', ');
       lines.push(`USER: ${m.content}${files ? `\n(attached: ${files})` : ''}`);
     } else if (m.role === 'assistant') {
       if (m.content.trim()) lines.push(`ASSISTANT: ${m.content.trim()}`);

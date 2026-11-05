@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Mouse
 import type { ApprovalView, AssistantMessageView, RunViewT, ToolCallView, ToolMessageView } from './types';
 import type { SessionMessage } from '../../../src/shared/protocol';
 import { renderMarkdown } from '../lib/markdown';
-import { documentInfo, toolInfo, toolTarget } from '../lib/format';
+import { documentInfo, imageDescription, toolInfo, toolTarget } from '../lib/format';
 import { post } from '../vscode';
 import { useStore } from '../state/store';
 import { ApprovalDetail, approvalAnchor } from './Approval';
@@ -444,9 +444,9 @@ function UserBlock({ message, canEdit }: { message: UserMessageView; canEdit: bo
   }
   return (
     <div className="sv-user" data-user-message={message.id}>
-      {message.attachments?.length ? (
+      {message.attachments?.length || message.images?.length ? (
         <div className="sv-user__context">
-          {message.attachments.map((a) => {
+          {(message.attachments ?? []).map((a) => {
             const doc = documentInfo(a.format, a.detail);
             return a.external ? (
               // Files from the computer are outside the workspace, so they cannot be opened from here.
@@ -468,6 +468,22 @@ function UserBlock({ message, canEdit }: { message: UserMessageView; canEdit: bo
                   {a.startLine ? `:${a.startLine}-${a.endLine}` : ''}
                 </span>
               </button>
+            );
+          })}
+          {(message.images ?? []).map((img) => {
+            const { icon, description } = imageDescription(img);
+            const label = img.name.split('/').pop();
+            // Workspace images open in VS Code's image preview; pasted ones and files from the computer have no file here.
+            return img.source === 'workspace' ? (
+              <button key={img.id} type="button" className="sv-chip" title={description} onClick={() => post({ type: 'openFile', path: img.name })}>
+                <Icon name={icon} />
+                <span>{label}</span>
+              </button>
+            ) : (
+              <span key={img.id} className="sv-chip sv-chip--static" title={`${img.source === 'external' ? `${img.name} (from your computer) · ` : ''}${description}`}>
+                <Icon name={icon} />
+                <span>{label}</span>
+              </span>
             );
           })}
         </div>

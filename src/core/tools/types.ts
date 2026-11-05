@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import type { DocumentReader } from '../documents/reader';
 import type { ApprovalDetail, ProcessPort, WorkspacePort } from '../ports';
 import type { ToolRisk } from '../permissions/policy';
 import type { ToolDisplay } from '../sessions/model';
@@ -16,6 +17,8 @@ export interface ToolContext {
   signal: AbortSignal;
   settings: ToolSettings;
   onOutput?: (chunk: string) => void;
+  /** Converts documents for `read_file`. Without it (or without `workspace.readBytes`), documents read as binary. */
+  documents?: DocumentReader;
 }
 
 export interface PreparedAction {

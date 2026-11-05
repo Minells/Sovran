@@ -88,11 +88,20 @@ describe('sniffFile', () => {
 
   it('names what it refuses', () => {
     const family = (b: Uint8Array) => (sniffFile(b) as { family?: string }).family;
-    expect(family(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d))).toBe('image');
-    expect(family(bytes(0xff, 0xd8, 0xff, 0xe0, 0, 0x10))).toBe('image');
-    expect(family(bytes(...ascii('GIF89a'), 1, 0))).toBe('image');
-    expect(family(bytes(...ascii('RIFF'), 0, 0, 0, 0, ...ascii('WEBPVP8 ')))).toBe('image');
+    // PNG, JPEG, GIF and WebP are images a model can receive (see images.test.ts); other image formats are refused.
+    expect(sniffFile(bytes(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d))).toEqual({
+      kind: 'image',
+      mime: 'image/png',
+    });
+    expect(sniffFile(bytes(0xff, 0xd8, 0xff, 0xe0, 0, 0x10))).toEqual({ kind: 'image', mime: 'image/jpeg' });
+    expect(sniffFile(bytes(...ascii('GIF89a'), 1, 0))).toEqual({ kind: 'image', mime: 'image/gif' });
+    expect(sniffFile(bytes(...ascii('RIFF'), 0, 0, 0, 0, ...ascii('WEBPVP8 ')))).toEqual({
+      kind: 'image',
+      mime: 'image/webp',
+    });
     expect(family(bytes(0, 0, 0, 0x18, ...ascii('ftypheic')))).toBe('image');
+    expect(family(bytes(...ascii('BM'), 0x36, 0, 0, 0))).toBe('image');
+    expect(family(bytes(0x49, 0x49, 0x2a, 0x00, 8, 0))).toBe('image');
     expect(family(bytes(0, 0, 0, 0x18, ...ascii('ftypisom')))).toBe('video');
     expect(family(bytes(0, 0, 0, 0x18, ...ascii('ftypM4A ')))).toBe('audio');
     expect(family(bytes(...ascii('ID3'), 4, 0, 0))).toBe('audio');
@@ -104,14 +113,14 @@ describe('sniffFile', () => {
   });
 
   it('explains each refusal and each failed conversion with what to do', () => {
-    expect(describeUnsupported('image', 'shot.png')).toMatch(
-      /^shot\.png is an image\. Sovran cannot send images/,
+    expect(describeUnsupported('image', 'scan.tiff')).toBe(
+      'scan.tiff is an image in a format models do not accept. Save it as PNG or JPEG, then attach that.',
     );
     expect(describeUnsupported('legacy-office', 'old.doc')).toMatch(
       /Save it as \.docx, \.xlsx, \.pptx or PDF/,
     );
     expect(describeUnsupported('binary', 'blob.bin')).toBe(
-      'blob.bin looks like a binary file. Sovran can attach text files and documents (PDF, Word, Excel, PowerPoint, OpenDocument, ZIP).',
+      'blob.bin looks like a binary file. Sovran can attach text files, documents (PDF, Word, Excel, PowerPoint, OpenDocument, ZIP) and images (PNG, JPEG, WebP, GIF).',
     );
     expect(describeDocumentError(new DocumentError('empty', ''), 'scan.pdf', 'pdf')).toMatch(
       /probably a scanned image/,

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { EditorContextView, RunView } from '../../../src/shared/protocol';
 import { APPROVAL_OPTIONS, approvalOption, nextApprovalMode } from '../lib/approvals';
-import { documentInfo, elapsed, toolInfo } from '../lib/format';
+import { documentInfo, elapsed, imageDescription, toolInfo } from '../lib/format';
+import { pastedImages, toBase64 } from '../lib/paste';
+import { IMAGE_LIMITS } from '../../../src/core/images/images';
 import { altLabel, shortcutList } from '../lib/keys';
 import { useStore } from '../state/store';
 import { getUiState, post, setUiState } from '../vscode';
@@ -224,7 +226,7 @@ interface SuggestItem {
 }
 
 export function Composer() {
-  const { app, state } = useStore();
+  const { app, state, dispatch } = useStore();
   const [text, setText] = useState(() => getUiState().draft ?? '');
   const [caret, setCaret] = useState(0);
   const [active, setActive] = useState(0);
@@ -426,14 +428,14 @@ export function Composer() {
           <div className="sv-chips" aria-label="Context for the next message">
             {editor ? <EditorChip editor={editor} included={app.context.includeEditor} /> : null}
             {app.context.attachments.map((a) => {
-              const doc = documentInfo(a.format, a.detail);
+              const doc = a.image ? imageDescription(a.image) : documentInfo(a.format, a.detail);
               return (
                 <button
                   key={a.id}
                   type="button"
                   className="sv-chip"
                   data-external={a.external || undefined}
-                  title={`${a.path}${a.external ? ' (from your computer)' : ''}${doc ? ` · ${doc.description}` : ''} · click to remove`}
+                  title={`${a.image?.pasted ? '' : a.path}${a.external ? ' (from your computer)' : ''}${doc ? `${a.image?.pasted ? '' : ' · '}${doc.description}` : ''} · click to remove`}
                   aria-label={`Remove ${a.label}`}
                   onClick={() => post({ type: 'removeAttachment', id: a.id })}
                 >
@@ -458,6 +460,20 @@ export function Composer() {
           aria-activedescendant={open && items.length ? `${listId}-${activeIndex}` : undefined}
           // Empty, it passes Enter and Escape to a pending approval.
           data-approval-keys=""
+          onPaste={(e) => {
+            // A screenshot becomes an attachment; a paste with text in it stays a text paste.
+            const images = pastedImages(e.clipboardData);
+            if (!images.length) return;
+            e.preventDefault();
+            for (const file of images) {
+              if (file.size > IMAGE_LIMITS.maxBytes) {
+                const mb = IMAGE_LIMITS.maxBytes / 1024 / 1024;
+                dispatch({ type: 'notice', id: `paste-${Date.now()}`, level: 'warning', message: `The pasted image is larger than ${mb} MB. Paste a smaller one (a crop, or a JPEG).` });
+                continue;
+              }
+              void toBase64(file).then((data) => post({ type: 'attachImage', data }));
+            }
+          }}
           onChange={(e) => {
             setText(e.target.value);
             setCaret(e.target.selectionStart ?? e.target.value.length);

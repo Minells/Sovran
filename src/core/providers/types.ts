@@ -12,6 +12,8 @@ export interface ModelConfig {
   maxOutputTokens?: number;
   temperature?: number;
   toolMode?: ToolMode;
+  /** Whether the model receives images. Unset: Sovran sends them and stops if the server refuses (see capabilities). */
+  vision?: boolean;
   /** What the server reports for this model. Attached at run time only, never written to settings or the file. */
   serverLimits?: ServerLimits;
 }
@@ -38,9 +40,12 @@ export interface WireToolCall {
   function: { name: string; arguments: string };
 }
 
+/** A part of a user message with images. Messages without images keep a plain string, as every server accepts. */
+export type WireContentPart = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
+
 export type WireMessage =
   | { role: 'system'; content: string }
-  | { role: 'user'; content: string }
+  | { role: 'user'; content: string | WireContentPart[] }
   | { role: 'assistant'; content: string | null; tool_calls?: WireToolCall[] }
   | { role: 'tool'; tool_call_id: string; content: string };
 
@@ -71,3 +76,14 @@ export interface ChatProvider {
   listModelInfo?(signal?: AbortSignal): Promise<ModelInfo[]>;
   streamChat(request: ChatRequest, signal: AbortSignal): AsyncIterable<ProviderEvent>;
 }
+
+/** The text of a message's content: its string, or its text parts joined (images left out). */
+export function wireText(content: string | WireContentPart[] | null): string {
+  if (content === null) return '';
+  if (typeof content === 'string') return content;
+  return content.map((p) => (p.type === 'text' ? p.text : '')).join('');
+}
+
+/** Whether a request carries any image (so a refusal can be read as "this model does not take images"). */
+export const carriesImages = (messages: readonly WireMessage[]) =>
+  messages.some((m) => m.role === 'user' && Array.isArray(m.content) && m.content.some((p) => p.type === 'image_url'));

@@ -1,7 +1,7 @@
 import { parseSSE } from './sse';
 import { ProviderError, errorFromException, errorFromResponse, isRedirect, redirectError, type AuthSent } from './errors';
 import { limitsFromLiteLlmInfo, limitsFromModelEntry, type ModelInfo, type ServerLimits } from './limits';
-import type { ChatProvider, ChatRequest, ProviderConfig, ProviderEvent } from './types';
+import { carriesImages, type ChatProvider, type ChatRequest, type ProviderConfig, type ProviderEvent } from './types';
 
 export interface OpenAICompatibleOptions {
   config: ProviderConfig;
@@ -140,6 +140,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
   async *streamChat(request: ChatRequest, signal: AbortSignal): AsyncGenerator<ProviderEvent> {
     const url = this.url('/chat/completions');
     const toolsSent = !!request.tools?.length;
+    const imagesSent = carriesImages(request.messages);
     const watchdog = new Watchdog(this.timeoutMs, signal);
     let secret: string | undefined;
     try {
@@ -161,7 +162,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
         redirect: 'manual',
       });
       if (isRedirect(res.status)) throw redirectError(res.status, res.headers.get('location'), url);
-      if (!res.ok) throw errorFromResponse(res.status, await res.text(), { url, toolsSent, secrets: [secret], auth: h.auth });
+      if (!res.ok) throw errorFromResponse(res.status, await res.text(), { url, toolsSent, imagesSent, secrets: [secret], auth: h.auth });
       watchdog.reset();
 
       const contentType = res.headers.get('content-type') ?? '';

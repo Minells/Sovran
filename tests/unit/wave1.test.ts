@@ -6,6 +6,7 @@ import { BUILTIN_COMMANDS, expandCommand, mergeCommands, parseCustomCommand, par
 import { planCompaction, renderForSummary } from '../../src/core/context/compaction';
 import { nullLogger } from '../../src/core/ports';
 import { MemoryCapabilityStore } from '../../src/core/providers/capabilities';
+import { wireText } from '../../src/core/providers/types';
 import { messagesForModel, type Session, type SessionMessage } from '../../src/core/sessions/model';
 import { createBuiltinRegistry } from '../../src/core/tools/builtin';
 import { searchFilesTool } from '../../src/core/tools/builtin/readTools';
@@ -107,7 +108,7 @@ describe('compaction', () => {
       },
       (req) => {
         expect(req.messages[0]!.content).toContain('# Summary of the earlier conversation\n## Goal\nShip the TTL change');
-        expect(req.messages.some((m) => m.content?.includes('question 1'))).toBe(false);
+        expect(req.messages.some((m) => wireText(m.content).includes('question 1'))).toBe(false);
         return [text('final answer')];
       },
     ]);

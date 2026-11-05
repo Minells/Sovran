@@ -2,6 +2,7 @@
  * What a file is, from its first bytes. The signature decides, never the extension: a `report.pdf` that is really a
  * ZIP is read as a ZIP, and a renamed image is still refused as an image.
  */
+import { imageInfo, type ImageMime } from '../images/images';
 import { looksBinary } from '../util/files';
 import { DocumentError, FORMAT_LABELS, type DocumentErrorCode, type DocumentFormat } from './types';
 
@@ -17,6 +18,8 @@ export type Sniffed =
    * A Markdown file that happens to start with `%PDF-` keeps working as it did before documents were supported.
    */
   | { kind: 'document'; container: 'pdf' | 'zip'; textFallback: boolean }
+  /** An image a vision model can receive (PNG, JPEG, WebP, GIF). Other image formats are `unsupported`. */
+  | { kind: 'image'; mime: ImageMime }
   | { kind: 'unsupported'; family: UnsupportedFamily };
 
 const at = (b: Uint8Array, offset: number, sig: readonly number[]) =>
@@ -142,9 +145,12 @@ export function sniffFile(head: Uint8Array): Sniffed {
   if (at(head, 0, [0x50, 0x4b, 0x03, 0x04]) || at(head, 0, [0x50, 0x4b, 0x05, 0x06])) {
     return { kind: 'document', container: 'zip', textFallback: !binary };
   }
+  // Images only count in a binary file (real ones always are), so no file that passes as text changes kind.
   if (!binary) return { kind: 'text', encoding: 'utf-8' };
   const utf16 = utf16Encoding(head);
   if (utf16) return { kind: 'text', encoding: utf16 };
+  const image = imageInfo(head);
+  if (image) return { kind: 'image', mime: image.mime };
   return { kind: 'unsupported', family: binaryFamily(head) };
 }
 
@@ -153,13 +159,14 @@ export function decodeText(bytes: Uint8Array, encoding: TextEncodingName): strin
   return new TextDecoder(encoding).decode(bytes);
 }
 
-const SUPPORTED = 'text files and documents (PDF, Word, Excel, PowerPoint, OpenDocument, ZIP)';
+const SUPPORTED =
+  'text files, documents (PDF, Word, Excel, PowerPoint, OpenDocument, ZIP) and images (PNG, JPEG, WebP, GIF)';
 
 /** Why a file of this family cannot be attached, and what to do instead. */
 export function describeUnsupported(family: UnsupportedFamily, shown: string): string {
   switch (family) {
     case 'image':
-      return `${shown} is an image. Sovran cannot send images to the model yet: describe what matters in your message, or attach the text it shows.`;
+      return `${shown} is an image in a format models do not accept. Save it as PNG or JPEG, then attach that.`;
     case 'audio':
     case 'video':
       return `${shown} is an ${family} file. Sovran can attach ${SUPPORTED}.`;

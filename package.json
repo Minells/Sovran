@@ -406,6 +406,10 @@
                           "none"
                         ],
                         "default": "auto"
+                      },
+                      "vision": {
+                        "type": "boolean",
+                        "markdownDescription": "Whether the model accepts images. `true` always sends attached images, `false` sends only their names. Leave it unset and Sovran sends them, and stops if the server refuses."
                       }
                     }
                   }

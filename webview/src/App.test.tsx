@@ -537,6 +537,72 @@ describe('attach menu', () => {
     expect(screen.getByRole('button', { name: 'Remove notes.md' }).querySelector('.codicon-file')).not.toBeNull();
   });
 
+  it('turns a pasted screenshot into an image attachment, and leaves text pastes alone', async () => {
+    mount(baseState({ context: { editor: null, includeEditor: true, attachments: [] } }));
+    const input = screen.getByRole('combobox', { name: 'Message Sovran' });
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+    const shot = new File([png], 'image.png', { type: 'image/png' });
+    const pasted = fireEvent.paste(input, { clipboardData: { files: [shot], types: ['Files'] } });
+    expect(pasted).toBe(false); // handled: nothing is pasted as text
+    await waitFor(() => expect(sent).toContainEqual({ type: 'attachImage', data: btoa(String.fromCharCode(...png)) }));
+
+    // Copied from a document: text and a picture of it. The text is pasted, as before.
+    sent = [];
+    const mixed = fireEvent.paste(input, { clipboardData: { files: [shot], types: ['text/plain', 'Files'] } });
+    expect(mixed).toBe(true);
+    expect(sent.filter((m) => m.type === 'attachImage')).toEqual([]);
+  });
+
+  it('says so when a pasted image is too large to send', () => {
+    mount(baseState({ context: { editor: null, includeEditor: true, attachments: [] } }));
+    const big = new File([new Uint8Array(1)], 'huge.png', { type: 'image/png' });
+    Object.defineProperty(big, 'size', { value: 9 * 1024 * 1024 });
+    fireEvent.paste(screen.getByRole('combobox', { name: 'Message Sovran' }), { clipboardData: { files: [big], types: ['Files'] } });
+    expect(screen.getByText('The pasted image is larger than 8 MB. Paste a smaller one (a crop, or a JPEG).')).toBeInTheDocument();
+    expect(sent.filter((m) => m.type === 'attachImage')).toEqual([]);
+  });
+
+  it('shows images on the chips of the next message and of sent messages', () => {
+    mount(
+      baseState({
+        context: {
+          editor: null,
+          includeEditor: true,
+          attachments: [
+            { id: 'p', path: 'Pasted image 1', label: 'Pasted image 1', image: { mime: 'image/png', width: 1280, height: 720, pasted: true } },
+            { id: 'w', path: 'docs/ui.jpg', label: 'ui.jpg', image: { mime: 'image/jpeg' } },
+          ],
+        },
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            {
+              role: 'user',
+              id: 'u1',
+              content: 'what is wrong?',
+              createdAt: 0,
+              images: [
+                { id: 'a'.repeat(64), name: 'docs/ui.png', source: 'workspace', mime: 'image/png', bytes: 10, width: 800, height: 600 },
+                { id: 'b'.repeat(64), name: 'Pasted image 1', source: 'pasted', mime: 'image/webp', bytes: 10 },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    const pasted = screen.getByRole('button', { name: 'Remove Pasted image 1' });
+    expect(pasted).toHaveAttribute('title', 'PNG image, 1280×720 · click to remove');
+    expect(pasted.querySelector('.codicon-file-media')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Remove ui.jpg' })).toHaveAttribute('title', 'docs/ui.jpg · JPEG image · click to remove');
+    // A workspace image opens in VS Code; a pasted one has no file to open.
+    const sentImage = screen.getByRole('button', { name: 'ui.png' });
+    expect(sentImage).toHaveAttribute('title', 'PNG image, 800×600');
+    fireEvent.click(sentImage);
+    expect(sent).toContainEqual({ type: 'openFile', path: 'docs/ui.png' });
+    expect(screen.getByTitle('WebP image')).toHaveTextContent('Pasted image 1');
+  });
+
   it('shows the documents a sent message carried', () => {
     mount(
       baseState({

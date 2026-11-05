@@ -63,6 +63,11 @@ export class VscodeWorkspace implements WorkspacePort {
     return new TextDecoder('utf-8').decode(bytes);
   }
 
+  /** The bytes on disk (an open editor's unsaved text does not apply to documents or images). */
+  readBytes(absPath: string): Promise<Uint8Array> {
+    return Promise.resolve(vscode.workspace.fs.readFile(vscode.Uri.file(absPath)));
+  }
+
   async readDirectory(absPath: string): Promise<DirEntry[]> {
     const entries = await vscode.workspace.fs.readDirectory(vscode.Uri.file(absPath));
     return entries.map(([name, t]) => ({ name, type: t & vscode.FileType.Directory ? 'directory' : t & vscode.FileType.File ? 'file' : 'other' }));

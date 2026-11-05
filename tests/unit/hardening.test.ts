@@ -63,3 +63,14 @@ describe('command environment', () => {
   });
 
 });
+
+describe('pasted images from the webview', () => {
+  it('accepts base64 within the image limit only, before anything is decoded', async () => {
+    const { webviewMessageSchema } = await import('../../src/shared/protocol');
+    const ok = (data: string) => webviewMessageSchema.safeParse({ type: 'attachImage', data }).success;
+    expect(ok(Buffer.from('a PNG would go here').toString('base64'))).toBe(true);
+    expect(ok('not base64!')).toBe(false);
+    expect(ok('')).toBe(false);
+    expect(ok('A'.repeat(Math.ceil((8 * 1024 * 1024) / 3) * 4 + 4))).toBe(false);
+  });
+});

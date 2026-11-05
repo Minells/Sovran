@@ -1,4 +1,5 @@
 import { FORMAT_LABELS, type DocumentFormat } from '../../../src/core/documents/types';
+import { dimensions, IMAGE_LABELS, type ImageMime } from '../../../src/core/images/images';
 
 export interface ToolInfo {
   icon: string;
@@ -90,4 +91,11 @@ export function documentInfo(format: string | undefined, detail?: string): { ico
   if (!format || !Object.hasOwn(FORMAT_LABELS, format)) return undefined;
   const label = FORMAT_LABELS[format as DocumentFormat];
   return { icon: DOCUMENT_ICONS[format as DocumentFormat], description: detail ? `${label}, ${detail}` : label };
+}
+
+/** The icon and description of an image attachment ("PNG image, 1280×720"). */
+export function imageDescription(image: { mime: ImageMime; width?: number; height?: number }): { icon: string; description: string } {
+  const label = IMAGE_LABELS[image.mime] ?? 'Image';
+  const size = dimensions(image);
+  return { icon: 'file-media', description: size ? `${label}, ${size}` : label };
 }
