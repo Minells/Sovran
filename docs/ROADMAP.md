@@ -50,7 +50,7 @@ Effort assumes one engineer with an AI pair. **P** is priority (1 = highest).
 
 | ID | Feature | P | Effort | Why |
 |---|---|---|---|---|
-| F8 | MCP client (stdio and Streamable HTTP, user-scope config, per-tool approvals) | 2 | L | De facto standard for connecting tools and data |
+| F8 | MCP client (stdio and Streamable HTTP, user-scope config, per-tool approvals) — ✅ implemented on `feat/mcp-client` (tools; resources, prompts and OAuth are next) | 2 | L | De facto standard for connecting tools and data |
 | F9 | Admin-managed policies (allowed hosts, forced approvals, no auto-approve) | 2 | M | Required to pass enterprise security reviews |
 | F10 | Native adapters: OpenAI Responses API and Anthropic Messages | 3 | M | Covers gateways that are not Chat Completions |
 | F11 | Usage and latency panel (tokens per second per model) | 3 | S | Helps tune self-hosted deployments |

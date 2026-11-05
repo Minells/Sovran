@@ -21,6 +21,7 @@ Please **do not** open a public issue. Use GitHub's private vulnerability report
 | Terminal output, tool results | **Untrusted** |
 | Webview | Sandboxed. Its messages are **validated** as untrusted input |
 | Workspace settings (`.vscode/settings.json`) | **Untrusted** for security-relevant keys |
+| MCP servers the user configured | Trusted to run (the user chose them), but their tool descriptions, annotations and results are **untrusted** |
 
 ## Threats and controls
 
@@ -43,9 +44,13 @@ Please **do not** open a public issue. Use GitHub's private vulnerability report
 | T15 | Untrusted text breaking out of its data wrapper | In the prompted tool protocol and in attached files, closing tags such as `</tool_result>`, `</file>` and `</context>` inside the content are neutralized, and wrapper attributes are escaped |
 | T16 | Malicious documents: parser exploits, ZIP bombs, entity expansion, pathological sizes | Documents are parsed only in a worker thread (`dist/documentWorker.js`) with its own heap limit (768 MB) and a 60 s timeout, started per conversion with no inherited command-line options and terminated when it answers; the parsers never load in the extension host (an ESLint rule enforces it). pdf.js runs with `isEvalSupported: false` (the CVE-2024-4367 fix), no font loading and no rendering. The ZIP reader checks each entry's declared size (64 MB) and the total (160 MB) before inflating, and never inflates past the declared size. The XML reader skips DTDs and decodes only the predefined entities, so documents cannot define or fetch entities. Repeated spreadsheet rows and columns are expanded only up to a bound. Files are classified by signature, not extension, and protected files ask before they are read |
 | T17 | Images: oversized or disguised data, data kept longer than expected | Only PNG, JPEG, WebP and GIF are sent, recognized by signature (never by name or by the MIME type a paste claims), up to 8 MB each and 8 per message. A paste is bounded and checked as base64 by the message schema before it is decoded. Images go only to the configured endpoint, as data URLs. They are stored per chat in workspace storage (in memory when `sovran.sessions.persist` is off), never in session files or webview messages, and deleted with the chat |
+| T18 | MCP servers: a repository starting a process or redirecting a token, tool calls nobody approved, tokens leaking, injected instructions in tool descriptions or results | `sovran.mcp.servers` is `application`-scoped and read from the user value only, so a workspace can never add, change or start a server; servers start only in trusted workspaces. MCP tools exist only in Act mode and **ask before every call in every approval mode**, Auto included, until the user allows that specific tool (Off / Ask / Allow per tool; *Always allow* names the tool from the pending request, never from the webview). The approval card shows the server, the tool and the exact arguments, with invisible characters revealed; the server's annotations are shown as its claims. Tokens are kept in Secret Storage (the webview only receives `hasToken`), passed to the server as a header or environment variable, masked in logs, errors, server output and tool results. Remote servers: redirects are followed only within the same origin. Local servers receive a minimal environment (the SDK's set plus proxy and certificate variables) and what the user lists, not the whole environment of the editor. Descriptions are capped and labelled with their server, schemas over 16 000 characters are replaced, results are capped and truncated, and tool output is treated as data like any other tool result. Stopping a run cancels the call; closing the window stops local servers |
 
 ## Known limitations
 
+- An MCP server runs with your privileges and can do whatever its code does: an allowed tool, or a call you approve,
+  acts outside Sovran's guardrails and checkpoints. Install servers only from sources you trust, and keep tools that
+  change data on *Ask*.
 - SOVRAN does **not** sandbox commands. An approved command, or a command that runs in Auto mode, runs with your user's
   privileges and inherits the editor's environment variables.
 - Auto-mode guardrails are heuristics over the command text, not a shell interpreter. They catch the common dangerous

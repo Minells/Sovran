@@ -158,6 +158,32 @@ Manual checks for this branch:
 - [ ] Ollama: the form shows the 32 768 default, not the model card's window.
 - [ ] Clearing a limit in the form and saving removes it from settings and from config.yaml.
 
+## MCP client (branch `feat/mcp-client`)
+
+| Feature | Status | Evidence |
+|---|---|---|
+| MCP servers: stdio and Streamable HTTP, settings in user scope, tokens in Secret Storage | ✅ Implemented | 33 core tests (`mcp.test.ts`: settings, variables, launch, tool names, results, policy, tool sources, `McpHub` against real SDK servers in memory, the agent loop, README snippets); 4 integration tests against a real child process and a real HTTP server (token, environment, working folder, stderr, missing command, timeout, cancellation, crash, bearer header, cross-origin redirect refused, 401) |
+| Tools in the agent loop: Act only, ask in every approval mode until allowed | ✅ Implemented | Policy matrix, Plan mode, untrusted workspace and *auto* label unit-tested; 10 host tests through the real controller (approval card, *Always allow*, tools turned off, tokens never in settings or webview messages, a token echoed by a server masked, hand-written entries kept, Restricted Mode) |
+| Settings → MCP (cards, tools Off / Ask / Allow, form, presets, README import) and the MCP approval card | ✅ Implemented | 8 component tests; visual QA in dark and light at 280, 360 and 380 px through the dev harness (`?scenario=settings&area=mcp`, `&mcp=empty`, `&mcp=restricted`, `?scenario=mcp`) |
+| `sovran.mcp.servers` is application-scoped | ✅ Implemented · ⚠️ smoke test runs in CI only | Asserted in `tests/extension/suite.cjs` |
+
+Not verified here:
+- Inside a real VS Code (the network policy blocks the VS Code download): the smoke tests run in CI.
+- On Node 20.18 (Electron 32, VS Code 1.95): the bundle was scanned for newer APIs and none is used unguarded, and the
+  SDK requires Node 20; the tests ran on Node 22, as CI does.
+- Real third-party servers (GitHub, Filesystem, Git, Fetch): covered by the manual checks below.
+
+Manual checks for this branch (first F5 session):
+- [ ] Add **Filesystem** from the presets: it shows *Starting…*, then *Connected* with its tools; ask the agent to list a folder through it and approve the call.
+- [ ] **Always allow** on a call: the next call of that tool runs with the *auto* badge; Settings shows it as *Allow*.
+- [ ] Turn a tool **Off**: the model no longer sees it (check the request in the logs) and the context estimate drops.
+- [ ] Paste the GitHub server's README snippet with a token: the token is not in settings.json, *Token stored* shows, and the server connects.
+- [ ] A remote server with a wrong token shows *The server answered 401. Check the token…*; **Replace token** fixes it.
+- [ ] In Auto mode an MCP call still asks, and the bar explains why.
+- [ ] Restricted Mode: no server process starts (check with the OS process list); trusting the workspace starts them.
+- [ ] Closing the window stops local server processes.
+- [ ] Windows: `npx`-based servers start (`.cmd` resolution).
+
 ## Manual QA checklist (first F5 session)
 
 - [ ] Onboarding: add Ollama from the preset, test the connection, add a discovered model, chat.
@@ -171,7 +197,9 @@ Manual checks for this branch:
 
 ## Known gaps (tracked in ROADMAP)
 
-- MCP tools.
+- MCP: resources and prompts, OAuth sign-in for remote servers, the legacy SSE transport, servers in `config.yaml`,
+  and the server's `instructions` in the system prompt. The SDK adds about 380 KB to the minified host bundle
+  (784 KB → 1.17 MB); it could be loaded only when a server is configured.
 - No conversation export. When it is added, it must reuse `redact()` (SECURITY T1).
 - The webview JS is about 535 KB (185 KB gzip). highlight.js languages could be lazy-loaded.
 - Auto-mode guardrails are heuristics, not a sandbox (see SECURITY.md). Sandboxed command execution is the next step.
