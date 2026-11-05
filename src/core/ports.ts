@@ -4,6 +4,8 @@
  * a future CLI would implement them with node:fs and child_process.
  */
 
+import type { DocumentResult } from './documents/types';
+
 export interface WorkspaceRoot {
   /** Display name (folder name in multi-root workspaces). */
   name: string;
@@ -135,6 +137,14 @@ export interface ApprovalResponse {
 export interface ApprovalPort {
   /** Resolves when the user decides. Must reject (or resolve unapproved) when `signal` aborts. */
   request(request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalResponse>;
+}
+
+export interface DocumentConverterPort {
+  /**
+   * Converts a document (PDF, Office Open XML, OpenDocument, ZIP) to Markdown. Rejects with a `DocumentError`.
+   * Implementations must isolate the parsers from the caller (the VS Code host runs them in a worker thread).
+   */
+  convert(data: Uint8Array, options: { maxChars: number; signal?: AbortSignal }): Promise<DocumentResult>;
 }
 
 export interface Logger {
