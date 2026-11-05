@@ -111,6 +111,11 @@ type ProviderEvent =
 globalState). A `tools_unsupported` error while in native mode downgrades the model to `prompted`,
 emits a notice and retries the same iteration once.
 
+**Vision.** `vision` is `true`, `false` or unset. Unset, images are sent until a server refuses them: a refusal
+(`vision_unsupported`, read from a 4xx/5xx that mentions images when the request carried some, and not a size or count
+limit) stores `vision: false` in the `CapabilityStore`, emits a notice and retries the iteration with each image's
+label in its place. The refusal applies to the rest of the run even if the store does not keep it.
+
 ## 5. Agent loop
 
 ```mermaid
@@ -208,6 +213,10 @@ Act mode is unavailable when the workspace is untrusted (Restricted Mode).
 - **Assembly order:** system prompt (mode rules, tool protocol, environment, `AGENTS.md` project
   instructions in trusted workspaces) → history → the latest user message with attached context blocks
   (`<context><file path=… lines=…>…</file></context>`).
+- **Images.** A user message without images stays a plain string. With images, its content becomes parts: for each
+  image a text label (`<image name=… type=… size=…/>`) and an `image_url` part with a data URL, then the text. When
+  the model does not take images, or an image is gone from the store, only the label is sent, with a `note` saying
+  why. Image parts count in the budget by an estimate from their size (`estimateImageTokens`, at most 1 600).
 - **Over budget:**
   1. Elide old tool results outside the last two turns.
   2. Drop the oldest whole turns, never splitting an assistant tool-call message from its tool results.
@@ -241,6 +250,20 @@ flowchart LR
 - **For the model.** The attachment carries `format`, `detail` and a `note` saying the text was extracted and that
   images, charts and layout are not included. A file that only looked like a document (it is not a valid PDF or ZIP)
   and has no binary content is attached as text, as before.
+- **`read_file`.** The tool converts documents through the same `DocumentReader` (a larger budget, 400 000
+  characters, which the agent pages through by line), decodes UTF-16 text and explains images. It needs
+  `WorkspacePort.readBytes` and `ToolContext.documents`; without them it behaves as before. The `CheckpointRecorder`
+  that wraps the workspace during a run forwards `readBytes`.
+
+### Image attachments
+
+PNG, JPEG, WebP and GIF files (recognized by signature, in binary files only) and images pasted into the chat input
+(`attachImage`, base64 bounded by the zod schema and checked again by the host) become `AttachmentView.image` chips
+with their size. When the message is sent, `collectImages` reads each file again, stores the bytes in the
+`ImageStorePort` under the chat (`FsImageStore`: `images/<session>/<sha256>.<ext>` in workspace storage;
+`MemoryImageStore` when chats are not persisted) and records `UserMessage.images` (name, type, size, never bytes).
+Before a run, the controller loads the chat's images as data URLs (`RunOptions.images`), unless the model is known
+not to take them. The webview never receives image bytes; images are deleted with the chat.
 
 ## 9. Sessions and persistence
 

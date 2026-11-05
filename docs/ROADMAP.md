@@ -62,7 +62,7 @@ Effort assumes one engineer with an AI pair. **P** is priority (1 = highest).
 | F12 | Open VSX publishing | 2 | S | Cursor, Windsurf and VSCodium users cannot use the Microsoft Marketplace |
 | F13 | Copilot Chat bridge (`LanguageModelChatProvider`) | 3 | M | Use SOVRAN providers in Copilot (optional) |
 | F14 | CLI on the shared core | 3 | L | Terminal and CI use. Proves the portable-core architecture |
-| F15 | Image input for vision models | 3 | M | Screenshots of UI bugs and diagrams |
+| F15 | Image input for vision models — ✅ implemented on `feat/document-attachments` | 3 | M | Screenshots of UI bugs and diagrams |
 
 ### Deliberately deferred
 

@@ -104,12 +104,17 @@ Manual checks for this branch (first F5 session):
 | PDF, Word, Excel, PowerPoint, OpenDocument and ZIP attachments converted to Markdown | ✅ Implemented | 33 core tests, 9 host tests through the real controller on disk, 6 integration tests on the bundled worker. The shipped `dist/documentWorker.js` was run under Electron 32.2.1 (Node 20.18, as in VS Code 1.95) both as Node and in a utility process |
 | Recognition by signature, UTF-16 text, specific refusals | ✅ Implemented | Unit tests per family; host tests for the messages |
 | Format and detail on chips | ✅ Implemented | Component tests for composer and transcript chips |
+| Images for vision models (paste, attach, `vision` option, learned refusals) | ✅ Implemented | 20 core tests (`images.test.ts`), 4 host tests, 2 end-to-end tests against a real HTTP server (the image part it receives; the retry with names after a refusal), 3 component tests |
+| `read_file` on documents, UTF-16 and images | ✅ Implemented | Core tests through the real converter, also through the checkpoint recorder; unchanged behaviour without a document reader |
 
 Manual checks for this branch (first F5 session):
 - [ ] Attach a real PDF of a few hundred pages: the status bar shows *Reading…* briefly, the chip says *pages 1–N of M*, and the answer cites page numbers.
 - [ ] Attach an Excel workbook with dates and several sheets: dates appear as dates, hidden sheets are labelled.
 - [ ] Attach a scanned PDF: the notice explains it has no text. Attach a `.png`: the image message appears.
 - [ ] Attach a document from outside the workspace with *Upload from computer*, then send: the model receives its text.
+- [ ] Paste a screenshot (Ctrl+V) and ask a vision model (for example Qwen2.5-VL on vLLM or Ollama) what it shows.
+- [ ] With a text-only model on vLLM, the refusal notice appears once and later messages send only the names.
+- [ ] Ask the agent to "read docs/spec.pdf": `read_file` returns Markdown and pages through it.
 
 ## Settings tabs, config.yaml and chat titles (branch `feat/settings-yaml-autotitle`)
 
