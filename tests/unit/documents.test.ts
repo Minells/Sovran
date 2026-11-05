@@ -3,7 +3,7 @@
  * conversion of each format to Markdown. Fixtures are built in code (tests/fixtures/documents.ts).
  */
 import { strToU8, zipSync } from 'fflate';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { convertDocument } from '../../src/core/documents/convert';
 import {
   decodeText,
@@ -269,6 +269,10 @@ describe('Markdown helpers', () => {
 });
 
 describe('convertDocument: PDF', () => {
+  // pdf.js (about 1.5 MB) loads on the first conversion. Loading it here, with time to spare on a busy CI machine, keeps
+  // that out of the first test, so each test measures only its own conversion.
+  beforeAll(() => convertDocument(makePdf([['warm-up']]), { maxChars: 1000 }), 60_000);
+
   it('reads every page, and names pages without text', async () => {
     const r = await convertDocument(makePdf([['Relazione tecnica', 'Prezzo: 12,50 (àèìòù)'], [], ['Fine']]), {
       maxChars: 50_000,
