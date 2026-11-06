@@ -24,6 +24,15 @@ const COMMANDS = [
   'sovran.rejectProposal',
 ];
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+// Real VS Code settings, Secret Storage and file notifications cross processes. Shared macOS runners can take
+// longer than 6 s even though the sync succeeds. Poll the same state with a bounded CI budget; do not add fixed waits.
+const STATE_TIMEOUT_MS = process.env.CI ? 30_000 : 10_000;
+async function until(check, what, ms = STATE_TIMEOUT_MS) {
+  for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(100);
+  assert.ok(check(), typeof what === 'function' ? what() : what);
+}
+
 async function test(name, fn) {
   try {
     await fn();
@@ -80,12 +89,6 @@ exports.run = async function run() {
     const diagnostics = () => vscode.languages.getDiagnostics(uri);
     const hinted = () => diagnostics().some((d) => /Did you mean "baseUrl"/.test(d.message) && d.range.start.line === 2);
     const cleared = () => diagnostics().length === 0;
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const until = async (check, what, ms = 5000) => {
-      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(100);
-      assert.ok(check(), what);
-    };
-
     await vscode.commands.executeCommand('sovran.openConfigFile');
     assert.ok(fs.readFileSync(uri.fsPath, 'utf8').includes('providers:'), 'the template was not created');
     const doc = await vscode.workspace.openTextDocument(uri);
@@ -125,22 +128,26 @@ exports.run = async function run() {
     const cfg = () => vscode.workspace.getConfiguration('sovran');
     const ids = () => (cfg().get('providers') ?? []).map((p) => p.id).sort().join(',');
     const text = () => fs.readFileSync(file, 'utf8');
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const until = async (check, what, ms = 6000) => {
-      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(100);
-      assert.ok(check(), what);
-    };
+    // Only this disposable fixture is included in failures; never dump a developer's real settings or config file.
+    const syncState = () => JSON.stringify({
+      providers: cfg().get('providers'),
+      enabled: cfg().get('configFile.enabled'),
+      file: text(),
+      documents: vscode.workspace.textDocuments
+        .filter((doc) => doc.uri.fsPath === file)
+        .map((doc) => ({ dirty: doc.isDirty, version: doc.version })),
+    });
     const local = (id) => ({ id, name: id, baseUrl: 'http://127.0.0.1:9/v1', auth: { type: 'none' }, models: [{ id: 'm' }] });
 
     // The file wins when it is saved: Settings follow. Wait for something only this content has (the previous test
     // already left a provider "lab" in Settings, so waiting for the id alone would not wait at all).
     const name = () => (cfg().get('providers') ?? []).find((p) => p.id === 'lab')?.name;
     fs.writeFileSync(file, 'providers:\n  # my note\n  - id: lab\n    name: Lab One\n    baseUrl: http://127.0.0.1:9/v1\n    auth: none\n    models: [m]\n');
-    await until(() => ids() === 'lab' && name() === 'Lab One', `Settings did not follow the file (Settings: "${ids()}", name "${name()}")`);
+    await until(() => ids() === 'lab' && name() === 'Lab One', () => `Settings did not follow the file: ${syncState()}`);
 
     // Settings change (the panel writes sovran.providers): the file follows and keeps its comments.
     await cfg().update('providers', [...cfg().get('providers'), local('extra')], G);
-    await until(() => /id: extra/.test(text()), 'the file did not follow Settings');
+    await until(() => /id: extra/.test(text()), () => `the file did not follow Settings: ${syncState()}`);
     assert.ok(text().includes('# my note'), 'the comment in the file was lost');
 
     // A repeated event for content already in sync (macOS can deliver late ones, Reload re-reads) changes nothing:
@@ -158,8 +165,8 @@ exports.run = async function run() {
 
     // Use it again: both sides are joined (Settings win where both define a provider).
     await cfg().update('configFile.enabled', undefined, G);
-    await until(() => ids() === 'extra,ghost,lab', `the sides were not joined (Settings: "${ids()}")`);
-    await until(() => /id: extra/.test(text()) && /id: ghost/.test(text()), 'the file was not joined with Settings');
+    await until(() => ids() === 'extra,ghost,lab', () => `the sides were not joined: ${syncState()}`);
+    await until(() => /id: extra/.test(text()) && /id: ghost/.test(text()), () => `the file was not joined with Settings: ${syncState()}`);
 
     await cfg().update('providers', undefined, G);
   });
@@ -173,11 +180,6 @@ exports.run = async function run() {
   await test('chats open in editor tabs, side by side, and close cleanly', async () => {
     const chatTabs = () =>
       vscode.window.tabGroups.all.flatMap((g) => g.tabs).filter((t) => t.input instanceof vscode.TabInputWebview && t.input.viewType.endsWith('sovran.chatPanel'));
-    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    const until = async (check, what, ms = 5000) => {
-      for (const end = Date.now() + ms; !check() && Date.now() < end; ) await sleep(100);
-      assert.ok(check(), what);
-    };
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
     await vscode.commands.executeCommand('sovran.newChatInEditor');
     await until(() => chatTabs().length === 1, 'New Chat in Editor did not open a tab');
