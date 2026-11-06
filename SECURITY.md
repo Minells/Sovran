@@ -6,8 +6,13 @@ feature, not a disclaimer. This document describes the threat model, the control
 
 ## Reporting a vulnerability
 
-Please **do not** open a public issue. Use GitHub's private vulnerability reporting
-(*Security → Report a vulnerability*) on this repository. We aim to acknowledge reports within 5 business days.
+Please **do not** post exploit details, credentials, or sensitive logs in a public issue. If GitHub's private
+vulnerability reporting is enabled, use **Security → Report a vulnerability** on this repository:
+[private report form](https://github.com/Minells/sovran/security/advisories/new).
+
+If that option is not available, a confidential maintainer contact has not been published. You can open a minimal
+issue asking the maintainer to enable private reporting, without vulnerability details. Keep those details private
+until a confidential route is available. Response times depend on maintainer availability.
 
 ## Trust model
 

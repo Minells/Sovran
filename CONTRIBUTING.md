@@ -11,10 +11,19 @@ opening a pull request.
 
 ## Development workflow
 
-1. Run `npm install`, then `npm run build`.
+1. Use Node.js 22 (the current CI version), then run `npm ci --ignore-scripts` and `npm run build`.
 2. Make your change with tests. New behavior in `src/core` needs unit tests; new UI states need component tests.
 3. Run `npm run check`. It must pass, as CI enforces it on Linux, Windows and macOS.
 4. If you added a dependency, run `node scripts/third-party-notices.mjs` and explain why the dependency is needed.
+5. For host or command changes, run `npm run test:extension` in a real VS Code instance. Run `npm run package` to
+   verify the distributable. See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for the complete testing guide.
+
+For bug reports, include reproduction steps, the operating system, VS Code version, model/server type, and sanitized
+logs when relevant. Never include keys, proprietary source, private endpoint URLs, or confidential conversations.
+The issue templates help collect these details. Compatibility reports from real model servers are welcome.
+
+Follow the [code of conduct](CODE_OF_CONDUCT.md). The official website lives in the independent
+[Sovran-Website repository](https://github.com/Minells/Sovran-Website); do not add website dependencies to this project.
 
 ## Architecture constraints
 

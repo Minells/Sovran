@@ -22,6 +22,11 @@
 
 Press **F5** in VS Code ("Run SOVRAN") to build and launch an Extension Development Host.
 
+The real VS Code smoke tests poll observable state rather than sleeping through settings and file updates. Their
+state timeout is 10 seconds locally and 30 seconds in CI, where macOS runner load and cross-process Settings/Secret
+Storage calls can delay notifications. A synchronization timeout reports the disposable fixture's current Settings,
+file content, and open-document state; it never reads the developer's real `~/.sovran/config.yaml`.
+
 ## UI development harness
 
 `npm run dev:webview` serves the React app with a simulated host and VS Code theme variables. The harness lives in
