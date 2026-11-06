@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible problem in SOVRAN
+body:
+  - type: markdown
+    attributes:
+      value: "For vulnerabilities, follow SECURITY.md. Remove keys, private URLs, confidential code, and sensitive logs."
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: SOVRAN version, VS Code version, OS, provider/server type and version, model ID, Plan/Act and approval mode.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal, non-confidential example.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or screenshots
+      description: Optional. Check for secrets and private code before sharing.

@@ -1,0 +1,23 @@
+name: Feature request
+description: Describe a concrete problem and a proposed improvement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe your workflow and why the current behavior is insufficient.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior and alternatives
+    validations:
+      required: true
+  - type: checkboxes
+    id: roadmap
+    attributes:
+      label: Existing plans
+      options:
+        - label: I checked existing issues and docs/ROADMAP.md.
+          required: true
