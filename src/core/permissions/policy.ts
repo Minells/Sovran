@@ -19,6 +19,9 @@ export const APPROVAL_MODES: readonly ApprovalMode[] = ['ask', 'edits', 'auto'];
 
 export interface PolicySettings {
   approvalMode: ApprovalMode;
+  /** Native tool overrides, read only from user settings. MCP keeps its own Off / Ask / Allow policy. */
+  disabledTools?: readonly string[];
+  forceAskTools?: readonly string[];
   allowedCommands: readonly string[];
   protectedPaths: readonly string[];
 }
@@ -28,6 +31,7 @@ export interface SessionGrants {
 }
 
 export interface PolicyInput {
+  toolName?: string;
   risk: ToolRisk;
   mode: AgentMode;
   workspaceTrusted: boolean;
@@ -67,6 +71,13 @@ export function decide(input: PolicyInput): PolicyDecision {
   }
   if (risk !== 'read' && !input.workspaceTrusted) {
     return { action: 'deny', reason: 'This workspace is in Restricted Mode. Trust the workspace to allow changes.' };
+  }
+
+  if (!input.mcp && input.toolName && settings.disabledTools?.includes(input.toolName)) {
+    return { action: 'deny', reason: `${input.toolName} is disabled in Sovran's tool settings.` };
+  }
+  if (!input.mcp && input.toolName && settings.forceAskTools?.includes(input.toolName)) {
+    return { action: 'ask', reason: `You chose to always review ${input.toolName}.` };
   }
 
   switch (risk) {

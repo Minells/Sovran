@@ -8,10 +8,15 @@ export interface ToolSource {
   tools(): readonly AnyTool[];
 }
 
+export interface ToolSelection {
+  disabledTools?: readonly string[];
+  workspaceTrusted?: boolean;
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, AnyTool>();
   private readonly sources: ToolSource[] = [];
-  private readonly schemaCache = new Map<string, ToolSchema>();
+  private readonly schemaCache = new WeakMap<AnyTool, ToolSchema>();
 
   register(tool: AnyTool): this {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(tool.name)) throw new Error(`Invalid tool name: ${tool.name}`);
@@ -30,24 +35,53 @@ export class ToolRegistry {
   }
 
   /** Tools offered to the model in a mode. Plan mode only ever sees read-only tools. */
-  list(mode: AgentMode): AnyTool[] {
-    return [...this.tools.values(), ...this.fromSources()].filter((t) => mode === 'act' || t.risk === 'read');
+  list(mode: AgentMode, selection: ToolSelection = {}): AnyTool[] {
+    return [...this.tools.values(), ...this.fromSources()].filter(
+      (t) => !this.unavailable(t, mode, selection),
+    );
   }
 
-  /** A source can never shadow a built-in tool. */
+  /** Visibility and dispatch share the same checks. A replaced definition needs a fresh model request. */
+  unavailable(tool: AnyTool, mode: AgentMode, selection: ToolSelection = {}): string | undefined {
+    if (this.get(tool.name) !== tool)
+      return `${tool.name} is no longer available. Request its current definition before retrying.`;
+    if (mode === 'plan' && tool.risk !== 'read')
+      return `${tool.name} is not available in Plan mode (read-only).`;
+    if ((tool.risk !== 'read' || tool.requiresTrust) && selection.workspaceTrusted === false) {
+      return `${tool.name} is not available in Restricted Mode. Trust the workspace first.`;
+    }
+    if (tool.source?.kind !== 'mcp' && selection.disabledTools?.includes(tool.name)) {
+      return `${tool.name} is disabled in Sovran's tool settings.`;
+    }
+    return tool.unavailable?.();
+  }
+
+  /** Native names win; ambiguous dynamic names fail closed instead of choosing an arbitrary source. */
   private fromSources(): AnyTool[] {
-    return this.sources.flatMap((s) => s.tools()).filter((t) => !this.tools.has(t.name));
+    const candidates = this.sources.flatMap((s) => s.tools());
+    const counts = new Map<string, number>();
+    for (const t of candidates) counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
+    return candidates.filter(
+      (t) => /^[a-zA-Z0-9_-]{1,64}$/.test(t.name) && !this.tools.has(t.name) && counts.get(t.name) === 1,
+    );
   }
 
   schema(tool: AnyTool): ToolSchema {
     // Given as JSON Schema (MCP tools): used as it is, and not cached, because a server may change it.
-    if (tool.parameters) return { type: 'function', function: { name: tool.name, description: tool.description, parameters: tool.parameters } };
-    let cached = this.schemaCache.get(tool.name);
+    if (tool.parameters)
+      return {
+        type: 'function',
+        function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+      };
+    let cached = this.schemaCache.get(tool);
     if (!cached) {
       const json = z.toJSONSchema(tool.schema, { io: 'input', unrepresentable: 'any' }) as Record<string, unknown>;
       delete json.$schema;
-      cached = { type: 'function', function: { name: tool.name, description: tool.description, parameters: json } };
-      this.schemaCache.set(tool.name, cached);
+      cached = {
+        type: 'function',
+        function: { name: tool.name, description: tool.description, parameters: json },
+      };
+      this.schemaCache.set(tool, cached);
     }
     return cached;
   }

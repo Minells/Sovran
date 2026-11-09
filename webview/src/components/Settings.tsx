@@ -519,6 +519,30 @@ export function SettingsView() {
 
       {area === 'agent' ? (
         <AreaPanel area="agent">
+          <ListEditor
+            label="Disabled native tools"
+            help="Tool names excluded from requests and blocked during execution, including pending approvals."
+            items={s.disabledTools}
+            placeholder="execute_terminal"
+            validate={(v) =>
+              /^[a-zA-Z0-9_-]{1,64}$/.test(v)
+                ? ''
+                : 'Use a tool name with letters, digits, underscores or hyphens.'
+            }
+            onChange={(value) => update({ key: 'tools.disabled', value })}
+          />
+          <ListEditor
+            label="Always review native tools"
+            help="These native tools ask before running, including reads and tools in Auto mode. MCP permissions are set in MCP."
+            items={s.forceAskTools}
+            placeholder="read_file"
+            validate={(v) =>
+              /^[a-zA-Z0-9_-]{1,64}$/.test(v)
+                ? ''
+                : 'Use a tool name with letters, digits, underscores or hyphens.'
+            }
+            onChange={(value) => update({ key: 'tools.forceAsk', value })}
+          />
           <NumberSetting
             label="Maximum steps per request"
             help="Model round-trips before Sovran stops and asks you to continue."

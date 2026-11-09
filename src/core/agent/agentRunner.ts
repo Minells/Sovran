@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { planCompaction, renderForSummary, summarize } from '../context/compaction';
 import type { DocumentReader } from '../documents/reader';
 import { buildContext, estimateTokens } from '../context/contextManager';
+import { commandPathRisks } from '../permissions/commands';
 import { decide, type AgentMode, type PolicySettings, type SessionGrants } from '../permissions/policy';
 import type { ApprovalPort, Logger, ProcessPort, WorkspacePort } from '../ports';
 import { capabilityKey, resolveToolMode, resolveVision, type CapabilityStore } from '../providers/capabilities';
@@ -13,7 +14,7 @@ import { redact } from '../security/redact';
 import { messagesForModel, type AssistantMessage, type ErrorInfo, type Session, type ToolCall, type ToolMessage, type ToolStatus } from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
 import type { ToolRegistry } from '../tools/registry';
-import { ToolError, type ToolContext, type ToolSettings } from '../tools/types';
+import { ToolError, type AnyTool, type ToolContext, type ToolSettings } from '../tools/types';
 import type { AgentEvent, RunOutcome } from './events';
 import { parseJsonLenient, parseToolCallBlock } from './promptedTools';
 import { buildSystemPrompt } from './systemPrompt';
@@ -127,6 +128,7 @@ export class AgentRunner {
       };
 
       let turn: TurnResult;
+      let offered: ReadonlyMap<string, AnyTool>;
       try {
         let built = this.buildRequest(o, toolMode, vision);
         if (built.droppedTurns > 0 && o.autoCompact && !compactedThisRun) {
@@ -143,6 +145,7 @@ export class AgentRunner {
         }
         o.emit({ type: 'context', estimatedTokens: built.estimatedTokens, budgetTokens: built.budgetTokens, contextWindow: built.contextWindow });
         const request = built.request;
+        offered = built.offered;
         o.session.messages.push(assistant);
         o.emit({ type: 'message_started', message: { ...assistant } });
         turn = await this.streamTurn(assistant, request, toolMode, o);
@@ -204,7 +207,7 @@ export class AgentRunner {
           this.cancelRemaining(o, turn.calls.slice(i));
           return { reason: 'cancelled' };
         }
-        const result = await this.executeCall(call, o);
+        const result = await this.executeCall(call, o, offered);
         o.session.messages.push(result);
         o.emit({ type: 'message_committed', message: { ...result } });
         if (result.status === 'cancelled') {
@@ -236,7 +239,13 @@ export class AgentRunner {
   }
 
   private buildRequest(o: RunOptions, toolMode: ResolvedToolMode, vision = false) {
-    const tools = toolMode === 'none' ? [] : this.deps.registry.list(o.mode);
+    const tools =
+      toolMode === 'none'
+        ? []
+        : this.deps.registry.list(o.mode, {
+            ...(o.policy?.() ?? o.settings.policy),
+            workspaceTrusted: this.deps.workspace.isTrusted(),
+          });
     const schemas = this.deps.registry.schemas(tools);
     const env = this.deps.workspace.environment();
     const systemPrompt = buildSystemPrompt({
@@ -265,6 +274,7 @@ export class AgentRunner {
       vision,
     });
     return {
+      offered: new Map(tools.map((tool) => [tool.name, tool])),
       request: {
         model: o.model.id,
         messages: ctx.messages,
@@ -395,7 +405,11 @@ export class AgentRunner {
     return { text: text.trim(), reasoning: reasoning.trim(), calls };
   }
 
-  private async executeCall(call: ToolCall, o: RunOptions): Promise<ToolMessage> {
+  private async executeCall(
+    call: ToolCall,
+    o: RunOptions,
+    offered: ReadonlyMap<string, AnyTool>,
+  ): Promise<ToolMessage> {
     const started = this.now();
     const result = (status: ToolStatus, content: string, extra: Partial<ToolMessage> = {}): ToolMessage => ({
       role: 'tool',
@@ -416,12 +430,27 @@ export class AgentRunner {
     }
     const tool = this.deps.registry.get(call.name);
     if (!tool) {
-      const names = this.deps.registry.list(o.mode).map((t) => t.name).join(', ');
+      const names = [...offered.keys()].join(', ');
       return result('error', `Unknown tool "${call.name}". Available tools: ${names}.`);
     }
     if (o.mode === 'plan' && tool.risk !== 'read') {
       return result('denied', `${tool.name} is not available in Plan mode (read-only). Describe the change in your plan instead.`);
     }
+
+    if (offered.get(call.name) !== tool) {
+      return result(
+        'denied',
+        `${call.name} was not offered in this model request, or its definition changed. Request the current tools before retrying.`,
+      );
+    }
+    const unavailable = () =>
+      this.deps.registry.unavailable(tool, o.mode, {
+        ...(o.policy?.() ?? o.settings.policy),
+        workspaceTrusted: this.deps.workspace.isTrusted(),
+      });
+    const unavailableReason = unavailable();
+    if (unavailableReason) return result('denied', unavailableReason);
+    if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.');
 
     const parsedJson = parseJsonLenient(call.arguments);
     if (!parsedJson.ok) return result('error', `Arguments for ${tool.name} are not valid JSON: ${parsedJson.error}`);
@@ -437,7 +466,7 @@ export class AgentRunner {
       workspace: this.deps.workspace,
       process: this.deps.process,
       signal: o.signal,
-      settings: o.settings.tools,
+      settings: { ...o.settings.tools, protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths },
       onOutput: (chunk) => o.emit({ type: 'tool_output', callId: call.id, chunk }),
       ...(this.deps.documents ? { documents: this.deps.documents } : {}),
     };
@@ -449,21 +478,34 @@ export class AgentRunner {
       return result('error', describeToolFailure(e), { summary: label });
     }
 
-    const policy = o.policy?.() ?? o.settings.policy;
-    const decision = decide({
-      risk: tool.risk,
-      mode: o.mode,
-      workspaceTrusted: this.deps.workspace.isTrusted(),
-      paths: prepared.paths,
-      command: prepared.command,
-      risks: prepared.risks,
-      mcp: prepared.mcp,
-      settings: policy,
-      grants: o.grants,
-    });
+    if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.', { summary: label });
+    const preparedUnavailable = unavailable();
+    if (preparedUnavailable) return result('denied', preparedUnavailable, { summary: label });
+
+    const evaluate = () => {
+      const policy = o.policy?.() ?? o.settings.policy;
+      const mcp = tool.mcpPolicy?.() ?? prepared.mcp;
+      const commandRisks = !mcp && prepared.command ? commandPathRisks(prepared.command, {
+        protectedPaths: policy.protectedPaths,
+        roots: this.deps.workspace.roots().map((r) => r.path),
+      }) : [];
+      return decide({
+        toolName: tool.name,
+        risk: tool.risk,
+        mode: o.mode,
+        workspaceTrusted: this.deps.workspace.isTrusted(),
+        paths: prepared.paths,
+        command: prepared.command,
+        risks: [...(prepared.risks ?? []), ...commandRisks],
+        mcp,
+        settings: policy,
+        grants: o.grants,
+      });
+    };
+    const decision = evaluate();
     if (decision.action === 'deny') return result('denied', decision.reason, { summary: label });
     // Changes made without a human decision are labelled, so the transcript shows what ran unattended.
-    const autoApproved = decision.action === 'allow' && tool.risk !== 'read' ? decision.reason : undefined;
+    let approvedReason: string | undefined;
 
     if (decision.action === 'ask') {
       o.emit({ type: 'tool_phase', callId: call.id, toolName: tool.name, label, phase: 'awaiting_approval' });
@@ -482,11 +524,29 @@ export class AgentRunner {
         const feedback = response.feedback?.trim() ? ` User feedback: ${response.feedback.trim()}` : '';
         return result('denied', `The user rejected this action.${feedback}`, { summary: label });
       }
+      approvedReason = decision.reason;
       if (response.grant === 'session-edits') o.grants.edits = true;
     }
 
     o.emit({ type: 'tool_phase', callId: call.id, toolName: tool.name, label, phase: 'running' });
-    const audit = autoApproved ? { autoApproved } : {};
+    // No await between this final check and dispatch. UI event listeners may also change policy or cancel.
+    if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.', { summary: label });
+    const finalUnavailable = unavailable();
+    if (finalUnavailable) return result('denied', finalUnavailable, { summary: label });
+    const finalDecision = evaluate();
+    if (finalDecision.action === 'deny') return result('denied', finalDecision.reason, { summary: label });
+    if (finalDecision.action === 'ask' && approvedReason !== finalDecision.reason) {
+      return result(
+        'denied',
+        'Permissions changed before execution. Request this action again for approval.',
+        { summary: label },
+      );
+    }
+    ctx.settings = { ...ctx.settings, protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths };
+    const audit =
+      !approvedReason && finalDecision.action === 'allow' && tool.risk !== 'read'
+        ? { autoApproved: finalDecision.reason }
+        : {};
     try {
       const r = await tool.execute(args, ctx, prepared);
       if (o.signal.aborted && tool.risk !== 'write') {

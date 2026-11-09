@@ -51,6 +51,15 @@ export interface ToolDefinition<A = unknown> {
    */
   parameters?: Record<string, unknown>;
   risk: ToolRisk;
+  /** Provenance and deterministic context grouping; absent metadata means a native tool. */
+  source?: { kind: 'native' } | { kind: 'mcp'; serverId: string };
+  group?: string;
+  /** Some read tools also require a trusted extension host (e.g. Git or network access). */
+  requiresTrust?: boolean;
+  /** Synchronous, side-effect-free live availability check. Returns a reason when unavailable. */
+  unavailable?(): string | undefined;
+  /** Current MCP permission, read again after approval rather than trusting prepared state. */
+  mcpPolicy?(): { server: string; allowed: boolean };
   /** Short human label for the UI, e.g. "src/app.ts" or "npm test". */
   label(args: A): string;
   prepare?(args: A, ctx: ToolContext): Promise<PreparedAction>;

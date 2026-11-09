@@ -120,6 +120,7 @@ Never put API keys in YAML or settings. Use **Sovran: Set Provider API Key…**.
 | `sovran.providers` | `[]` | OpenAI-compatible endpoints |
 | `sovran.defaultModel` / `sovran.planModel` | `""` | Act / Plan model; blank Plan inherits Act |
 | `sovran.approvals.mode` | `ask` | `ask`, `edits` (Auto-edit), or `auto` |
+| `sovran.tools.disabled` / `sovran.tools.forceAsk` | `[]` | Disable native tools or always review their calls |
 | `sovran.agent.maxIterations` | `25` | Model round-trips per request |
 | `sovran.terminal.timeoutSeconds` | `120` | Command timeout |
 | `sovran.context.autoCompact` | `true` | Summarize older turns when needed |

@@ -526,6 +526,8 @@ function baseState(): AppState {
       defaultApprovalMode: 'ask',
       allowedCommands: ['npm test', 'git status', 'npm run lint'],
       protectedPaths: ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/.git/**'],
+      disabledTools: [],
+      forceAskTools: [],
       defaultProtectedPaths: ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/id_ed25519*', '**/.git/**', '**/.npmrc', '**/.pypirc', '**/.netrc'],
       maxIterations: 25,
       terminalTimeoutSeconds: 120,
@@ -640,6 +642,8 @@ onPost((m) => {
     case 'updateSetting': {
       const key = m.setting.key;
       const field = ({
+        'tools.disabled': 'disabledTools',
+        'tools.forceAsk': 'forceAskTools',
         'approvals.mode': 'defaultApprovalMode',
         'approvals.allowedCommands': 'allowedCommands',
         'security.protectedPaths': 'protectedPaths',

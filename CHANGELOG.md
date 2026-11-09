@@ -6,6 +6,8 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- Native tool controls in **Settings → Agent**: disable tools or always review them, including reads in Auto mode.
+  The user settings are `sovran.tools.disabled` and `sovran.tools.forceAsk`.
 - Project presentation: official website links, a concise README with a preserved full user guide, community standards,
   issue and pull request templates, dependency update configuration, and clearer security reporting instructions.
 - **MCP servers.** Connect Model Context Protocol servers in the new **Settings → MCP** area and the agent can use their tools in Act mode. Local servers are commands Sovran starts (stdio); remote servers are reached over Streamable HTTP. Add one from a common server (Filesystem, Git, Fetch, GitHub), with the form, or by pasting the JSON snippet from its README (Claude Desktop, Cursor, Cline and VS Code formats; a token in it moves to Secret Storage). Tokens are kept in VS Code Secret Storage and sent as a bearer token, in a header or as an environment variable; `${workspaceFolder}`, `${userHome}` and `${env:NAME}` are expanded. Each server card shows its status (with the reason and *Try again* when it is not connected), its tools with what the server says about them (*read-only*, *can change data*), an estimate of the context they cost, and an **Off / Ask / Allow** choice per tool. Every MCP tool asks before it runs, in every approval mode, until you allow it, also with **Always allow** on the approval card, which shows the tool, its server and the exact arguments. The list is the user setting `sovran.mcp.servers`; servers start only in trusted workspaces and stop with the window. Built on the official MCP TypeScript SDK (`@modelcontextprotocol/client` v2).
@@ -36,6 +38,9 @@ pre-releases and even minor versions are stable releases.
 - The status bar shows `auto-edit` or `auto` when Act mode runs unattended.
 
 ### Fixed
+- Tool calls must use the definitions offered in that model request and remain enabled at execution. Sovran checks
+  workspace trust and permissions after approvals, rejects ambiguous dynamic names and stale definitions, and
+  rechecks MCP Off / Ask / Allow before dispatch.
 - Scrolling the chat while Sovran streams or waits for approval: the conversation no longer animates every streamed chunk (which fought the mouse wheel), and diffs no longer have their own scroll area that caught the wheel. A new proposal that is taller than the view is shown from its start.
 - The approval buttons can no longer end up below a long diff or be folded away with the tool row.
 - <kbd>Esc</kbd> in the empty chat input rejects a pending action instead of stopping the whole run (the Stop button still stops it).

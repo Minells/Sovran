@@ -197,6 +197,8 @@ export interface SettingsView {
   /** Approval mode a new window starts in (`sovran.approvals.mode`). */
   defaultApprovalMode: ApprovalMode;
   allowedCommands: string[];
+  disabledTools: string[];
+  forceAskTools: string[];
   protectedPaths: string[];
   defaultProtectedPaths: string[];
   maxIterations: number;
@@ -389,6 +391,14 @@ const allowEntry = z
  * models) goes through dedicated messages, so the webview can never write an arbitrary key.
  */
 export const settingUpdateSchema = z.discriminatedUnion('key', [
+  z.object({
+    key: z.literal('tools.disabled'),
+    value: z.array(z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/)).max(200),
+  }),
+  z.object({
+    key: z.literal('tools.forceAsk'),
+    value: z.array(z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/)).max(200),
+  }),
   z.object({ key: z.literal('approvals.mode'), value: approvalModeSchema }),
   z.object({ key: z.literal('approvals.allowedCommands'), value: z.array(allowEntry).max(200) }),
   z.object({ key: z.literal('security.protectedPaths'), value: z.array(z.string().trim().min(1).max(300)).max(200) }),

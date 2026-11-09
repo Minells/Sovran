@@ -378,6 +378,16 @@ output, including errors, is in **Show logs**.
 
 ## Settings
 
+In **Settings → Agent**, **Disabled native tools** removes the named tools from model requests and blocks their
+execution, including actions already awaiting approval. **Always review native tools** requires confirmation for
+those tools even for reads and in Auto mode. Use names such as `read_file`, `write_file` or `execute_terminal`.
+These are user settings (`sovran.tools.disabled` and `sovran.tools.forceAsk`); repository settings cannot change them.
+MCP tools retain their separate Off / Ask / Allow controls in **Settings → MCP**.
+
+Tool availability, workspace trust and permissions are checked again after approval. If a definition or permission
+changes while the model responds or an approval is open, Sovran can refuse that pending call and ask the model to
+request it again with the current tools. Plan mode remains read-only.
+
 | Setting | Default | Description |
 |---|---|---|
 | `sovran.providers` | `[]` | Model endpoints. User scope only |
@@ -385,6 +395,7 @@ output, including errors, is in **Show logs**.
 | `sovran.planModel` | `""` | Model for Plan mode. Empty means the same as Act |
 | `sovran.configFile.enabled` | `true` | Use `~/.sovran/config.yaml` when it exists, kept in sync with `sovran.providers`. User scope only |
 | `sovran.agent.maxIterations` | `25` | Maximum model round-trips per request |
+| `sovran.tools.disabled` / `sovran.tools.forceAsk` | `[]` | Native tool names to disable or always approve; user scope only |
 | `sovran.mcp.servers` | `[]` | MCP servers whose tools the agent can use in Act mode (see [MCP servers](#mcp-servers)). User scope only |
 | `sovran.approvals.mode` | `ask` | Approval mode a new window starts in: `ask`, `edits` (Auto-edit) or `auto`. User scope only |
 | `sovran.approvals.allowedCommands` | `[]` | Commands that run without asking, for example `npm test`. Never applies to commands that contain shell operators or trip a guardrail |

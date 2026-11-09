@@ -34,6 +34,8 @@ const baseState = (over: Partial<AppState> = {}): AppState => ({
     defaultApprovalMode: 'ask',
     allowedCommands: ['npm test'],
     protectedPaths: ['**/.env'],
+    disabledTools: [],
+    forceAskTools: [],
     defaultProtectedPaths: ['**/.env', '**/*.pem'],
     maxIterations: 25,
     terminalTimeoutSeconds: 120,
@@ -973,6 +975,28 @@ describe('settings view', () => {
     expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'approvals.allowedCommands', value: ['npm test', 'cargo test'] } });
     await userEvent.click(screen.getByRole('button', { name: 'Remove npm test' }));
     expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'approvals.allowedCommands', value: [] } });
+  });
+
+  it('edits native tool controls and rejects invalid tool names', async () => {
+    mount(settingsState());
+    await openArea('Agent');
+    const disabled = screen.getByLabelText('Disabled native tools');
+    await userEvent.type(disabled, 'execute_terminal{Enter}');
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'tools.disabled', value: ['execute_terminal'] },
+    });
+    const review = screen.getByLabelText('Always review native tools');
+    await userEvent.type(review, '../read_file');
+    expect(
+      screen.getByText('Use a tool name with letters, digits, underscores or hyphens.'),
+    ).toBeInTheDocument();
+    await userEvent.clear(review);
+    await userEvent.type(review, 'read_file{Enter}');
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'tools.forceAsk', value: ['read_file'] },
+    });
   });
 
   it('toggles options, validates numbers and restores protected defaults', async () => {

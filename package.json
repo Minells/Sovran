@@ -518,6 +518,35 @@
         }
       },
       {
+        "id": "sovran-tools",
+        "title": "Tools",
+        "order": 3,
+        "properties": {
+          "sovran.tools.disabled": {
+            "type": "array",
+            "scope": "application",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,64}$"
+            },
+            "uniqueItems": true,
+            "default": [],
+            "markdownDescription": "Native tools excluded from model requests and blocked at execution, including pending approvals. Use tool names such as `execute_terminal` or `write_file`. Only user settings are honored. MCP tools use their own Off / Ask / Allow controls."
+          },
+          "sovran.tools.forceAsk": {
+            "type": "array",
+            "scope": "application",
+            "items": {
+              "type": "string",
+              "pattern": "^[a-zA-Z0-9_-]{1,64}$"
+            },
+            "uniqueItems": true,
+            "default": [],
+            "markdownDescription": "Native tools that always require approval, including read tools and tools in Auto mode. Plan mode and Restricted Mode restrictions still apply. Only user settings are honored."
+          }
+        }
+      },
+      {
         "id": "sovran-agent",
         "title": "Agent",
         "order": 3,
