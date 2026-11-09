@@ -1,7 +1,7 @@
 # P2b — Controlled native Git writes
 
-Implemented on `codex/native-git-write`, **stacked on unmerged P2a** at `319c315`, which itself depends on P1.
-Review this increment relative to `codex/native-git-read`. No phase was merged or pushed to main.
+Implemented on `feature/native-git-write`, **stacked on unmerged P2a** at `319c315`, which itself depends on P1.
+Review this increment relative to `feature/native-git-read`. No phase was merged or pushed to main.
 
 ## Implemented
 

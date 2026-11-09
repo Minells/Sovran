@@ -1,6 +1,6 @@
 # P1 — Tool availability and live permissions
 
-Implemented on `codex/tool-availability-policy`, based on freshly fetched `main`
+Implemented on `feature/tool-availability-policy`, based on freshly fetched `main`
 `84954828aac2f5a1b7b09ebbda6687ed697bf7dd`. The owner authorized implementation of the native-tools/MCP plan on
 9 November 2026. This increment implements P1; Git, diagnostics, Web and the MCP catalog remain separate increments.
 

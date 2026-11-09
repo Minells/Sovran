@@ -1,8 +1,8 @@
 # P2a — Native Git inspection
 
-Implemented on `codex/native-git-read`, **stacked on unmerged P1** at `1f39177`.
+Implemented on `feature/native-git-read`, **stacked on unmerged P1** at `1f39177`.
 Remote `main` was fetched again before this increment and remained at `8495482`; P1 was not merged to main.
-Review this increment relative to `codex/tool-availability-policy`. P4 remains independent.
+Review this increment relative to `feature/tool-availability-policy`. P4 remains independent.
 
 ## Implemented
 
@@ -52,7 +52,7 @@ The core agent-loop test exercises trusted Plan reads and rejects an explicit pr
 - Git output is path-protected, not a semantic secret classifier. Metadata may name protected files; moving/copying
   sensitive content into an unprotected path does not keep it protected by history. No OS sandbox is claimed.
 - No stage/unstage/commit, network/history rewrite or repository checkpoint recovery is added. The separately reviewable P2b increment is now implemented on
-  `codex/native-git-write`; see [its status](2026-11-09-native-git-write-status.md). Existing custom MCP entries/policies are preserved.
+  `feature/native-git-write`; see [its status](2026-11-09-native-git-write-status.md). Existing custom MCP entries/policies are preserved.
 - Website source is unchanged; its public feature claims can be updated with the release documentation increment.
 
 Primary Git references checked during implementation:
