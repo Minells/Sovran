@@ -6,6 +6,9 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- Optional integration catalog for Playwright MCP, Chrome DevTools MCP and GitHub MCP. Selecting a card has no
+  installation/launch effect; managed entries start disconnected, install reviewed locked packages on demand, then
+  connect separately. Custom commands, remote servers, JSON import, saved tokens and tool policies are preserved.
 - Native `web_fetch`: one public HTTP(S) URL, readable HTML/text/Markdown/JSON and source links, with explicit approval
   in trusted Plan/Act even in Auto. Direct IP-bound connections, same-origin redirects, robots checks, bounded
   compressed/decoded bodies, cancellation and an isolated HTML/robots worker. No Crawlee, browser, global search,

@@ -23,6 +23,7 @@ import {
 } from '../core/mcp/config';
 import type { McpStatus } from '../core/mcp/status';
 import type { GitApprovalDetail, McpToolHint } from '../core/ports';
+import { INTEGRATION_IDS, type ManagedIntegration, type IntegrationCatalogView } from '../core/mcp/catalog';
 
 export type { SessionMessage, SessionSummary, AgentMode, ApprovalMode, ToolMode, McpAuth, McpStatus, McpToolHint, McpToolPolicy, McpTransportKind };
 
@@ -230,6 +231,7 @@ export interface McpToolView {
 
 /** A configured MCP server and how it is doing. Tokens never reach the webview: only `hasToken`. */
 export interface McpServerView {
+  managed?: ManagedIntegration;
   id: string;
   name: string;
   enabled: boolean;
@@ -254,6 +256,7 @@ export interface McpServerView {
 }
 
 export interface McpView {
+  catalog?: IntegrationCatalogView;
   /** False in Restricted Mode: servers do not start, and MCP tools are never offered. */
   active: boolean;
   servers: McpServerView[];
@@ -486,6 +489,8 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('useConfigFile') }),
   /** Adds a server (no id) or replaces one, keeping its tool policies. */
   z.object({ type: z.literal('saveMcpServer'), server: mcpServerInputSchema }),
+  z.object({ type: z.literal('addMcpIntegration'), integration: z.enum(INTEGRATION_IDS), profile: z.enum(['isolated', 'extension', 'readonly', 'collaboration']) }),
+  z.object({ type: z.literal('installMcpIntegration'), integration: z.enum(INTEGRATION_IDS) }),
   /** The host confirms first: the server's stored token is deleted too. */
   z.object({ type: z.literal('deleteMcpServer'), id: mcpId }),
   z.object({ type: z.literal('setMcpServerEnabled'), id: mcpId, enabled: z.boolean() }),

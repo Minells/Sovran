@@ -45,6 +45,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const ref: { view?: SovranViewProvider; panels?: SovranPanels; controller?: SovranController } = {};
   // MCP servers start in the background: activation never waits for them.
   mcp = new McpHost({
+    managed: { resources: context.asAbsolutePath('resources/mcp'), storage: path.join(context.globalStorageUri.fsPath, 'mcp'), host: vscode.env.remoteName ? `Remote extension host (${vscode.env.remoteName})` : `This computer (${process.platform})` },
     secrets: new McpSecrets(context.secrets),
     logger,
     version: String((context.extension.packageJSON as { version?: unknown }).version ?? '0.0.0'),

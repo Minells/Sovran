@@ -100,7 +100,7 @@ const argumentsSchema = z.preprocess((v) => (v == null ? {} : v), z.record(z.str
 
 /** Settings that need a new connection when they change. Names, timeouts and tool policies apply in place. */
 const connectionKey = (s: McpServerConfig) =>
-  JSON.stringify([s.command, s.args, s.env, s.cwd, s.url, s.headers, s.auth]);
+  JSON.stringify([s.command, s.args, s.env, s.cwd, s.url, s.headers, s.auth, s.managed]);
 
 function hintsOf(tool: Tool): McpToolHint[] {
   const a = tool.annotations;

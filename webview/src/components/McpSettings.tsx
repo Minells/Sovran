@@ -15,6 +15,13 @@ import {
   transportProblems,
 } from '../../../src/core/mcp/rules';
 import { parseMcpSnippet, type McpDraft } from '../../../src/shared/mcpImport';
+import {
+  INTEGRATIONS,
+  integration,
+  type IntegrationId,
+  type IntegrationProfile,
+  type InstallationState,
+} from '../../../src/core/mcp/catalog';
 import { sendsKeyInsecurely } from '../../../src/shared/endpoints';
 import { useStore } from '../state/store';
 import { post } from '../vscode';
@@ -25,54 +32,6 @@ import { Button, Icon, IconButton } from './primitives';
  * Everything here writes user settings through the host; tokens go the other way only (webview → host → Secret
  * Storage), so the form never shows one back.
  */
-
-// --------------------------------------------------------------------------------------------- presets
-
-interface Preset {
-  name: string;
-  note: string;
-  icon: string;
-  draft: Omit<McpDraft, 'notes'>;
-}
-
-/** Well-known reference servers: one click fills the form, nothing starts until the user saves. */
-const PRESETS: readonly Preset[] = [
-  {
-    name: 'Filesystem',
-    note: 'files in this workspace',
-    icon: 'files',
-    draft: {
-      name: 'Filesystem',
-      transport: 'stdio',
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '${workspaceFolder}'],
-      auth: { type: 'none' },
-    },
-  },
-  {
-    name: 'Fetch',
-    note: 'web pages as Markdown, needs uv',
-    icon: 'globe',
-    draft: {
-      name: 'Fetch',
-      transport: 'stdio',
-      command: 'uvx',
-      args: ['mcp-server-fetch'],
-      auth: { type: 'none' },
-    },
-  },
-  {
-    name: 'GitHub',
-    note: 'remote, with a personal access token',
-    icon: 'github',
-    draft: {
-      name: 'GitHub',
-      transport: 'http',
-      url: 'https://api.githubcopilot.com/mcp/',
-      auth: { type: 'bearer' },
-    },
-  },
-];
 
 // --------------------------------------------------------------------------------------------- helpers
 
@@ -240,7 +199,11 @@ function ServerCard({
   server: s,
   onEdit,
   active,
+  installation,
+  host,
 }: {
+  installation?: InstallationState;
+  host?: string;
   server: McpServerView;
   onEdit: () => void;
   active: boolean;
@@ -267,18 +230,57 @@ function ServerCard({
           label={`Remove ${s.name}`}
           onClick={() => post({ type: 'deleteMcpServer', id: s.id })}
         />
-        <button
-          type="button"
-          role="switch"
-          className="sv-switch"
-          aria-checked={s.enabled}
-          aria-label={`Use ${s.name}`}
-          title={s.enabled ? 'On: Sovran starts this server' : 'Off: the server does not start'}
-          onClick={() => post({ type: 'setMcpServerEnabled', id: s.id, enabled: !s.enabled })}
-        />
+        {s.managed ? (
+          <Button
+            disabled={
+              !active ||
+              busy ||
+              (!s.enabled && (needsToken || (s.managed.id !== 'github' && installation?.status !== 'ready')))
+            }
+            onClick={() => post({ type: 'setMcpServerEnabled', id: s.id, enabled: !s.enabled })}
+          >
+            {s.enabled ? 'Disconnect' : 'Connect'}
+          </Button>
+        ) : (
+          <button
+            type="button"
+            role="switch"
+            className="sv-switch"
+            aria-checked={s.enabled}
+            aria-label={`Use ${s.name}`}
+            title={s.enabled ? 'On: Sovran starts this server' : 'Off: the server does not start'}
+            onClick={() => post({ type: 'setMcpServerEnabled', id: s.id, enabled: !s.enabled })}
+          />
+        )}
       </div>
+      {s.managed ? (
+        <div className="sv-field__help">
+          {integration(s.managed.id).name} {s.managed.version} · {s.managed.profile} ·{' '}
+          {host ?? 'Extension host'}
+        </div>
+      ) : null}
+      {s.managed && s.managed.id !== 'github' ? (
+        <div className="sv-approval__actions">
+          <Button
+            disabled={
+              !active ||
+              s.enabled ||
+              installation?.status === 'installing' ||
+              installation?.status === 'ready'
+            }
+            onClick={() => post({ type: 'installMcpIntegration', integration: s.managed!.id })}
+          >
+            {installation?.status === 'installing'
+              ? 'Installing…'
+              : installation?.status === 'ready'
+                ? 'Dependencies installed'
+                : 'Install dependencies'}
+          </Button>
+          {installation?.error ? <span role="alert">{installation.error}</span> : null}
+        </div>
+      ) : null}
       <div className="sv-card__url" title={summary(s)}>
-        {summary(s)}
+        {s.managed ? (integration(s.managed.id).package ?? s.url) : summary(s)}
       </div>
       <div className="sv-badges">
         <span className="sv-badge">
@@ -829,13 +831,10 @@ export function McpArea() {
   const [editing, setEditing] = useState<{ key: string; values: FormValues; hasToken: boolean } | null>(null);
   const servers = app.mcp.servers;
   const edit = (s: McpServerView) => setEditing({ key: s.id, values: valuesOf(s), hasToken: s.hasToken });
-  // The form unmounts whenever it closes, so a new one always starts from these values.
-  const add = (preset?: Preset) =>
-    setEditing({
-      key: `new-${preset?.name ?? 'blank'}`,
-      values: valuesOf(preset?.draft ?? {}),
-      hasToken: false,
-    });
+  const [selected, setSelected] = useState<IntegrationId | null>(null);
+  const [profile, setProfile] = useState<IntegrationProfile>('isolated');
+  const add = () => setEditing({ key: 'new-custom', values: valuesOf({}), hasToken: false });
+  const candidate = selected ? integration(selected) : undefined;
   const offered = servers.reduce((n, s) => n + s.tools.filter((t) => t.policy !== 'off').length, 0);
   const cost = servers.reduce((n, s) => n + (s.status === 'connected' ? s.toolTokens : 0), 0);
 
@@ -860,46 +859,106 @@ export function McpArea() {
       ) : (
         <>
           {servers.map((s) => (
-            <ServerCard key={s.id} server={s} onEdit={() => edit(s)} active={app.mcp.active} />
+            <ServerCard
+              key={s.id}
+              server={s}
+              onEdit={() => edit(s)}
+              active={app.mcp.active}
+              host={app.mcp.catalog?.host}
+              installation={app.mcp.catalog?.entries.find((entry) => entry.id === s.managed?.id)}
+            />
           ))}
-          {servers.length ? (
-            <div className="sv-approval__actions">
-              <Button icon="add" onClick={() => add()}>
-                Add server
-              </Button>
-              {offered ? (
-                <span className="sv-field__help sv-tabular">
-                  {offered} tool{offered === 1 ? '' : 's'} offered · ~{compact(cost)} tokens per request
-                </span>
-              ) : null}
-            </div>
-          ) : (
-            <div className="sv-field">
-              <span className="sv-field__label">Add a server</span>
-              <ul className="sv-presets" aria-label="Common MCP servers">
-                {PRESETS.map((p) => (
-                  <li key={p.name}>
-                    <button type="button" className="sv-preset" onClick={() => add(p)}>
-                      <Icon name={p.icon} className="sv-preset__icon" />
-                      <span className="sv-preset__name">
-                        {p.name} <span className="sv-tagline">· {p.note}</span>
-                      </span>
-                      <span className="sv-preset__url">{summary(p.draft)}</span>
-                      <Icon name="chevron-right" className="sv-preset__chevron" />
-                    </button>
-                  </li>
-                ))}
-                <li>
-                  <button type="button" className="sv-preset" onClick={() => add()}>
-                    <Icon name="add" className="sv-preset__icon" />
-                    <span className="sv-preset__name">Another server</span>
-                    <span className="sv-preset__url">A command, a URL or a README snippet</span>
-                    <Icon name="chevron-right" className="sv-preset__chevron" />
+          <div className="sv-field">
+            <span className="sv-field__label">Integration catalog</span>
+            <p className="sv-field__help">
+              Optional tools for browser work and collaboration. Selecting an integration does not install or
+              start it.
+            </p>
+            <ul className="sv-presets" aria-label="Integration catalog">
+              {INTEGRATIONS.map((item) => (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className="sv-preset"
+                    aria-label={item.name}
+                    aria-describedby={`integration-${item.id}-description`}
+                    aria-pressed={selected === item.id}
+                    onClick={() => {
+                      setSelected(item.id);
+                      setProfile(item.defaultProfile);
+                    }}
+                  >
+                    <Icon name={item.icon} className="sv-preset__icon" />
+                    <span className="sv-preset__name">{item.name}</span>
+                    <span className="sv-preset__url" id={`integration-${item.id}-description`}>
+                      {item.description}
+                    </span>
                   </button>
                 </li>
-              </ul>
+              ))}
+            </ul>
+            {candidate ? (
+              <section className="sv-card" aria-label={`${candidate.name} setup`}>
+                <h3>{candidate.name}</h3>
+                <p>{candidate.description}</p>
+                <p className="sv-field__help">{candidate.requirements}</p>
+                <p className="sv-field__help">
+                  Runs on {app.mcp.catalog?.host ?? 'the extension host'}.{' '}
+                  {candidate.package
+                    ? `${candidate.package}@${candidate.version}. Installation and connection are separate actions.`
+                    : 'Hosted service; no local package installation.'}
+                </p>
+                {candidate.profiles.length > 1 ? (
+                  <label className="sv-field">
+                    Browser or access mode
+                    <select
+                      value={profile}
+                      onChange={(event) => setProfile(event.target.value as IntegrationProfile)}
+                    >
+                      {candidate.profiles.map((value) => (
+                        <option key={value} value={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+                <div className="sv-approval__actions">
+                  <Button
+                    onClick={() => {
+                      post({ type: 'addMcpIntegration', integration: candidate.id, profile });
+                      setSelected(null);
+                    }}
+                  >
+                    Add integration
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => post({ type: 'openExternal', url: candidate.documentation })}
+                  >
+                    Documentation
+                  </Button>
+                </div>
+                <p className="sv-field__help">
+                  Added disconnected. Every tool starts on Ask. Browser tools can reach sites and services
+                  beyond native Web safeguards.
+                </p>
+              </section>
+            ) : null}
+            <div className="sv-approval__actions">
+              <Button icon="add" onClick={add}>
+                Add server
+              </Button>
+              <span className="sv-field__help">
+                Use a local command, remote URL or import a JSON snippet.
+              </span>
             </div>
-          )}
+            {offered ? (
+              <span className="sv-field__help sv-tabular">
+                {offered} tools offered · ~{compact(cost)} tokens per request
+              </span>
+            ) : null}
+          </div>
           <p className="sv-fineprint">
             <Icon name="shield" />
             <span>

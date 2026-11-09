@@ -24,6 +24,11 @@ The original broader design below remains historical context where it refers to 
 
 ### Implementation checkpoint — 9 November 2026
 
+Owner direction after P5: keep every feature branch unmerged for joint integration later. Develop P8a, P8b and P9
+as progressive `feature/` branches, each based on the preceding one. General Web search is deferred; native Web
+remains a small fetch tool and advanced browser tasks use optional Playwright MCP. P6/P7 are not release dependencies
+for this scope. P9 records unexercised platform/account/manual gates separately from completed code and local checks.
+
 | Phase | Implemented / evidence | Automated checks observed | Manual / remaining gates |
 | --- | --- | --- | --- |
 | P1 | `feature/tool-availability-policy`, implementation commit `6b4886a`; native disable/force-Ask controls, offered-definition enforcement and live permission rechecks | 417 tests in 25 files, typecheck/lint/build, real VS Code 1.145.2 smoke suite, VSIX packaging | No manual layout review, minimum VS Code, Windows/Linux or Remote matrix |
@@ -31,6 +36,7 @@ The original broader design below remains historical context where it refers to 
 | P2b | `feature/native-git-write`, stacked on unmerged P2a; controlled stage/unstage/commit, typed approval card and stale-state/late permission checks | 480 tests in 29 files on Node 22, typecheck/lint/build, real VS Code 1.145.2 smoke suite, VSIX packaging | Real signing, manual Git-card/model checks, Windows/Linux, Remote and minimum VS Code not exercised |
 | P3 | `feature/workspace-diagnostics`, stacked on unmerged P2b at `12aa10f`; cached native diagnostics with workspace/active, literal path, severity and result filters; optional port/adapter/checkpoint capability | 506 tests in 30 files on Node 22, typecheck/lint/build, real VS Code 1.145.2 diagnostics and regression smoke suite, VSIX packaging | Manual model calls, Windows/Linux, Remote, minimum VS Code and fresh VSIX installation not exercised |
 | P5 small fetch | `feature/native-web-fetch`, stacked on P3 at `eda4cca`; one public URL, mandatory approval, direct validated-IP transport, HTML/robots worker; no Crawlee | 600 tests in 32 files, typecheck/lint/build, real VS Code 1.145.2 smoke, actual Node 20.18.0 bundled runtime probe, VSIX packaging and public HTTPS probe | Manual model/layout review, Windows/Linux, Remote, minimum VS Code and fresh installation/upgrade remain P9 |
+| P8a | `feature/mcp-integration-catalog`, based on P5 at `db8854a`; optional catalog, managed package locks, separate install/connect lifecycle, compatibility checks and preserved custom servers | 619 tests in 33 files, typecheck/lint/build, VSIX with four managed-manifest assets; actual locked installs and pinned CLI help on Node 22 | Browser handshake/tool calls and final profile restrictions follow in P8b; full release matrix remains P9 |
 | P4 | Independent `feature/web-runtime-spike`, commit `4fb1405`; locked experiment, transport/configuration reproducers, extraction/index fixture, bundle and VSIX measurements | Bundled worker on actual Node 20.18.0, root 392 tests in 23 files, typecheck/lint/build, two VSIX packages | **Adoption gate closed**: safe DNS-bound transport and helper routing remain unproven; default helpers/configuration cannot be adopted directly |
 | Website | Fetched and fast-forward checked `main` at `45381b3`; no feature/source change required by these increments | `npm run verify`: diagnostics/build and generated-site checks passed | Product Web claims wait for an implemented, verified feature |
 
@@ -41,6 +47,7 @@ P2a details: [native Git inspection status](2026-11-09-native-git-read-status.md
 P2b details: [controlled native Git write status](2026-11-09-native-git-write-status.md).
 P3 details: [workspace diagnostics status](2026-11-09-workspace-diagnostics-status.md).
 Small P5 details: [native public Web fetch status](2026-11-09-native-web-fetch-status.md).
+P8a details: [integration catalog status](2026-11-09-mcp-integration-catalog-status.md).
 No phase was merged or pushed. P8a and any broader crawling/index work are subsequent increments.
 The original plan was retained and versioned with the small-fetch amendment above.
 

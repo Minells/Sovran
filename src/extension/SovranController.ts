@@ -597,6 +597,10 @@ export class SovranController implements vscode.Disposable {
           return;
         case 'saveMcpServer':
           return await this.deps.mcp?.save(msg.server);
+        case 'addMcpIntegration':
+          return await this.deps.mcp?.addIntegration(msg.integration, msg.profile);
+        case 'installMcpIntegration':
+          return await this.deps.mcp?.installIntegration(msg.integration);
         case 'deleteMcpServer':
           return await this.deps.mcp?.remove(msg.id);
         case 'setMcpServerEnabled':

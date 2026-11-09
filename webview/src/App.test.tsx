@@ -1519,7 +1519,7 @@ describe('MCP servers', () => {
 
   it('uses native Git instead of the basic preset and preserves saved Git MCP servers', async () => {
     const { unmount } = open([]);
-    const presets = screen.getByRole('list', { name: 'Common MCP servers' });
+    const presets = screen.getByRole('list', { name: 'Integration catalog' });
     expect(within(presets).queryByRole('button', { name: /^Git\b/ })).not.toBeInTheDocument();
     unmount();
     open([{ ...jira, id: 'legacygit', name: 'Git', command: 'uvx', args: ['mcp-server-git', '--repository', '${workspaceFolder}'], status: 'connected', error: undefined }]);
@@ -1530,33 +1530,31 @@ describe('MCP servers', () => {
     expect(screen.getByLabelText('Arguments')).toHaveValue('mcp-server-git\n--repository\n${workspaceFolder}');
   });
 
-  it('adds a server from a preset, checking the fields first', async () => {
+  it('selects catalog metadata without installing, launching or saving anything', async () => {
     open([]);
-    await userEvent.click(screen.getByRole('button', { name: /Filesystem/ }));
-    expect(screen.getByLabelText('Command')).toHaveValue('npx');
-    expect(screen.getByLabelText('Arguments')).toHaveValue('-y\n@modelcontextprotocol/server-filesystem\n${workspaceFolder}');
-    await userEvent.clear(screen.getByLabelText('Command'));
+    await userEvent.click(screen.getByRole('button', { name: 'Playwright MCP' }));
+    expect(screen.getByRole('region', { name: 'Playwright MCP setup' })).toBeInTheDocument();
+    expect(screen.getByText(/Node.js 20/)).toBeInTheDocument();
+    expect(sent.some((message) => ['installMcpIntegration', 'addMcpIntegration', 'setMcpServerEnabled', 'saveMcpServer'].includes(message.type))).toBe(false);
+    await userEvent.click(screen.getByRole('button', { name: 'Add integration' }));
+    expect(sent).toContainEqual({ type: 'addMcpIntegration', integration: 'playwright', profile: 'isolated' });
+    expect(sent.some((message) => message.type === 'installMcpIntegration' || message.type === 'setMcpServerEnabled')).toBe(false);
+  });
+
+  it('keeps custom local commands and field validation available', async () => {
+    open([]);
+    await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
+    await userEvent.type(screen.getByLabelText('Name'), 'My files');
     await userEvent.type(screen.getByLabelText('Environment'), 'bad name=1');
     await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
     expect(screen.getByText('Enter the command that starts the server, for example npx.')).toBeInTheDocument();
     expect(screen.getByText(/Line 1: Use letters, digits and _/)).toBeInTheDocument();
     expect(sent.some((m) => m.type === 'saveMcpServer')).toBe(false);
-
-    await userEvent.type(screen.getByLabelText('Command'), 'npx');
+    await userEvent.type(screen.getByLabelText('Command'), 'node');
     await userEvent.clear(screen.getByLabelText('Environment'));
     await userEvent.type(screen.getByLabelText('Environment'), 'LOG_LEVEL=debug');
     await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
-    expect(sent).toContainEqual({
-      type: 'saveMcpServer',
-      server: {
-        name: 'Filesystem',
-        transport: 'stdio',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-filesystem', '${workspaceFolder}'],
-        env: { LOG_LEVEL: 'debug' },
-        auth: { type: 'none' },
-      },
-    });
+    expect(sent).toContainEqual({ type: 'saveMcpServer', server: { name: 'My files', transport: 'stdio', command: 'node', env: { LOG_LEVEL: 'debug' }, auth: { type: 'none' } } });
   });
 
   it('fills the form from a README snippet and moves its token to Secret Storage', async () => {

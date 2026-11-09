@@ -6,6 +6,7 @@
  * maps onto it field by field. Tokens never live here: `auth` only says where the token stored in Secret Storage goes.
  */
 import { z } from 'zod';
+import { INTEGRATION_IDS, type ManagedIntegration } from './catalog';
 import {
   ENV_NAME_PATTERN,
   HEADER_NAME_PATTERN,
@@ -29,6 +30,7 @@ export {
 };
 
 export interface McpServerConfig {
+  managed?: ManagedIntegration;
   id: string;
   name: string;
   enabled: boolean;
@@ -92,6 +94,7 @@ export const mcpServerEntrySchema = z
     timeoutSeconds: z.number().int().min(MCP_TIMEOUT_SECONDS.min).max(MCP_TIMEOUT_SECONDS.max).optional(),
     allowedTools: toolNames.optional(),
     disabledTools: toolNames.optional(),
+    managed: z.object({ id: z.enum(INTEGRATION_IDS), profile: z.enum(['isolated', 'extension', 'readonly', 'collaboration']), version: z.string().min(1).max(40) }).strict().optional(),
   })
   .superRefine((s, ctx) => {
     for (const problem of transportProblems(s)) ctx.addIssue({ code: 'custom', message: problem });
@@ -102,6 +105,7 @@ export type McpServerEntry = z.infer<typeof mcpServerEntrySchema>;
 export function fromEntry(e: McpServerEntry): McpServerConfig {
   return {
     id: e.id,
+    ...(e.managed ? { managed: e.managed } : {}),
     name: e.name ?? e.id,
     enabled: e.enabled ?? true,
     ...(e.command ? { command: e.command } : {}),
@@ -121,6 +125,7 @@ export function fromEntry(e: McpServerEntry): McpServerConfig {
 export function toEntry(s: McpServerConfig): McpServerEntry {
   return {
     id: s.id,
+    ...(s.managed ? { managed: s.managed } : {}),
     ...(s.name !== s.id ? { name: s.name } : {}),
     ...(s.enabled ? {} : { enabled: false }),
     ...(s.command ? { command: s.command } : {}),

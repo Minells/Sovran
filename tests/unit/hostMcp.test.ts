@@ -206,6 +206,54 @@ beforeEach(async () => {
   await until(() => mcpView().servers[0]?.status === 'connected');
 });
 
+describe('integration catalog host lifecycle', () => {
+  it('adds a catalog integration disconnected and preserves existing servers and policies', async () => {
+    const before = structuredClone(servers());
+    await controller.handle({ type: 'addMcpIntegration', integration: 'github', profile: 'readonly' });
+    expect(servers()[0]).toEqual(before[0]);
+    const added = servers().find((s) => s.id !== 'notes')!;
+    expect(added).toMatchObject({
+      enabled: false,
+      managed: { id: 'github', profile: 'readonly' },
+      headers: { 'X-MCP-Readonly': 'true' },
+    });
+    expect(mcpView().servers.find((s) => s.id === added.id)?.status).toBe('disabled');
+    expect(mcpView().servers.find((s) => s.id === added.id)?.tools).toEqual([]);
+    h.inputAnswer = 'ghp_catalog_fixture';
+    await mcp.promptToken(added.id as string);
+    expect(mcpView().servers.find((s) => s.id === added.id)).toMatchObject({
+      hasToken: true,
+      enabled: false,
+      status: 'disabled',
+    });
+    expect(JSON.stringify(servers())).not.toContain('ghp_catalog_fixture');
+  });
+  it('requires native confirmation before converting managed settings to a custom server', async () => {
+    await mcp.addIntegration('github', 'readonly');
+    const added = mcpView().servers.find((s) => s.managed)!;
+    const input = {
+      id: added.id,
+      name: 'Custom GitHub',
+      transport: 'http' as const,
+      url: 'https://mcp.example.com/mcp',
+      auth: { type: 'bearer' as const },
+    };
+    await mcp.save(input);
+    expect(mcpView().servers.find((s) => s.id === added.id)?.managed).toBeDefined();
+    h.warningAnswer = 'Save custom server';
+    await mcp.save(input);
+    expect(mcpView().servers.find((s) => s.id === added.id)).toMatchObject({
+      name: 'Custom GitHub',
+      enabled: false,
+    });
+    expect(mcpView().servers.find((s) => s.id === added.id)?.managed).toBeUndefined();
+  });
+  it('blocks installation in Restricted Mode before requesting install approval', async () => {
+    h.trusted = false;
+    await expect(mcp.installIntegration('playwright')).rejects.toThrow(/Trust/);
+  });
+});
+
 afterEach(async () => {
   controller.dispose();
   await mcp.dispose();
