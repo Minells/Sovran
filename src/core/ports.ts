@@ -92,17 +92,31 @@ export interface ProcessResult {
   durationMs: number;
 }
 
+export interface ProcessOptions {
+  cwd: string;
+  timeoutMs: number;
+  signal: AbortSignal;
+  maxOutputChars: number;
+  onOutput?: (chunk: string) => void;
+}
+
+export interface FileProcessOptions extends ProcessOptions {
+  /** Structured processes inherit a minimal host environment; these trusted overrides are applied last. */
+  env?: Readonly<Record<string, string>>;
+  /** Never resolve an executable from these workspace roots, even through a PATH symlink. */
+  disallowedExecutableRoots?: readonly string[];
+}
+
+export interface FileProcessResult extends ProcessResult {
+  /** Kept separate and decoded incrementally; structured output must not be mixed with diagnostics. */
+  stdout: string;
+  stderr: string;
+}
+
 export interface ProcessPort {
-  run(
-    command: string,
-    options: {
-      cwd: string;
-      timeoutMs: number;
-      signal: AbortSignal;
-      maxOutputChars: number;
-      onOutput?: (chunk: string) => void;
-    },
-  ): Promise<ProcessResult>;
+  run(command: string, options: ProcessOptions): Promise<ProcessResult>;
+  /** Execute an executable and literal argv without a shell, using the host PATH outside workspace roots. */
+  runFile(executable: string, argv: readonly string[], options: FileProcessOptions): Promise<FileProcessResult>;
 }
 
 export type ApprovalDetail =

@@ -11,13 +11,15 @@ records implementation separately; later-phase APIs and limits remain design cho
 | Phase | Implemented / evidence | Automated checks observed | Manual / remaining gates |
 | --- | --- | --- | --- |
 | P1 | `codex/tool-availability-policy`, implementation commit `6b4886a`; native disable/force-Ask controls, offered-definition enforcement and live permission rechecks | 417 tests in 25 files, typecheck/lint/build, real VS Code 1.145.2 smoke suite, VSIX packaging | No manual layout review, minimum VS Code, Windows/Linux or Remote matrix |
+| P2a | `codex/native-git-read`, stacked on unmerged P1; five native Git reads and structured argv execution | 447 tests in 28 files on Node 22, typecheck/lint/build, real VS Code 1.145.2 smoke suite, VSIX packaging | Windows/Linux, Remote, minimum VS Code and fresh VSIX install not exercised |
 | P4 | Independent `codex/web-runtime-spike`, commit `4fb1405`; locked experiment, transport/configuration reproducers, extraction/index fixture, bundle and VSIX measurements | Bundled worker on actual Node 20.18.0, root 392 tests in 23 files, typecheck/lint/build, two VSIX packages | **Adoption gate closed**: safe DNS-bound transport and helper routing remain unproven; default helpers/configuration cannot be adopted directly |
 | Website | Fetched and fast-forward checked `main` at `45381b3`; no feature/source change required by these increments | `npm run verify`: diagnostics/build and generated-site checks passed | Product Web claims wait for an implemented, verified feature |
 
 P1 details: [implementation status](2026-11-09-tool-availability-policy-status.md).
 P4 details are committed on its own branch under `docs/plans/2026-11-09-web-runtime-spike-status.md` and
 `experiments/web-runtime/README.md`; its worktree is `/Users/luca.minelli/sovran/.worktrees/web-runtime-spike`.
-No phase was merged or pushed. P2a/P3/P8a and the remaining Web feasibility work are subsequent increments;
+P2a details: [native Git inspection status](2026-11-09-native-git-read-status.md).
+No phase was merged or pushed. P2b/P3/P8a and the remaining Web feasibility work are subsequent increments;
 P5 stays gated. The original plan was retained and versioned with this progress update.
 
 ## 1. Baseline and working branch

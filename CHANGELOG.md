@@ -6,6 +6,9 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- Read-only native Git tools: `git_status`, `git_diff`, `git_log`, `git_show` and `git_branches`, available in trusted
+  Plan/Act workspaces. Explicit repository selection, literal argv/pathspecs, protected-content filtering, paging,
+  bounded process execution and worktree support require no Git MCP server or network access.
 - Native tool controls in **Settings → Agent**: disable tools or always review them, including reads in Auto mode.
   The user settings are `sovran.tools.disabled` and `sovran.tools.forceAsk`.
 - Project presentation: official website links, a concise README with a preserved full user guide, community standards,

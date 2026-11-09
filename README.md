@@ -42,6 +42,7 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
   `/review`, `/doc`, `/compact`, and `/new`. Add custom Markdown prompts under `.sovran/commands/`.
 - **Attachments:** extract text locally from PDF, modern Office, and OpenDocument files; list ZIP contents. Paste or
   attach images for vision-capable models.
+- **Native Git inspection:** status, diff, history, commit/file inspection and branches in trusted Plan and Act workspaces.
 - **MCP tools:** user-configured stdio and Streamable HTTP servers, with per-tool Off / Ask / Allow controls.
 - **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
   history that can persist across restarts.

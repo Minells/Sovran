@@ -52,6 +52,18 @@ until a confidential route is available. Response times depend on maintainer ava
 | T18 | MCP servers: a repository starting a process or redirecting a token, tool calls nobody approved, tokens leaking, injected instructions in tool descriptions or results | `sovran.mcp.servers` is `application`-scoped and read from the user value only, so a workspace can never add, change or start a server; servers start only in trusted workspaces. MCP tools exist only in Act mode and **ask before every call in every approval mode**, Auto included, until the user allows that specific tool (Off / Ask / Allow per tool; *Always allow* names the tool from the pending request, never from the webview). The approval card shows the server, the tool and the exact arguments, with invisible characters revealed; the server's annotations are shown as its claims. Tokens are kept in Secret Storage (the webview only receives `hasToken`), passed to the server as a header or environment variable, masked in logs, errors, server output and tool results. Remote servers: redirects are followed only within the same origin. Local servers receive a minimal environment (the SDK's set plus proxy and certificate variables) and what the user lists, not the whole environment of the editor. Descriptions are capped and labelled with their server, schemas over 16 000 characters are replaced, results are capped and truncated, and tool output is treated as data like any other tool result. Stopping a run cancels the call; closing the window stops local servers |
 | T19 | Disabled, stale or guessed tools; permissions changed during approval | The runner captures offered definitions for every model request, rejects unoffered or replaced tools, and checks live availability, workspace trust and cancellation before preparation and dispatch, and re-evaluates permission policy after approval. Native disabled/force-Ask settings are user-scoped. Dynamic source name collisions fail closed. MCP Off is also checked at the dispatch boundary; Ask/Allow changes are evaluated again after approval |
 
+Native Git inspection uses structured argv with an explicitly selected workspace repository and working tree.
+It disables optional index locks, lazy fetch, replace objects, pagers, fsmonitor, submodule recursion, external diff,
+textconv and effective clean/process filters. The executable is resolved outside workspace roots; structured
+processes inherit a minimal host environment without ambient Git redirection, credentials or runtime preloads.
+Bulk patches omit protected paths and detected protected rename sources; explicit protected-file inspection uses
+approval. Paths and revisions have separate contracts, metadata must be complete before parsing, and raw process
+output is never streamed to chat or mirrored before filtering. Git must support the required protective flags.
+
+These are read safeguards for trusted repositories, not an OS sandbox or content classification system. Git metadata
+may name protected files; moving/copying secrets into an unprotected path does not make that path protected by history.
+A linked worktree's ordinary `.git` file can reference its administrative Git directory outside that worktree.
+
 ## Known limitations
 
 - An MCP server runs with your privileges and can do whatever its code does: an allowed tool, or a call you approve,

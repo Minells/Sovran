@@ -52,6 +52,28 @@ It works through ten built-in tools:
 | `apply_diff` | Applies several exact edits to one file at once |
 | `execute_terminal` | Runs a shell command after you approve it |
 
+**Native Git inspection.** In trusted workspaces, Plan and Act can use `git_status`, `git_diff`, `git_log`,
+`git_show` and `git_branches` without an MCP server. They are read-only and never fetch. Select the repository root
+explicitly with `repository` (`"."` for a single root, `"rootName/nested"` in multi-root workspaces). Nested repositories
+and linked worktrees are supported; native Git does not discover a parent outside your selected root.
+
+Paths are separate, literal repository-relative arguments. `git_diff` supports `scope: "unstaged"`, `"staged"`, or
+`"revision"` with `from` and optional `to` (default `HEAD`). Use `names_only`, `offset` and `limit` for concise results.
+`git_show` accepts a separate `path` and `start_line`/`end_line` to inspect historical text; `REV:path`, flags and
+revision ranges are not accepted as a revision. Commit IDs, branch/tag names and `HEAD~2`/`HEAD^` ancestry are supported.
+Bulk patches omit protected paths and detected renames from protected sources. An exact protected-file request uses
+the ordinary approval card, including in Auto. Status/history metadata may still name protected files.
+
+Git is resolved from the extension host's PATH outside workspace roots. The host Git must support `--no-lazy-fetch`
+(documented in Git 2.48); if it does not, update Git rather than falling back to an unsafe read. Native inspection
+disables pagers, fsmonitor, textconv, external diff and configured clean/process filters. Results are bounded, with a
+15-second maximum command budget per inspection and 2 MiB maximum historical blob. Very large metadata sets fail
+explicitly; large patches are marked truncated. Structured Git output is filtered before it reaches chat and is not
+mirrored raw to a terminal. Git runs on the extension host in Remote environments too.
+
+Stage, unstage and commit remain a separate planned increment. Existing custom MCP servers and the terminal retain
+their own policies. Native Git settings use the same disabled/always-review controls as other native tools.
+
 **MCP servers for more tools.** Connect [Model Context Protocol](https://modelcontextprotocol.io) servers, local
 commands or remote URLs, from **Settings → MCP**, and the agent can use their tools in Act mode: issues, databases,
 documentation, browsers, anything a server offers. Each tool asks before it runs until you allow it, in every approval
