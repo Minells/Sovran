@@ -6,6 +6,9 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- Native `get_diagnostics`: cached VS Code Problems for the active file or all workspace roots, with literal
+  file/directory, severity and result-count filters. Read-only in Plan/Act, bounded by the result-size setting, with
+  protected/external/unverifiable paths omitted. No documents opened, language providers invoked or checks run.
 - Controlled `git_stage`, `git_unstage` and `git_commit`: individual saved-file selections, repository/branch/file and
   commit-message previews, mandatory approval in every mode, stale-index/HEAD/config/content checks and final runtime
   authorization before spawning Git. Hooks, filters and signing remain explicit privileged effects without checkpoint

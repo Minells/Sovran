@@ -124,6 +124,56 @@ exports.run = async function run() {
     await writeOutside(GOOD, cleared, 'changed outside VS Code: diagnostics were not cleared');
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
   });
+  await test('native diagnostics read cached Problems for active and unopened files with bounded filtering', async () => {
+    const { readDiagnostics } = require(process.env.SOVRAN_TEST_DIAGNOSTICS_MODULE);
+    const fs = require('node:fs/promises');
+    const path = require('node:path');
+    const root = vscode.workspace.workspaceFolders[0].uri.fsPath;
+    const dir = await fs.mkdtemp(path.join(root, 'sovran-diagnostics-'));
+    const active = vscode.Uri.file(path.join(dir, 'active.txt'));
+    const unopened = vscode.Uri.file(path.join(dir, 'unopened.txt'));
+    const protectedFile = vscode.Uri.file(path.join(dir, '.env'));
+    const external = vscode.Uri.file(process.env.SOVRAN_TEST_CONFIG_FILE);
+    const virtual = vscode.Uri.parse('sovran-test:/virtual');
+    const collection = vscode.languages.createDiagnosticCollection('sovran-smoke');
+    const diagnostic = (message, severity) => {
+      const d = new vscode.Diagnostic(new vscode.Range(1, 0, 1, 2), message, severity);
+      d.source = 'sovran-smoke';
+      return d;
+    };
+    try {
+      await Promise.all([active, unopened, protectedFile].map((uri) => fs.writeFile(uri.fsPath, 'one\ntwo\n')));
+      await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(active));
+      const edit = new vscode.WorkspaceEdit();
+      edit.insert(active, new vscode.Position(0, 0), 'unsaved\n');
+      assert.ok(await vscode.workspace.applyEdit(edit));
+      collection.set(active, [diagnostic('active error', vscode.DiagnosticSeverity.Error)]);
+      collection.set(unopened, [diagnostic('unopened warning', vscode.DiagnosticSeverity.Warning), diagnostic('unopened hint', vscode.DiagnosticSeverity.Hint)]);
+      collection.set(protectedFile, [diagnostic('SECRET DIAGNOSTIC', vscode.DiagnosticSeverity.Error)]);
+      collection.set(external, [diagnostic('EXTERNAL DIAGNOSTIC', vscode.DiagnosticSeverity.Error)]);
+      collection.set(virtual, [diagnostic('VIRTUAL DIAGNOSTIC', vscode.DiagnosticSeverity.Error)]);
+      assert.ok(!vscode.workspace.textDocuments.some((doc) => doc.uri.fsPath === unopened.fsPath));
+      const workspace = await readDiagnostics({});
+      assert.ok(workspace.content.includes('unopened warning'), workspace.content);
+      assert.ok(!/SECRET DIAGNOSTIC|EXTERNAL DIAGNOSTIC|VIRTUAL DIAGNOSTIC/.test(workspace.content));
+      const activeResult = await readDiagnostics({ scope: 'active' });
+      assert.ok(activeResult.content.includes('active error'));
+      assert.ok(!activeResult.content.includes('unopened warning'));
+      const filtered = await readDiagnostics({ path: dir, severity: 'warning' });
+      assert.ok(filtered.content.includes('unopened warning'));
+      assert.ok(!/active error|unopened hint/.test(filtered.content));
+      assert.strictEqual((await readDiagnostics({ path: unopened.fsPath, severity: 'hint' })).summary, '1 cached diagnostic(s)');
+      assert.ok((await readDiagnostics({ path: dir, max_results: 1 })).content.includes('Results limited'));
+      assert.ok(!vscode.workspace.textDocuments.some((doc) => doc.uri.fsPath === unopened.fsPath), 'the tool opened a document');
+      collection.clear();
+      assert.ok((await readDiagnostics({ path: dir })).content.includes('No matching cached diagnostics'));
+    } finally {
+      collection.dispose();
+      // Discard the disposable buffer rather than saving it into the fixture workspace.
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
   await test('config.yaml and Settings stay in sync both ways, and the file can be ignored', async () => {
     const fs = require('node:fs');
     const file = process.env.SOVRAN_TEST_CONFIG_FILE ?? '';

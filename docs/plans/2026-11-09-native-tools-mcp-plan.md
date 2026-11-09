@@ -16,6 +16,7 @@ does not change the implementation commits or their dependency order.
 | P1 | `feature/tool-availability-policy`, implementation commit `6b4886a`; native disable/force-Ask controls, offered-definition enforcement and live permission rechecks | 417 tests in 25 files, typecheck/lint/build, real VS Code 1.145.2 smoke suite, VSIX packaging | No manual layout review, minimum VS Code, Windows/Linux or Remote matrix |
 | P2a | `feature/native-git-read`, stacked on unmerged P1; five native Git reads and structured argv execution | 447 tests in 28 files on Node 22, typecheck/lint/build, real VS Code 1.145.2 smoke suite, VSIX packaging | Windows/Linux, Remote, minimum VS Code and fresh VSIX install not exercised |
 | P2b | `feature/native-git-write`, stacked on unmerged P2a; controlled stage/unstage/commit, typed approval card and stale-state/late permission checks | 480 tests in 29 files on Node 22, typecheck/lint/build, real VS Code 1.145.2 smoke suite, VSIX packaging | Real signing, manual Git-card/model checks, Windows/Linux, Remote and minimum VS Code not exercised |
+| P3 | `feature/workspace-diagnostics`, stacked on unmerged P2b at `12aa10f`; cached native diagnostics with workspace/active, literal path, severity and result filters; optional port/adapter/checkpoint capability | 506 tests in 30 files on Node 22, typecheck/lint/build, real VS Code 1.145.2 diagnostics and regression smoke suite, VSIX packaging | Manual model calls, Windows/Linux, Remote, minimum VS Code and fresh VSIX installation not exercised |
 | P4 | Independent `feature/web-runtime-spike`, commit `4fb1405`; locked experiment, transport/configuration reproducers, extraction/index fixture, bundle and VSIX measurements | Bundled worker on actual Node 20.18.0, root 392 tests in 23 files, typecheck/lint/build, two VSIX packages | **Adoption gate closed**: safe DNS-bound transport and helper routing remain unproven; default helpers/configuration cannot be adopted directly |
 | Website | Fetched and fast-forward checked `main` at `45381b3`; no feature/source change required by these increments | `npm run verify`: diagnostics/build and generated-site checks passed | Product Web claims wait for an implemented, verified feature |
 
@@ -24,7 +25,8 @@ P4 details are committed on its own branch under `docs/plans/2026-11-09-web-runt
 `experiments/web-runtime/README.md`; its worktree is `/Users/luca.minelli/sovran/.worktrees/web-runtime-spike`.
 P2a details: [native Git inspection status](2026-11-09-native-git-read-status.md).
 P2b details: [controlled native Git write status](2026-11-09-native-git-write-status.md).
-No phase was merged or pushed. P3/P8a and the remaining Web feasibility work are subsequent increments;
+P3 details: [workspace diagnostics status](2026-11-09-workspace-diagnostics-status.md).
+No phase was merged or pushed. P8a and the remaining Web feasibility work are subsequent increments;
 P5 stays gated. The original plan was retained and versioned with this progress update.
 
 ## 1. Baseline and working branch

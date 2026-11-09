@@ -43,6 +43,7 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
 - **Attachments:** extract text locally from PDF, modern Office, and OpenDocument files; list ZIP contents. Paste or
   attach images for vision-capable models.
 - **Native Git:** inspect status, diffs, history and branches in trusted Plan/Act workspaces; stage/unstage selected files and commit with mandatory review in Act.
+- **Workspace diagnostics:** read cached editor Problems for active or unopened files, filtered by file/folder, severity and result count. Protected and external paths are omitted; the tool does not run checks or start language servers.
 - **MCP tools:** user-configured stdio and Streamable HTTP servers, with per-tool Off / Ask / Allow controls.
 - **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
   history that can persist across restarts.

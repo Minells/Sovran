@@ -32,6 +32,12 @@ export interface EditorDiagnostic {
   source?: string;
 }
 
+export interface FileDiagnostics {
+  /** Absolute file-system path. Non-file URI schemes must not be included. */
+  path: string;
+  diagnostics: readonly EditorDiagnostic[];
+}
+
 export interface EditorContext {
   /** Absolute path of the active document (file scheme only). */
   path: string;
@@ -80,6 +86,10 @@ export interface WorkspacePort {
   /** Whether a saved-file operation would ignore unsaved editor changes. */
   isDirty?(absPath: string): boolean;
   activeEditor(): EditorContext | null;
+  /** Cached editor diagnostics, including unopened files. Never opens documents or starts analysis.
+   * When supplied, absPath selects one exact file. Callers enforce workspace/protected-path boundaries.
+   */
+  diagnostics?(absPath?: string): readonly FileDiagnostics[];
   openEditors(): string[];
   environment(): { os: string; shell: string };
 }
