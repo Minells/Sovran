@@ -2529,13 +2529,19 @@ export class SovranController implements vscode.Disposable {
         toolName: request.toolName,
         title: request.title,
         detail:
-          d.kind === 'edit'
-            ? { kind: 'edit', path: d.path, isNew: d.isNew, diff: d.diff, added: d.added, removed: d.removed }
-            : d.kind === 'command'
-              ? { kind: 'command', command: d.command, cwd: d.cwd, warnings: d.warnings, allowPrefix: d.warnings.length ? null : suggestAllowPrefix(d.command) }
-              : d.kind === 'mcp'
-                ? { kind: 'mcp', server: d.server, tool: d.tool, ...(d.title ? { title: d.title } : {}), arguments: d.arguments, hints: d.hints }
-                : { kind: 'read', path: d.path, reason: d.reason },
+          d.kind === 'git'
+            ? {
+                kind: 'git', operation: d.operation, repository: d.repository, branch: d.branch,
+                files: [...d.files], ...(d.message !== undefined ? { message: d.message } : {}),
+                preview: d.preview, warnings: [...d.warnings],
+              }
+            : d.kind === 'edit'
+              ? { kind: 'edit', path: d.path, isNew: d.isNew, diff: d.diff, added: d.added, removed: d.removed }
+              : d.kind === 'command'
+                ? { kind: 'command', command: d.command, cwd: d.cwd, warnings: d.warnings, allowPrefix: d.warnings.length ? null : suggestAllowPrefix(d.command) }
+                : d.kind === 'mcp'
+                  ? { kind: 'mcp', server: d.server, tool: d.tool, ...(d.title ? { title: d.title } : {}), arguments: d.arguments, hints: d.hints }
+                  : { kind: 'read', path: d.path, reason: d.reason },
         ...(request.reason ? { reason: request.reason } : {}),
       };
       const cleanup = () => {

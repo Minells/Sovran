@@ -77,6 +77,8 @@ export interface WorkspacePort {
   deleteFile(absPath: string): Promise<void>;
   /** Optional fast text search (e.g. ripgrep). Callers fall back to scanning files when absent. */
   searchText?(options: TextSearchOptions): Promise<TextSearchResult>;
+  /** Whether a saved-file operation would ignore unsaved editor changes. */
+  isDirty?(absPath: string): boolean;
   activeEditor(): EditorContext | null;
   openEditors(): string[];
   environment(): { os: string; shell: string };
@@ -103,8 +105,12 @@ export interface ProcessOptions {
 export interface FileProcessOptions extends ProcessOptions {
   /** Structured processes inherit a minimal host environment; these trusted overrides are applied last. */
   env?: Readonly<Record<string, string>>;
+  /** Explicit host keys requested by trusted code (e.g. signing-agent locations), never model-controlled. */
+  inheritEnv?: readonly string[];
   /** Never resolve an executable from these workspace roots, even through a PATH symlink. */
   disallowedExecutableRoots?: readonly string[];
+  /** Final synchronous runtime authorization check after executable resolution, immediately before spawning. */
+  beforeSpawn?: () => void;
 }
 
 export interface FileProcessResult extends ProcessResult {
@@ -119,7 +125,19 @@ export interface ProcessPort {
   runFile(executable: string, argv: readonly string[], options: FileProcessOptions): Promise<FileProcessResult>;
 }
 
+export interface GitApprovalDetail {
+  kind: 'git';
+  operation: 'stage' | 'unstage' | 'commit';
+  repository: string;
+  branch: string;
+  files: string[];
+  message?: string;
+  preview: string;
+  warnings: string[];
+}
+
 export type ApprovalDetail =
+  | GitApprovalDetail
   | {
       kind: 'edit';
       path: string;

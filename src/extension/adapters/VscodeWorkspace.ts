@@ -119,6 +119,12 @@ export class VscodeWorkspace implements WorkspacePort {
     if (!(await vscode.workspace.applyEdit(edit))) throw new Error(`VS Code refused to delete ${vscode.workspace.asRelativePath(absPath)}.`);
   }
 
+  isDirty(absPath: string): boolean {
+    return vscode.workspace.textDocuments.some(
+      (doc) => doc.uri.scheme === 'file' && path.relative(doc.uri.fsPath, absPath) === '' && doc.isDirty,
+    );
+  }
+
   activeEditor(): EditorContext | null {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.scheme !== 'file') return null;

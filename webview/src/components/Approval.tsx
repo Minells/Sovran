@@ -50,6 +50,10 @@ export function approvalCopy(approval: ApprovalView) {
     return { title: d.isNew ? 'Create this file?' : 'Apply these changes?', verb: d.isNew ? 'Create' : 'Apply', icon: 'git-pull-request-go-to-changes' };
   }
   if (d.kind === 'command') return { title: 'Run this command?', verb: 'Run', icon: 'terminal' };
+  if (d.kind === 'git') {
+    const verb = { stage: 'Stage', unstage: 'Unstage', commit: 'Commit' }[d.operation];
+    return { title: d.operation === 'commit' ? 'Commit these staged changes?' : `${verb} these files?`, verb, icon: 'git-commit' };
+  }
   if (d.kind === 'mcp') return { title: 'Run this MCP tool?', verb: 'Run', icon: 'mcp' };
   return { title: 'Allow reading a protected file?', verb: 'Allow', icon: 'shield' };
 }
@@ -140,7 +144,7 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
   // In an unattended mode the bar explains why this action still needs a human, without repeating a listed warning.
   const paused = app.approvalMode !== 'ask' && !!approval.reason;
   const reasonListed = d.kind === 'command' && !!approval.reason && d.warnings.includes(approval.reason);
-  const target = d.kind === 'command' || d.kind === 'mcp' ? null : d.path;
+  const target = d.kind === 'command' || d.kind === 'mcp' || d.kind === 'git' ? null : d.path;
 
   return (
     <section className="sv-approval-bar" aria-label={copy.title} data-kind={d.kind}>
@@ -159,6 +163,10 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
             ) : (
               <code className="sv-approval-bar__path">{target}</code>
             )
+          ) : d.kind === 'git' ? (
+            <span className="sv-approval-bar__path">
+              <code>{revealHidden(d.repository)}</code> · {revealHidden(d.branch)}
+            </span>
           ) : d.kind === 'mcp' ? (
             <span className="sv-approval-bar__path">
               <code>{d.tool}</code> on {d.server}
@@ -195,7 +203,16 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
         </div>
       ) : null}
 
-      {d.kind === 'command' ? (
+      {d.kind === 'git' ? (
+        <>
+          <button type="button" className="sv-link-btn" onClick={showDetail}>
+            Review {d.files.length} file(s){d.message !== undefined ? ' and commit message' : ''}
+          </button>
+          <ul className="sv-approval__warnings">
+            {d.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </>
+      ) : d.kind === 'command' ? (
         <>
           <pre className="sv-approval__command">{revealHidden(d.command)}</pre>
           <div className="sv-approval__meta">{d.cwd === '.' ? 'in the workspace folder' : `in ${d.cwd}`}</div>
@@ -341,7 +358,25 @@ export function ApprovalDetail({ approval }: { approval: ApprovalView }) {
   const d = approval.detail;
   return (
     <div className="sv-approval" id={approvalAnchor(approval.id)} data-kind={d.kind}>
-      {d.kind === 'edit' ? (
+      {d.kind === 'git' ? (
+        <>
+          <div className="sv-approval__meta">
+            <code>{revealHidden(d.repository)}</code> · {revealHidden(d.branch)}
+          </div>
+          <ul className="sv-list" aria-label="Files included in the Git action">
+            {d.files.map((file) => <li key={file}><code>{revealHidden(JSON.stringify(file))}</code></li>)}
+          </ul>
+          {d.message !== undefined ? (
+            <pre className="sv-approval__command" aria-label="Commit message">{revealHidden(d.message)}</pre>
+          ) : null}
+          {d.preview ? (
+            <>
+              <p className="sv-approval__meta">The preview may be shortened. Inspect truncated sections before approving.</p>
+              <DiffView diff={d.preview} label="Git change preview" />
+            </>
+          ) : null}
+        </>
+      ) : d.kind === 'edit' ? (
         <>
           <div className="sv-approval__meta">
             <span className="sv-tabular">

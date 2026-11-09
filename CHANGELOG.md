@@ -6,6 +6,10 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- Controlled `git_stage`, `git_unstage` and `git_commit`: individual saved-file selections, repository/branch/file and
+  commit-message previews, mandatory approval in every mode, stale-index/HEAD/config/content checks and final runtime
+  authorization before spawning Git. Hooks, filters and signing remain explicit privileged effects without checkpoint
+  undo; failed or cancelled actions ask users to inspect status before retrying.
 - Read-only native Git tools: `git_status`, `git_diff`, `git_log`, `git_show` and `git_branches`, available in trusted
   Plan/Act workspaces. Explicit repository selection, literal argv/pathspecs, protected-content filtering, paging,
   bounded process execution and worktree support require no Git MCP server or network access.
@@ -41,6 +45,9 @@ pre-releases and even minor versions are stable releases.
 - The status bar shows `auto-edit` or `auto` when Act mode runs unattended.
 
 ### Fixed
+- Recheck native tool permissions, trust, workspace scope and unsaved-file state at delayed Git process dispatch.
+- Remove the basic Git MCP shortcut now that native inspection and controlled writes are available, preserving saved
+  servers, custom forms and import workflows.
 - Tool calls must use the definitions offered in that model request and remain enabled at execution. Sovran checks
   workspace trust and permissions after approvals, rejects ambiguous dynamic names and stale definitions, and
   rechecks MCP Off / Ask / Allow before dispatch.

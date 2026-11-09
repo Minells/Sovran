@@ -1262,6 +1262,27 @@ describe('approvalKey', () => {
   });
 });
 
+describe('native Git approvals', () => {
+  it.each(['stage', 'unstage', 'commit'] as const)('shows repository/files and requires one-time approval for %s', async (operation) => {
+    const verb = { stage: 'Stage', unstage: 'Unstage', commit: 'Commit' }[operation];
+    mount(baseState({
+      approvalMode: 'auto',
+      session: { id: 's', title: 'Git', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: `git_${operation}`, arguments: '{}' }] }] },
+      run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'Git', callId: 'c1' } },
+      approvals: [{ id: 'ap', callId: 'c1', toolName: `git_${operation}`, title: 'Git', reason: 'Git writes always ask.', detail: { kind: 'git', operation, repository: 'app', branch: 'refs/heads/main', files: ['src/a.ts'], ...(operation === 'commit' ? { message: 'feat: reviewed\n\nLiteral $(touch forbidden)' } : {}), preview: '@@ -1 +1 @@\n-old\n+new', warnings: ['Hooks and signing may run programs.', 'Git changes have no checkpoint undo.'] } }],
+    }));
+    const bar = screen.getByRole('region', { name: operation === 'commit' ? 'Commit these staged changes?' : `${verb} these files?` });
+    expect(within(bar).getByText(/refs\/heads\/main/)).toBeInTheDocument();
+    expect(within(bar).getByText('Hooks and signing may run programs.')).toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Files included in the Git action' })).toHaveTextContent('src/a.ts');
+    if (operation === 'commit') expect(screen.getByLabelText('Commit message')).toHaveTextContent('Literal $(touch forbidden)');
+    expect(within(bar).queryByRole('button', { name: /Always allow/ })).not.toBeInTheDocument();
+    expect(within(bar).queryByRole('checkbox')).not.toBeInTheDocument();
+    await userEvent.click(within(bar).getByRole('button', { name: verb }));
+    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: true, feedback: undefined });
+  });
+});
+
 describe('diff view', () => {
   it('numbers lines, keeps removed lines that look like headers and expands long diffs', async () => {
     const { parseDiff } = await import('./components/Diff');
@@ -1475,6 +1496,19 @@ describe('MCP servers', () => {
     within(search).getByRole('radio', { name: 'Allow' }).focus();
     await userEvent.keyboard('{ArrowLeft}');
     expect(sent).toContainEqual({ type: 'setMcpToolPolicy', id: 'github', tool: 'search_issues', policy: 'ask' });
+  });
+
+  it('uses native Git instead of the basic preset and preserves saved Git MCP servers', async () => {
+    const { unmount } = open([]);
+    const presets = screen.getByRole('list', { name: 'Common MCP servers' });
+    expect(within(presets).queryByRole('button', { name: /^Git\b/ })).not.toBeInTheDocument();
+    unmount();
+    open([{ ...jira, id: 'legacygit', name: 'Git', command: 'uvx', args: ['mcp-server-git', '--repository', '${workspaceFolder}'], status: 'connected', error: undefined }]);
+    const saved = screen.getByRole('region', { name: 'Git' });
+    expect(within(saved).getByText(/mcp-server-git/)).toBeInTheDocument();
+    expect(sent.some((message) => message.type === 'deleteMcpServer' || message.type === 'saveMcpServer')).toBe(false);
+    await userEvent.click(within(saved).getByRole('button', { name: 'Edit Git' }));
+    expect(screen.getByLabelText('Arguments')).toHaveValue('mcp-server-git\n--repository\n${workspaceFolder}');
   });
 
   it('adds a server from a preset, checking the fields first', async () => {

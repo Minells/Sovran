@@ -50,18 +50,6 @@ const PRESETS: readonly Preset[] = [
     },
   },
   {
-    name: 'Git',
-    note: 'history and diffs, needs uv',
-    icon: 'git-branch',
-    draft: {
-      name: 'Git',
-      transport: 'stdio',
-      command: 'uvx',
-      args: ['mcp-server-git', '--repository', '${workspaceFolder}'],
-      auth: { type: 'none' },
-    },
-  },
-  {
     name: 'Fetch',
     note: 'web pages as Markdown, needs uv',
     icon: 'globe',

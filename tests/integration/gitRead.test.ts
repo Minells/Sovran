@@ -1,9 +1,7 @@
-import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AnyTool, ToolContext } from '../../src/core/tools/types';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
   gitBranchesTool,
   gitDiffTool,
@@ -14,103 +12,19 @@ import {
 import { parseChanges, validRevision } from '../../src/core/git/read';
 import { decide } from '../../src/core/permissions/policy';
 import { runFileProcess } from '../../src/extension/adapters/processExecution';
+import { createGitFixture, git } from '../fixtures/git';
 import { AgentRunner } from '../../src/core/agent/agentRunner';
 import { MemoryCapabilityStore } from '../../src/core/providers/capabilities';
 import { nullLogger } from '../../src/core/ports';
 import { createBuiltinRegistry } from '../../src/core/tools/builtin';
 import type { Session, ToolMessage } from '../../src/core/sessions/model';
-import {
-  FakeProcess,
-  MemoryWorkspace,
-  ScriptedApprovals,
-  ScriptedProvider,
-  call,
-  text,
-} from '../fixtures/fakes';
-
-class DiskWorkspace extends MemoryWorkspace {
-  constructor(private readonly folders: Array<{ name: string; path: string }>) {
-    super();
-  }
-  override roots() {
-    return this.folders;
-  }
-  override async realpath(file: string) {
-    return fs.realpath(file);
-  }
-  override async stat(file: string) {
-    try {
-      const s = await fs.stat(file);
-      return {
-        type: s.isDirectory() ? ('directory' as const) : s.isFile() ? ('file' as const) : ('other' as const),
-        size: s.size,
-        mtimeMs: s.mtimeMs,
-      };
-    } catch {
-      return null;
-    }
-  }
-}
+import { ScriptedApprovals, ScriptedProvider, call, text } from '../fixtures/fakes';
 
 const folders: string[] = [];
 afterEach(async () => {
   for (const folder of folders.splice(0)) await fs.rm(folder, { recursive: true, force: true });
 });
-const env = {
-  ...process.env,
-  GIT_CONFIG_NOSYSTEM: '1',
-  GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-  GIT_TERMINAL_PROMPT: '0',
-  GIT_AUTHOR_NAME: 'Fixture',
-  GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
-  GIT_COMMITTER_NAME: 'Fixture',
-  GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
-};
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync('git', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
-
-async function fixture() {
-  const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'sovran-git-'));
-  folders.push(folder);
-  const root = await fs.realpath(folder);
-  git(root, 'init', '--initial-branch=main');
-  await fs.writeFile(path.join(root, 'a.txt'), 'first\nsecond\n');
-  await fs.writeFile(path.join(root, '.env'), 'PRIVATE_FIXTURE=original-secret\n');
-  git(root, 'add', '--', 'a.txt', '.env');
-  git(root, '-c', 'commit.gpgsign=false', 'commit', '-m', 'Initial fixture');
-  const initial = git(root, 'rev-parse', 'HEAD');
-  const workspace = new DiskWorkspace([{ name: 'app', path: root }]);
-  const calls: string[][] = [];
-  const process = new FakeProcess();
-  process.runFile = async (executable, argv, options) => {
-    calls.push([...argv]);
-    return runFileProcess(executable, argv, {
-      ...options,
-      env: {
-        ...options.env,
-        GIT_CONFIG_NOSYSTEM: '1',
-        GIT_CONFIG_GLOBAL: globalThis.process.platform === 'win32' ? 'NUL' : '/dev/null',
-      },
-    });
-  };
-  const ctx: ToolContext = {
-    workspace,
-    process,
-    signal: new AbortController().signal,
-    settings: {
-      terminalTimeoutMs: 15000,
-      maxToolResultChars: 20000,
-      protectedPaths: ['**/.env', '**/.git/**'],
-    },
-    onOutput: vi.fn(),
-  };
-  const execute = async (tool: AnyTool, input: Record<string, unknown> = {}) => {
-    const args = tool.schema.parse({ repository: '.', ...input });
-    const prepared = await tool.prepare!(args, ctx);
-    return JSON.parse((await tool.execute(args, ctx, prepared)).content);
-  };
-  return { root, workspace, ctx, calls, initial, execute };
-}
+const fixture = () => createGitFixture(folders);
 
 describe('native Git reads on disposable repositories', () => {
   it('reads status, history, branches and historical blobs without changing the index', async () => {

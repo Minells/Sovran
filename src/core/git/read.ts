@@ -80,13 +80,14 @@ export async function gitPath(
   if (
     !input ||
     input.includes('\0') ||
+    input.trim() !== input ||
     input.includes('\\') ||
     path.isAbsolute(input) ||
     input.split('/').includes('..') ||
     input.includes('\uFFFD')
   ) {
     throw new ToolError(
-      'Git paths must be literal repository-relative paths without traversal or backslashes.',
+      'Git paths must be literal repository-relative paths without traversal, edge whitespace or backslashes.',
     );
   }
   const absolute = path.resolve(repository.absolute, input);
@@ -224,6 +225,10 @@ export class GitReader {
         GIT_PAGER: 'cat',
         PAGER: 'cat',
       },
+      beforeSpawn: () => {
+        this.ctx.revalidate?.();
+        this.checkActive();
+      },
       // Do not stream raw Git stdout/stderr: only filtered results may reach the model or webview.
     });
     if (result.cancelled || this.ctx.signal.aborted) throw new ToolError('Git inspection was cancelled.');
@@ -243,6 +248,8 @@ export class GitReader {
   }
 
   private checkActive() {
+    if (!this.ctx.workspace.roots().some((root) => isInside(root.path, this.repository.absolute)))
+      throw new ToolError('The repository is no longer inside the open workspace.');
     if (!this.ctx.workspace.isTrusted()) throw new ToolError('Native Git requires a trusted workspace.');
     if (this.ctx.signal.aborted) throw new ToolError('Git inspection was cancelled.');
     if (Date.now() >= this.deadline) throw new ToolError('Git inspection exceeded its time budget.');

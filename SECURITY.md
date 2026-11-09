@@ -60,6 +60,23 @@ Bulk patches omit protected paths and detected protected rename sources; explici
 approval. Paths and revisions have separate contracts, metadata must be complete before parsing, and raw process
 output is never streamed to chat or mirrored before filtering. Git must support the required protective flags.
 
+
+Native Git index changes and commits are separate execute-risk tools that require one-time approval in Act even in
+Auto, independently of command allow-lists or chat edit grants. Approval shows repository, branch, exact selected
+paths, bounded change preview and the commit message. Raw-index, HEAD/branch, administrative-directory, configuration
+and saved-file fingerprints reject changes during approval. Native writes on a repository are serialized inside
+Sovran; executable resolution finishes before a final live authorization/trust/workspace/dirty-buffer check.
+Directory-wide selections, implicit stage-all, amend/force and remote/history rewrite arguments are unavailable.
+
+Preparation uses only the read-only Git client and saved bytes; it does not run write-time filters, hooks or signing.
+An approved commit additionally forwards the host signing locations `SSH_AUTH_SOCK`, `GNUPGHOME` and `GPG_TTY`;
+these names are fixed by trusted code, never model arguments. Ambient Git redirection, runtime preloads and arbitrary
+plaintext token variables remain excluded. Actual stage/commit honors configured programs after approval: these have the user's privileges and may modify files
+or index, contact services or change the commit content. The warnings describe that boundary. Index changes and
+commits do not create a fictitious file checkpoint. Failure, timeout or cancellation can occur after a commit or index
+change; results require status/log inspection and never claim automatic rollback. Concurrent external Git changes
+and arbitrary hook behavior are not an OS sandbox or a cross-process transaction guarantee.
+
 These are read safeguards for trusted repositories, not an OS sandbox or content classification system. Git metadata
 may name protected files; moving/copying secrets into an unprotected path does not make that path protected by history.
 A linked worktree's ordinary `.git` file can reference its administrative Git directory outside that worktree.

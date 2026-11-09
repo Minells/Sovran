@@ -17,6 +17,8 @@ export interface ToolContext {
   signal: AbortSignal;
   settings: ToolSettings;
   onOutput?: (chunk: string) => void;
+  /** Runtime-owned live permission check for a tool about to perform a delayed effect. */
+  revalidate?: () => void;
   /** Converts documents for `read_file`. Without it (or without `workspace.readBytes`), documents read as binary. */
   documents?: DocumentReader;
 }

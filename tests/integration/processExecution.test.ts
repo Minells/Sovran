@@ -164,6 +164,22 @@ describe('structured process execution', () => {
     expect(env).toEqual({ PATH: '/bin', HOME: '/home/user', GIT_NO_LAZY_FETCH: '1' });
   });
 
+  it('forwards only explicitly requested signing locations alongside the minimal environment', () => {
+    const env = fileProcessEnvironment(
+      {
+        PATH: '/bin',
+        SSH_AUTH_SOCK: '/agent.sock',
+        GNUPGHOME: '/keys',
+        GIT_DIR: '/redirect',
+        NODE_OPTIONS: '--require evil',
+        TOKEN: 'secret',
+      },
+      {},
+      ['SSH_AUTH_SOCK', 'GNUPGHOME'],
+    );
+    expect(env).toEqual({ PATH: '/bin', SSH_AUTH_SOCK: '/agent.sock', GNUPGHOME: '/keys' });
+  });
+
   it('marks output truncated only after the full budget is exceeded', () => {
     const buffer = new OutputBuffer(10);
     buffer.push('12345678');

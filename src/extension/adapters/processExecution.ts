@@ -151,6 +151,7 @@ export function runProcess(
 export function fileProcessEnvironment(
   base: NodeJS.ProcessEnv,
   overrides: Readonly<Record<string, string>> = {},
+  inheritEnv: readonly string[] = [],
 ): NodeJS.ProcessEnv {
   const allowed = new Set([
     'PATH',
@@ -164,6 +165,7 @@ export function fileProcessEnvironment(
     'TEMP',
     'TMPDIR',
   ]);
+  for (const key of inheritEnv) allowed.add(key.toUpperCase());
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(base))
     if (allowed.has(key.toUpperCase()) && value !== undefined) env[key] = value;
@@ -224,8 +226,9 @@ export async function runFileProcess(
 ): Promise<FileProcessResult> {
   if (options.signal.aborted) return emptyResult(true);
   try {
-    const env = fileProcessEnvironment(process.env, options.env);
+    const env = fileProcessEnvironment(process.env, options.env, options.inheritEnv);
     const resolved = await resolveExecutable(executable, options, env);
+    options.beforeSpawn?.();
     return runProcess(resolved, argv, options, { env });
   } catch (error) {
     return emptyResult(

@@ -22,7 +22,7 @@ import {
   type McpTransportKind,
 } from '../core/mcp/config';
 import type { McpStatus } from '../core/mcp/status';
-import type { McpToolHint } from '../core/ports';
+import type { GitApprovalDetail, McpToolHint } from '../core/ports';
 
 export type { SessionMessage, SessionSummary, AgentMode, ApprovalMode, ToolMode, McpAuth, McpStatus, McpToolHint, McpToolPolicy, McpTransportKind };
 
@@ -85,6 +85,7 @@ export interface RunView {
 }
 
 export type ApprovalDetailView =
+  | GitApprovalDetail
   | { kind: 'edit'; path: string; isNew: boolean; diff: string; added: number; removed: number }
   /** `allowPrefix` is the suggested "always allow" entry, or null when this command can never be allow-listed. */
   | { kind: 'command'; command: string; cwd: string; warnings: string[]; allowPrefix: string | null }

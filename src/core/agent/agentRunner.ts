@@ -547,6 +547,16 @@ export class AgentRunner {
       !approvedReason && finalDecision.action === 'allow' && tool.risk !== 'read'
         ? { autoApproved: finalDecision.reason }
         : {};
+    ctx.revalidate = () => {
+      if (o.signal.aborted) throw new ToolError('Cancelled by the user.');
+      const unavailableReason = unavailable();
+      if (unavailableReason) throw new ToolError(unavailableReason);
+      const current = evaluate();
+      if (current.action === 'deny') throw new ToolError(current.reason);
+      if (current.action === 'ask' && current.reason !== approvedReason) {
+        throw new ToolError('Permissions changed before execution. Request this action again for approval.');
+      }
+    };
     try {
       const r = await tool.execute(args, ctx, prepared);
       if (o.signal.aborted && tool.risk !== 'write') {

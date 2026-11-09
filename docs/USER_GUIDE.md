@@ -71,8 +71,30 @@ disables pagers, fsmonitor, textconv, external diff and configured clean/process
 explicitly; large patches are marked truncated. Structured Git output is filtered before it reaches chat and is not
 mirrored raw to a terminal. Git runs on the extension host in Remote environments too.
 
-Stage, unstage and commit remain a separate planned increment. Existing custom MCP servers and the terminal retain
-their own policies. Native Git settings use the same disabled/always-review controls as other native tools.
+**Controlled Git changes.** In Act mode, `git_stage` and `git_unstage` accept an explicit `repository` and a `paths`
+array of individual files. `git_commit` accepts `repository` and a non-empty `message`, including multiple lines.
+It commits staged changes without automatically staging files. The native surface does not offer stage-all, amend,
+force, checkout, history rewrite or remote Git operations. Paths use forward slashes; edge whitespace and backslash
+filenames are refused rather than silently normalized.
+
+Every operation shows a repository/branch/file preview and asks for one-time approval, even in Auto or with a chat
+edit grant. For commits, the full message appears with the change preview in the transcript. Use **Review files and
+commit message** above the input before approving. There is no Always allow option for native Git changes.
+
+A changed raw index, HEAD, branch, administrative directory, configuration or selected saved content invalidates the
+pending action. Stage refuses known unsaved buffers, directory-wide selections and files over 5 MiB. A raw index over
+16 MiB or a commit involving more than 100 files requires another workflow. Native Git writes on the same repository
+are serialized within Sovran; other Git programs still have their own concurrency and locks.
+
+Git filters may run while staging; hooks/signing may run while committing. Approved commits retain the host
+signing-agent/key-store location variables without disabling configured signing. These programs have your privileges and
+can change files/index or contact services, so inspect the warnings and verify the resulting status/log. Previews use
+read-only settings with filters disabled and can be shortened. Git changes are not covered by checkpoint undo. After
+failure, timeout or cancellation, inspect status/log before retrying: a commit may already exist. No rollback is implied.
+
+The old basic Git MCP shortcut is removed; saved Git MCP servers, custom/import routes and their policies remain.
+Existing MCP servers and the terminal retain their own policies. Native Git settings use the same disabled/always-review
+controls as other native tools.
 
 **MCP servers for more tools.** Connect [Model Context Protocol](https://modelcontextprotocol.io) servers, local
 commands or remote URLs, from **Settings → MCP**, and the agent can use their tools in Act mode: issues, databases,

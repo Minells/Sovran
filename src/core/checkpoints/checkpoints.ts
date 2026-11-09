@@ -28,10 +28,12 @@ export class CheckpointRecorder implements WorkspacePort {
   readonly searchText: WorkspacePort['searchText'];
   /** Optional capabilities pass through as the inner workspace has them (read_file needs readBytes for documents). */
   readonly readBytes: WorkspacePort['readBytes'];
+  readonly isDirty: WorkspacePort['isDirty'];
 
   constructor(private readonly inner: WorkspacePort) {
     this.searchText = inner.searchText?.bind(inner);
     this.readBytes = inner.readBytes?.bind(inner);
+    this.isDirty = inner.isDirty?.bind(inner);
   }
 
   private async snapshot(absPath: string): Promise<FileSnapshot> {

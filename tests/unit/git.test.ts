@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { GIT_WRITE_REASON } from '../../src/core/git/write';
+import { decide } from '../../src/core/permissions/policy';
+import { gitStageTool, gitCommitTool } from '../../src/core/tools/builtin/gitWriteTools';
 import { parseChanges, prepareGit, validRevision } from '../../src/core/git/read';
 import { createBuiltinRegistry } from '../../src/core/tools/builtin';
 import type { ToolContext } from '../../src/core/tools/types';
@@ -68,5 +71,25 @@ describe('native Git argument and metadata boundaries', () => {
         .list('plan', { workspaceTrusted: true, disabledTools: ['git_show'] })
         .some((tool) => tool.name === 'git_show'),
     ).toBe(false);
+  });
+  it('does not allow a native Git mutation through Auto, edit grants or command allow-lists', () => {
+    for (const approvalMode of ['ask', 'edits', 'auto'] as const) {
+      expect(
+        decide({
+          risk: 'execute',
+          mode: 'act',
+          workspaceTrusted: true,
+          paths: [],
+          risks: [GIT_WRITE_REASON],
+          settings: { approvalMode, allowedCommands: ['git'], protectedPaths: [] },
+          grants: { edits: true },
+        }).action,
+      ).toBe('ask');
+    }
+    expect(gitStageTool.schema.safeParse({ repository: '.', paths: ['a'], all: true }).success).toBe(false);
+    expect(gitCommitTool.schema.safeParse({ repository: '.', message: 'message', amend: true }).success).toBe(
+      false,
+    );
+    expect(gitCommitTool.schema.safeParse({ repository: '.', message: '   ' }).success).toBe(false);
   });
 });

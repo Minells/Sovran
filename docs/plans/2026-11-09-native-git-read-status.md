@@ -51,8 +51,8 @@ The core agent-loop test exercises trusted Plan reads and rejects an explicit pr
   installation/upgrade was performed. Test coverage is not a claim that these matrices ran.
 - Git output is path-protected, not a semantic secret classifier. Metadata may name protected files; moving/copying
   sensitive content into an unprotected path does not keep it protected by history. No OS sandbox is claimed.
-- No stage/unstage/commit, network/history rewrite or repository checkpoint recovery is added. P2b implements the
-  separately approved mutation increment. Existing custom MCP entries/policies are preserved.
+- No stage/unstage/commit, network/history rewrite or repository checkpoint recovery is added. The separately reviewable P2b increment is now implemented on
+  `codex/native-git-write`; see [its status](2026-11-09-native-git-write-status.md). Existing custom MCP entries/policies are preserved.
 - Website source is unchanged; its public feature claims can be updated with the release documentation increment.
 
 Primary Git references checked during implementation:

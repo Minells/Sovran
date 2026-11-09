@@ -204,11 +204,31 @@ describe('tool availability at model request and dispatch', () => {
 
   it('rechecks protected command paths when rules change before dispatch', async () => {
     const t = fixture({ risk: 'execute', prepare: async () => ({ paths: [], command: 'cat secrets.txt' }) });
-    await t.run({ emit: (event) => {
-      if (event.type === 'tool_phase' && event.phase === 'running') t.policy({ protectedPaths: ['**/secrets.txt'] });
-    } });
+    await t.run({
+      emit: (event) => {
+        if (event.type === 'tool_phase' && event.phase === 'running')
+          t.policy({ protectedPaths: ['**/secrets.txt'] });
+      },
+    });
     expect(t.execute).not.toHaveBeenCalled();
     expect(t.result().status).toBe('denied');
+  });
+
+  it('provides a live execution check for a tool delayed after its initial dispatch', async () => {
+    const effect = vi.fn();
+    const t = fixture({
+      risk: 'execute',
+      execute: async (_args, ctx) => {
+        await Promise.resolve();
+        t.policy({ disabledTools: ['probe'] });
+        ctx.revalidate?.();
+        effect();
+        return { content: 'changed' };
+      },
+    });
+    await t.run();
+    expect(effect).not.toHaveBeenCalled();
+    expect(t.result().content).toContain('disabled');
   });
 
   it('checks cancellation immediately before dispatch', async () => {
