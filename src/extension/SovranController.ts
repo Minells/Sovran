@@ -41,6 +41,7 @@ import {
 } from '../core/sessions/model';
 import { generateTitle } from '../core/sessions/titles';
 import { createBuiltinRegistry } from '../core/tools/builtin';
+import type { WebFetchPort } from '../core/web/types';
 import type {
   AppState,
   ApprovalView,
@@ -122,6 +123,7 @@ async function readHead(absolute: string, length = 8000): Promise<Uint8Array> {
 }
 
 export interface ControllerDeps {
+  web?: WebFetchPort;
   logger: HostLogger;
   secrets: ProviderSecrets;
   diff: DiffPresenter;
@@ -2117,6 +2119,7 @@ export class SovranController implements vscode.Disposable {
       capabilities: this.deps.capabilities,
       logger: this.deps.logger,
       documents: this.documentReader,
+      web: this.deps.web,
     });
   }
 
@@ -2529,7 +2532,9 @@ export class SovranController implements vscode.Disposable {
         toolName: request.toolName,
         title: request.title,
         detail:
-          d.kind === 'git'
+          d.kind === 'web'
+            ? { kind: 'web', url: d.url }
+            : d.kind === 'git'
             ? {
                 kind: 'git', operation: d.operation, repository: d.repository, branch: d.branch,
                 files: [...d.files], ...(d.message !== undefined ? { message: d.message } : {}),

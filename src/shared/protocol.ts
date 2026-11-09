@@ -86,6 +86,7 @@ export interface RunView {
 
 export type ApprovalDetailView =
   | GitApprovalDetail
+  | { kind: 'web'; url: string }
   | { kind: 'edit'; path: string; isNew: boolean; diff: string; added: number; removed: number }
   /** `allowPrefix` is the suggested "always allow" entry, or null when this command can never be allow-listed. */
   | { kind: 'command'; command: string; cwd: string; warnings: string[]; allowPrefix: string | null }

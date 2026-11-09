@@ -9,6 +9,7 @@ const ctx = await esbuild.context({
   entryPoints: {
     extension: 'src/extension/extension.ts',
     documentWorker: 'src/extension/adapters/documentWorker.ts',
+    webWorker: 'src/extension/adapters/webWorker.ts',
   },
   bundle: true,
   format: 'cjs',

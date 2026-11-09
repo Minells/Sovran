@@ -174,6 +174,31 @@ exports.run = async function run() {
       await fs.rm(dir, { recursive: true, force: true });
     }
   });
+  await test('native Web adapters load the packaged worker and read only the controlled fixture', async () => {
+    const http = require('node:http');
+    const path = require('node:path');
+    const { readWeb } = require(process.env.SOVRAN_TEST_WEB_MODULE);
+    const seen = [];
+    const server = http.createServer((req, res) => {
+      seen.push(req.url);
+      if (req.url === '/robots.txt') return res.writeHead(200, { 'Content-Type': 'text/plain' }).end('User-agent: *\nAllow: /');
+      res.writeHead(200, { 'Content-Type': 'text/html' }).end('<title>Smoke docs</title><main><h1>Read me</h1><pre>const x = 1;</pre><a href="/api">API</a></main>');
+    });
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { prepared, result } = await readWeb(path.join(ext.extensionPath, 'dist', 'webWorker.js'), server.address().port);
+      assert.deepStrictEqual(prepared.approval, { kind: 'web', url: 'https://docs.example.com/guide' });
+      assert.ok(result.content.includes('Smoke docs'));
+      assert.ok(result.content.includes('# Read me'));
+      assert.ok(result.content.includes('const x = 1;'));
+      assert.ok(result.content.includes('https://docs.example.com/api'));
+      assert.ok(result.content.length <= 2000);
+      assert.deepStrictEqual(seen, ['/robots.txt', '/guide']);
+    } finally {
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+    }
+  });
   await test('config.yaml and Settings stay in sync both ways, and the file can be ignored', async () => {
     const fs = require('node:fs');
     const file = process.env.SOVRAN_TEST_CONFIG_FILE ?? '';

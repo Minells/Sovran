@@ -3,6 +3,7 @@ import type { DocumentReader } from '../documents/reader';
 import type { ApprovalDetail, ProcessPort, WorkspacePort } from '../ports';
 import type { ToolRisk } from '../permissions/policy';
 import type { ToolDisplay } from '../sessions/model';
+import type { WebFetchPort } from '../web/types';
 
 export interface ToolSettings {
   terminalTimeoutMs: number;
@@ -21,6 +22,7 @@ export interface ToolContext {
   revalidate?: () => void;
   /** Converts documents for `read_file`. Without it (or without `workspace.readBytes`), documents read as binary. */
   documents?: DocumentReader;
+  web?: WebFetchPort;
 }
 
 export interface PreparedAction {
@@ -31,6 +33,7 @@ export interface PreparedAction {
   risks?: string[];
   /** Set for a tool of an MCP server: it asks unless the user allowed it (see `PolicyInput.mcp`). */
   mcp?: { server: string; allowed: boolean };
+  network?: { url: string };
   approval?: ApprovalDetail;
   /** Tool-private state carried from prepare() to execute(). */
   state?: unknown;

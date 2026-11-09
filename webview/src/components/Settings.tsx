@@ -27,7 +27,7 @@ const AREAS: ReadonlyArray<{ id: SettingsArea; label: string; icon: string; desc
     description: 'Connect MCP servers to give the agent tools from other programs and services. Only you can add them: a repository never can.',
   },
   { id: 'context', label: 'Context', icon: 'book', description: 'What Sovran sends to the model with your messages.' },
-  { id: 'data', label: 'Data', icon: 'lock', description: 'Sovran has no server and no telemetry. Requests go only to the endpoints you configure.' },
+  { id: 'data', label: 'Data', icon: 'lock', description: 'Sovran has no server and no telemetry. Requests go to configured endpoints and public web URLs you approve. Read web content can be sent to your model and saved in chat history.' },
 ];
 
 const isArea = (v: unknown): v is SettingsArea => AREAS.some((a) => a.id === v);

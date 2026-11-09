@@ -3,6 +3,8 @@
 !dist/extension.js.LEGAL.txt
 !dist/documentWorker.js
 !dist/documentWorker.js.LEGAL.txt
+!dist/webWorker.js
+!dist/webWorker.js.LEGAL.txt
 !dist/webview/**
 !media/brand/**
 !media/sovran.css

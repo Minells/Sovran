@@ -7,6 +7,8 @@ import { NodeProcessRunner, TerminalMirror } from './adapters/NodeProcessRunner'
 import { RipgrepSearch } from './adapters/RipgrepSearch';
 import { VscodeWorkspace } from './adapters/VscodeWorkspace';
 import { WorkerDocumentConverter } from './adapters/WorkerDocumentConverter';
+import { NativeWebFetcher } from './adapters/NativeWebFetcher';
+import { WorkerHtmlExtractor } from './adapters/WorkerHtmlExtractor';
 import { FsImageStore, MemoryImageStore } from './adapters/FsImageStore';
 import { CommandLoader, FileIndex } from './workspaceServices';
 import { readSettings } from './config';
@@ -57,6 +59,7 @@ export async function activate(context: vscode.ExtensionContext) {
     diff,
     workspace: new VscodeWorkspace(ripgrep),
     process: new NodeProcessRunner(() => (readSettings().mirrorToTerminal ? mirror : undefined)),
+    web: new NativeWebFetcher(new WorkerHtmlExtractor(context.asAbsolutePath('dist/webWorker.js'))),
     capabilities: new MementoCapabilityStore(context.globalState),
     statusBar,
     repo,

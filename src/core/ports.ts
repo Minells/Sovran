@@ -148,6 +148,7 @@ export interface GitApprovalDetail {
 
 export type ApprovalDetail =
   | GitApprovalDetail
+  | { kind: 'web'; url: string }
   | {
       kind: 'edit';
       path: string;

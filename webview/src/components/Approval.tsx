@@ -46,6 +46,7 @@ export const approvalAnchor = (id: string) => `sv-approval-${id}`;
 
 export function approvalCopy(approval: ApprovalView) {
   const d = approval.detail;
+  if (d.kind === 'web') return { title: 'Read this public web page?', verb: 'Fetch', icon: 'globe' };
   if (d.kind === 'edit') {
     return { title: d.isNew ? 'Create this file?' : 'Apply these changes?', verb: d.isNew ? 'Create' : 'Apply', icon: 'git-pull-request-go-to-changes' };
   }
@@ -144,7 +145,7 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
   // In an unattended mode the bar explains why this action still needs a human, without repeating a listed warning.
   const paused = app.approvalMode !== 'ask' && !!approval.reason;
   const reasonListed = d.kind === 'command' && !!approval.reason && d.warnings.includes(approval.reason);
-  const target = d.kind === 'command' || d.kind === 'mcp' || d.kind === 'git' ? null : d.path;
+  const target = d.kind === 'web' ? d.url : d.kind === 'command' || d.kind === 'mcp' || d.kind === 'git' ? null : d.path;
 
   return (
     <section className="sv-approval-bar" aria-label={copy.title} data-kind={d.kind}>
@@ -161,7 +162,7 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
                 </span>
               </button>
             ) : (
-              <code className="sv-approval-bar__path">{target}</code>
+              <code className="sv-approval-bar__path">{revealHidden(target)}</code>
             )
           ) : d.kind === 'git' ? (
             <span className="sv-approval-bar__path">
@@ -203,7 +204,12 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
         </div>
       ) : null}
 
-      {d.kind === 'git' ? (
+      {d.kind === 'web' ? (
+        <div className="sv-approval__meta">
+          Reads this public URL and its robots.txt, with up to 3 redirects per resource within the same origin.
+          No login or browser cookies. Page body up to 1 MiB, robots.txt up to 128 KiB and 30 seconds total. Every URL asks for approval.
+        </div>
+      ) : d.kind === 'git' ? (
         <>
           <button type="button" className="sv-link-btn" onClick={showDetail}>
             Review {d.files.length} file(s){d.message !== undefined ? ' and commit message' : ''}

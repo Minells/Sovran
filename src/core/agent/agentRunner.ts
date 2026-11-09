@@ -18,6 +18,7 @@ import { ToolError, type AnyTool, type ToolContext, type ToolSettings } from '..
 import type { AgentEvent, RunOutcome } from './events';
 import { parseJsonLenient, parseToolCallBlock } from './promptedTools';
 import { buildSystemPrompt } from './systemPrompt';
+import type { WebFetchPort } from '../web/types';
 import { TaggedStreamParser } from './taggedStream';
 
 const defaultsOf = (s: Pick<AgentSettings, 'defaultContextWindow' | 'defaultMaxOutputTokens'>) => ({
@@ -43,6 +44,7 @@ export interface AgentDeps {
   logger: Logger;
   /** Lets `read_file` read PDF, Office and OpenDocument files (see ToolContext.documents). */
   documents?: DocumentReader;
+  web?: WebFetchPort;
   newId?: () => string;
   now?: () => number;
 }
@@ -469,6 +471,7 @@ export class AgentRunner {
       settings: { ...o.settings.tools, protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths },
       onOutput: (chunk) => o.emit({ type: 'tool_output', callId: call.id, chunk }),
       ...(this.deps.documents ? { documents: this.deps.documents } : {}),
+      ...(this.deps.web ? { web: this.deps.web } : {}),
     };
 
     let prepared;
@@ -498,6 +501,7 @@ export class AgentRunner {
         command: prepared.command,
         risks: [...(prepared.risks ?? []), ...commandRisks],
         mcp,
+        network: prepared.network,
         settings: policy,
         grants: o.grants,
       });

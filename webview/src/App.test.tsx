@@ -1262,6 +1262,25 @@ describe('approvalKey', () => {
   });
 });
 
+describe('native Web approval', () => {
+  it('shows the complete URL and scope in Auto with only a one-time approval', async () => {
+    const url = 'https://example.com/docs?topic=auth';
+    mount(baseState({
+      approvalMode: 'auto', mode: 'plan',
+      session: { id: 's', title: 'Web', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'web_fetch', arguments: JSON.stringify({ url }) }] }] },
+      run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: url, callId: 'c1' } },
+      approvals: [{ id: 'ap', callId: 'c1', toolName: 'web_fetch', title: url, reason: 'Public Web access requires approval for each URL.', detail: { kind: 'web', url } }],
+    }));
+    const bar = screen.getByRole('region', { name: 'Read this public web page?' });
+    expect(within(bar).getByText(url)).toBeInTheDocument();
+    expect(within(bar).getByText(/Reads this public URL and its robots.txt/)).toBeInTheDocument();
+    expect(within(bar).queryByRole('button', { name: /Always allow/ })).not.toBeInTheDocument();
+    expect(within(bar).queryByRole('checkbox')).not.toBeInTheDocument();
+    await userEvent.click(within(bar).getByRole('button', { name: 'Fetch' }));
+    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: true, feedback: undefined });
+  });
+});
+
 describe('native Git approvals', () => {
   it.each(['stage', 'unstage', 'commit'] as const)('shows repository/files and requires one-time approval for %s', async (operation) => {
     const verb = { stage: 'Stage', unstage: 'Unstage', commit: 'Commit' }[operation];

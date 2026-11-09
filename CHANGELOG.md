@@ -6,6 +6,10 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- Native `web_fetch`: one public HTTP(S) URL, readable HTML/text/Markdown/JSON and source links, with explicit approval
+  in trusted Plan/Act even in Auto. Direct IP-bound connections, same-origin redirects, robots checks, bounded
+  compressed/decoded bodies, cancellation and an isolated HTML/robots worker. No Crawlee, browser, global search,
+  login, persistent Web index or automatic background requests.
 - Native `get_diagnostics`: cached VS Code Problems for the active file or all workspace roots, with literal
   file/directory, severity and result-count filters. Read-only in Plan/Act, bounded by the result-size setting, with
   protected/external/unverifiable paths omitted. No documents opened, language providers invoked or checks run.

@@ -45,6 +45,8 @@ export interface PolicyInput {
    * what it does and no checkpoint can undo it, so it asks in every approval mode unless the user allowed that tool.
    */
   mcp?: { server: string; allowed: boolean };
+  /** An explicit public Web read; always asks, also in Plan/Auto. */
+  network?: { url: string };
   settings: PolicySettings;
   grants: SessionGrants;
 }
@@ -72,6 +74,8 @@ export function decide(input: PolicyInput): PolicyDecision {
   if (risk !== 'read' && !input.workspaceTrusted) {
     return { action: 'deny', reason: 'This workspace is in Restricted Mode. Trust the workspace to allow changes.' };
   }
+  if (input.network && !input.workspaceTrusted)
+    return { action: 'deny', reason: 'Trust the workspace before accessing the public Web.' };
 
   if (!input.mcp && input.toolName && settings.disabledTools?.includes(input.toolName)) {
     return { action: 'deny', reason: `${input.toolName} is disabled in Sovran's tool settings.` };
@@ -79,6 +83,7 @@ export function decide(input: PolicyInput): PolicyDecision {
   if (!input.mcp && input.toolName && settings.forceAskTools?.includes(input.toolName)) {
     return { action: 'ask', reason: `You chose to always review ${input.toolName}.` };
   }
+  if (input.network) return { action: 'ask', reason: 'Public Web access requires approval for each URL.' };
 
   switch (risk) {
     case 'read':

@@ -179,6 +179,7 @@ interface ToolResult { content: string; display?: ToolDisplay; isError?: boolean
 | `get_workspace_info` | read | Roots, OS, shell, git branch (from `.git/HEAD`), top-level entries |
 | `get_active_editor_context` | read | Active file, selection, open tabs, diagnostics of the active file |
 | `get_diagnostics` | read | Cached Problems for workspace/active file; literal file/folder, severity and count filters; protected and external paths omitted |
+| `web_fetch` | read | One approved public URL in trusted Plan/Act; robots and same-origin redirects share the direct IP-bound transport; bounded HTML/robots worker |
 | `write_file` | write | Create or overwrite. The diff is computed in `prepare` |
 | `edit_file` | write | Exact `old_string` → `new_string`. Must be unique unless `replace_all` |
 | `apply_diff` | write | N search/replace blocks applied atomically. All of them must match uniquely |

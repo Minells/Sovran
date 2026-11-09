@@ -9,6 +9,19 @@ records implementation separately; later-phase APIs and limits remain design cho
 Branch labels and future roadmap branches use the owner's `feature/` naming convention. The branch rename
 does not change the implementation commits or their dependency order.
 
+### Owner-approved scope amendment — small native Web fetch
+
+On 9 November 2026 the owner requested a small implementation on `feature/native-web-fetch` after reviewing P4.
+P5 now starts with one `web_fetch` tool and modular HTML/IP/robots libraries, without adopting Crawlee. The native
+transport must independently prove approval-before-network, validated-IP socket binding, same-origin redirects,
+robots routing, bounded bodies and cancellation. P4 remains evidence against direct adoption of Crawlee defaults;
+its Crawlee adoption gate no longer blocks this independent fetch path.
+
+There is no crawler, persistent index, browser, global search or account integration in this increment. P6/P7 remain
+optional follow-ups rather than prerequisites for a useful Web tool. General search still needs a separate owner
+decision about URL discovery; no external search provider or search-result scraping is authorized by this amendment.
+The original broader design below remains historical context where it refers to Crawlee or the three-tool release.
+
 ### Implementation checkpoint — 9 November 2026
 
 | Phase | Implemented / evidence | Automated checks observed | Manual / remaining gates |
@@ -17,6 +30,7 @@ does not change the implementation commits or their dependency order.
 | P2a | `feature/native-git-read`, stacked on unmerged P1; five native Git reads and structured argv execution | 447 tests in 28 files on Node 22, typecheck/lint/build, real VS Code 1.145.2 smoke suite, VSIX packaging | Windows/Linux, Remote, minimum VS Code and fresh VSIX install not exercised |
 | P2b | `feature/native-git-write`, stacked on unmerged P2a; controlled stage/unstage/commit, typed approval card and stale-state/late permission checks | 480 tests in 29 files on Node 22, typecheck/lint/build, real VS Code 1.145.2 smoke suite, VSIX packaging | Real signing, manual Git-card/model checks, Windows/Linux, Remote and minimum VS Code not exercised |
 | P3 | `feature/workspace-diagnostics`, stacked on unmerged P2b at `12aa10f`; cached native diagnostics with workspace/active, literal path, severity and result filters; optional port/adapter/checkpoint capability | 506 tests in 30 files on Node 22, typecheck/lint/build, real VS Code 1.145.2 diagnostics and regression smoke suite, VSIX packaging | Manual model calls, Windows/Linux, Remote, minimum VS Code and fresh VSIX installation not exercised |
+| P5 small fetch | `feature/native-web-fetch`, stacked on P3 at `eda4cca`; one public URL, mandatory approval, direct validated-IP transport, HTML/robots worker; no Crawlee | 600 tests in 32 files, typecheck/lint/build, real VS Code 1.145.2 smoke, actual Node 20.18.0 bundled runtime probe, VSIX packaging and public HTTPS probe | Manual model/layout review, Windows/Linux, Remote, minimum VS Code and fresh installation/upgrade remain P9 |
 | P4 | Independent `feature/web-runtime-spike`, commit `4fb1405`; locked experiment, transport/configuration reproducers, extraction/index fixture, bundle and VSIX measurements | Bundled worker on actual Node 20.18.0, root 392 tests in 23 files, typecheck/lint/build, two VSIX packages | **Adoption gate closed**: safe DNS-bound transport and helper routing remain unproven; default helpers/configuration cannot be adopted directly |
 | Website | Fetched and fast-forward checked `main` at `45381b3`; no feature/source change required by these increments | `npm run verify`: diagnostics/build and generated-site checks passed | Product Web claims wait for an implemented, verified feature |
 
@@ -26,8 +40,9 @@ P4 details are committed on its own branch under `docs/plans/2026-11-09-web-runt
 P2a details: [native Git inspection status](2026-11-09-native-git-read-status.md).
 P2b details: [controlled native Git write status](2026-11-09-native-git-write-status.md).
 P3 details: [workspace diagnostics status](2026-11-09-workspace-diagnostics-status.md).
-No phase was merged or pushed. P8a and the remaining Web feasibility work are subsequent increments;
-P5 stays gated. The original plan was retained and versioned with this progress update.
+Small P5 details: [native public Web fetch status](2026-11-09-native-web-fetch-status.md).
+No phase was merged or pushed. P8a and any broader crawling/index work are subsequent increments.
+The original plan was retained and versioned with the small-fetch amendment above.
 
 ## 1. Baseline and working branch
 
@@ -479,7 +494,7 @@ explicitly; do not merge an unreviewed umbrella branch into main.
 | **P2b** `feature/native-git-write`              | New stage/unstage/commit tools and repository approval preview; reuse process/policy pipeline                                                       | P2a                 | Reject stale index and protected-file bypass; no stage-all; Ask even in Auto; hooks/signing warning; no remote/history rewrite operation                                   |
 | **P3** `feature/workspace-diagnostics`          | Extend workspace port, adapter and checkpoint passthrough; add `get_diagnostics` with path/severity/result filters                                  | P1                  | Active/workspace diagnostics, unopened file, multi-root and protected/outside-path behavior tested; no language-server invocation unless needed                            |
 | **P4** `feature/web-runtime-spike`              | Isolated dependency/packaging/security feasibility experiment; no exposed Web tool or automatic network                                             | P0                  | Actual Crawlee lock, minimum-runtime worker test, safe-client routing proof, extracted documentation fixtures and bundle/activation report; go/no-go recorded              |
-| **P5** `feature/native-web-fetch`               | New Web contracts, network scope policy, safe HTTP client, worker and `web_fetch`; minimal Tools UI                                                 | P1 + P4             | DNS binding/redirect/proxy policy proven; no request before approval; robots/body/time limits; URLs and code blocks preserved; no browser/service/account needed           |
+| **P5** `feature/native-web-fetch`               | Small native public-URL read, explicit network approval, direct safe HTTP client and bounded HTML/robots worker; no Crawlee adoption (scope amendment above) | P1; stacked on P3 | DNS-bound sockets and direct-only proxy policy; no request before approval; same-origin redirects, robots/body/time limits, source/code preservation, bundled worker checks |
 | **P6** `feature/native-web-crawl`               | Extend the same Web service with Crawlee queues, scoped links, bounded sitemaps, shared limiters and progress                                       | P5                  | Exact request budgets despite concurrency/retries; adversarial sitemap/redirect tests; stop cancels sockets/workers; no cwd storage or hidden HTTP path                    |
 | **P7** `feature/local-web-index`                | New bounded workspace index/cache adapter and `web_search`; source management and clear-data UI                                                     | P6                  | Offline search sends zero requests; freshness explicit; persistence/eviction/restart/corruption/cross-workspace isolation tested; no complete-web claims                   |
 | **P8a** `feature/mcp-integration-catalog`       | Extend existing MCP UI/host for optional preset metadata, compatibility checks and install/connect lifecycle; retain custom-server/import workflows | P1                  | Three catalog entries with pinned candidates; zero install/launch from selecting a card; saved user servers/policies preserved                                             |
