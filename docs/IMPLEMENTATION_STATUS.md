@@ -1,5 +1,10 @@
 # Implementation Status
 
+> Native-tools checkpoint, 2026-11-10: P8a/P8b and P9 code are on sequential unmerged feature branches.
+> The current evidence and remaining gates are in [P9 verification](plans/2026-11-10-native-tools-release-hardening-status.md).
+> Older sections below describe earlier checkpoints; their MCP catalog/manual lists are superseded by Settings → Tools,
+> the Playwright/DevTools/GitHub catalog and the dated verification record.
+
 This is the source of truth for progress. *Verified* means checked by an automated test or a build step that was
 actually run. Anything else is labelled.
 

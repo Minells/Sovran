@@ -45,7 +45,8 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
 - **Native Git:** inspect status, diffs, history and branches in trusted Plan/Act workspaces; stage/unstage selected files and commit with mandatory review in Act.
 - **Workspace diagnostics:** read cached editor Problems for active or unopened files, filtered by file/folder, severity and result count. Protected and external paths are omitted; the tool does not run checks or start language servers.
 - **Public Web reads:** `web_fetch` reads one approved public URL as structured text with source links. Available in trusted Plan/Act, with approval for each URL even in Auto. No account, search service, browser or crawler installation.
-- **MCP tools:** user-configured stdio and Streamable HTTP servers, with per-tool Off / Ask / Allow controls.
+- **Tools:** built-in permissions and per-chat group selection with definition cost estimates. Optional Playwright,
+  Chrome DevTools and GitHub integrations, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
 - **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
   history that can persist across restarts.
 
@@ -97,7 +98,7 @@ pending, <kbd>Enter</kbd> approves from the empty input and <kbd>Esc</kbd> rejec
 
 ## Configuration
 
-Use the gear in the Sovran view title for **Models**, **Approvals**, **Agent**, **MCP**, **Context**, and **Data**.
+Use the gear in the Sovran view title for **Models**, **Approvals**, **Agent**, **Tools**, **Context**, and **Data**.
 Provider and security-sensitive settings are read from user scope; a repository cannot override them.
 
 For YAML configuration, run **Sovran: Open Model Config File (config.yaml)** to create `~/.sovran/config.yaml`.

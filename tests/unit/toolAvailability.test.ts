@@ -100,6 +100,72 @@ function fixture(overrides: Partial<AnyTool> = {}) {
 }
 
 describe('tool availability at model request and dispatch', () => {
+  it.each(['native', 'prompted'] as const)(
+    'excludes chat groups from %s requests and rejects guessed calls',
+    async (toolMode) => {
+      const t = fixture({ group: 'git' });
+      t.session.excludedToolGroups = ['git'];
+      const provider = new ScriptedProvider([
+        toolMode === 'native'
+          ? [call(0, 'probe', {})]
+          : [text('<tool_call>{"name":"probe","arguments":{}}</tool_call>')],
+        [text('done')],
+      ]);
+      const runner = new AgentRunner({
+        registry: t.registry,
+        provider,
+        workspace: t.workspace,
+        process: new FakeProcess(),
+        approvals: t.approvals,
+        capabilities: new MemoryCapabilityStore(),
+        logger: nullLogger,
+      });
+      await runner.run({
+        session: t.session,
+        providerId: 'p',
+        model: { id: 'm', toolMode },
+        mode: 'act',
+        settings,
+        grants: { edits: false },
+        signal: new AbortController().signal,
+        emit() {},
+      });
+      expect(provider.requests[0]!.tools).toBeUndefined();
+      expect(t.prepare).not.toHaveBeenCalled();
+      expect(t.execute).not.toHaveBeenCalled();
+      expect(t.result().status).toBe('denied');
+    },
+  );
+  it('rechecks a chat group changed during approval', async () => {
+    const t = fixture({
+      group: 'mcp:browser',
+      source: { kind: 'mcp', serverId: 'browser' },
+      risk: 'execute',
+    });
+    t.policy({ approvalMode: 'ask' });
+    t.onApproval(() => {
+      t.session.excludedToolGroups = ['mcp:browser'];
+    });
+    await t.run();
+    expect(t.approvals.requests).toHaveLength(1);
+    expect(t.execute).not.toHaveBeenCalled();
+    expect(t.result().content).toContain('excluded from this chat');
+  });
+  it('blocks a newly excluded MCP group even when its tool is set to Allow', async () => {
+    const t = fixture({
+      group: 'mcp:browser',
+      source: { kind: 'mcp', serverId: 'browser' },
+      risk: 'execute',
+      mcpPolicy: () => ({ server: 'Browser', allowed: true }),
+    });
+    t.onRequest(() => {
+      t.session.excludedToolGroups = ['mcp:browser'];
+    });
+    await t.run();
+    expect(t.execute).not.toHaveBeenCalled();
+    expect(t.approvals.requests).toHaveLength(0);
+    expect(t.result().status).toBe('denied');
+  });
   it('blocks disabled tools guessed by the model before prepare', async () => {
     const t = fixture();
     t.policy({ disabledTools: ['probe'] });

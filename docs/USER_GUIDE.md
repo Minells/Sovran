@@ -97,7 +97,7 @@ Existing MCP servers and the terminal retain their own policies. Native Git sett
 controls as other native tools.
 
 **MCP servers for more tools.** Connect [Model Context Protocol](https://modelcontextprotocol.io) servers, local
-commands or remote URLs, from **Settings → MCP**, and the agent can use their tools in Act mode: issues, databases,
+commands or remote URLs, from **Settings → Tools**, and the agent can use their tools in Act mode: issues, databases,
 documentation, browsers, anything a server offers. Each tool asks before it runs until you allow it, in every approval
 mode. See [MCP servers](#mcp-servers).
 
@@ -379,7 +379,7 @@ moment, the file wins and Sovran says so.
 ## MCP servers
 
 [MCP](https://modelcontextprotocol.io) servers give the agent tools from other programs and services. Add them in
-**Sovran Settings → MCP**: pick a common server, fill in the form, or paste the JSON snippet from the server's README
+**Sovran Settings → Tools**: choose an optional integration, fill in the form, or paste the JSON snippet from the server's README
 (the Claude Desktop, Cursor, Cline and VS Code formats all work, and a token in it moves to Secret Storage).
 
 - **Local servers** are commands Sovran starts, such as
@@ -405,7 +405,7 @@ The same list is the `sovran.mcp.servers` user setting:
     "id": "github",
     "name": "GitHub",
     "url": "https://api.githubcopilot.com/mcp/",
-    "auth": { "type": "bearer" },            // the token itself: Set token, in Settings → MCP
+    "auth": { "type": "bearer" },            // the token itself: Set token, in Settings → Tools
     "allowedTools": ["search_issues"]
   },
   {
@@ -420,13 +420,50 @@ The same list is the `sovran.mcp.servers` user setting:
 Servers start in the background when a window opens, only in trusted workspaces, and stop with the window. Their
 output, including errors, is in **Show logs**.
 
+### Optional managed integrations
+
+In **Settings → Tools**, selecting a catalog card only shows its setup. **Add integration** saves it disconnected,
+**Install dependencies** downloads the reviewed locked package with npm scripts disabled, and **Connect** asks before
+starting it. Existing custom servers and their policies remain available. No browser is bundled or downloaded.
+
+- **Playwright MCP** uses a separate system Chrome session by default. It offers navigation, snapshots and interactions.
+  Call `browser_snapshot` for inline content after an action; action responses may link a snapshot file that Sovran
+  does not open. Existing-profile mode is an advanced local choice: name the Chrome profile, install the companion
+  extension there and confirm the tab. It may expose signed-in accounts and is unavailable on Remote hosts.
+- **Chrome DevTools MCP** uses separate system Chrome for console, network and performance inspection. The managed
+  profile disables usage statistics, CrUX, update checks, JavaScript evaluation and file navigation.
+- **GitHub MCP** uses the hosted service and a PAT stored in Secret Storage. The default exposes a small read-only
+  set for issues and PRs; collaboration adds issue writes/comments and PR creation on Ask. Restrict token permissions
+  and repository access. Git does not require this integration.
+
+Node/npm and Chrome must exist on the **extension host**, which can be a Remote SSH/WSL/container machine. Missing
+components produce instructions. There is no automatic bridge to your desktop browser. Managed profile limits remain
+in force even if an individual tool is set to Allow. To use other launch settings, edit explicitly as a custom server.
+Browser integrations have wider network/session access than `web_fetch` and can initiate downloads. Playwright output
+is separate from chats in extension global storage (`mcp/artifacts`), with a 20 MiB eviction threshold, not a hard quota.
+Deleting a chat does not remove browser output. The managed tool surface excludes screenshots-to-model, arbitrary code
+and upload/install tools; no returned local path is opened automatically.
+
+### Tools for each chat
+
+Open **Tools** beside the chat input, or **Settings → Tools → Tools for this chat**, to choose native groups and
+configured integrations. Estimates show how much the available definitions add before selecting a group. Off,
+disconnected, Plan-incompatible and untrusted tools contribute no offered definitions. The estimate covers tool
+definitions, not the whole prompt or actual billed tokens. Selecting a disconnected group never connects it.
+
+Choices are saved with the chat when chat persistence is enabled. Older chats and new chats start with all groups
+selected, preserving existing behavior. A new integration starts selected unless excluded in that chat; its separate
+Connect and per-tool policies still apply. Deselecting a group also blocks pending calls. Global permissions and
+Plan/Restricted Mode remain in force. Re-enable a group and make a fresh model request to use definitions not offered
+in the previous request. No model request is used to select tools and no tool is silently removed by a token heuristic.
+
 ## Settings
 
-In **Settings → Agent**, **Disabled native tools** removes the named tools from model requests and blocks their
+In **Settings → Tools**, enable or always review individual built-in tools. Under **Advanced native overrides**, **Disabled native tools** removes the named tools from model requests and blocks their
 execution, including actions already awaiting approval. **Always review native tools** requires confirmation for
 those tools even for reads and in Auto mode. Use names such as `read_file`, `write_file` or `execute_terminal`.
 These are user settings (`sovran.tools.disabled` and `sovran.tools.forceAsk`); repository settings cannot change them.
-MCP tools retain their separate Off / Ask / Allow controls in **Settings → MCP**.
+MCP tools retain their separate Off / Ask / Allow controls in **Settings → Tools**.
 
 Tool availability, workspace trust and permissions are checked again after approval. If a definition or permission
 changes while the model responds or an approval is open, Sovran can refuse that pending call and ask the model to
@@ -457,8 +494,8 @@ request it again with the current tools. Plan mode remains read-only.
 | `sovran.approvals.fileEdits` | `ask` | *Deprecated*: use `sovran.approvals.mode`. `auto` here still starts windows in Auto-edit |
 
 All of these can be changed from **Sovran Settings** (the gear in the view title). Its areas, *Models*, *Approvals*,
-*Agent*, *MCP*, *Context* and *Data*, stay at the top as tabs: pick one to see only its settings (arrow keys move
-between them). The VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *MCP*, *Context*
+*Agent*, *Tools: Integrations*, *Context* and *Data*, stay at the top as tabs: pick one to see only its settings (arrow keys move
+between them). The VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *Tools: Integrations*, *Context*
 and *Chats*.
 
 ## Security

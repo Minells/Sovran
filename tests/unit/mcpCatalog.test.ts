@@ -222,6 +222,17 @@ describe('managed package installation lifecycle', () => {
     );
     expect(f.run).not.toHaveBeenCalled();
   });
+  it('rejects a managed local preset redirected to a URL or custom environment before spawning', async () => {
+    const f = await fixture();
+    const managed = { id: 'playwright', version: '0.0.84', profile: 'isolated' } as const;
+    await expect(
+      f.manager.launch(fromEntry({ id: 'x', url: 'https://other.example/mcp', managed })),
+    ).rejects.toThrow(/configuration changed/);
+    await expect(
+      f.manager.launch(fromEntry({ id: 'x', command: 'node', env: { CUSTOM: 'value' }, managed })),
+    ).rejects.toThrow(/configuration changed/);
+    expect(f.run).not.toHaveBeenCalled();
+  });
   it('inspects without spawning or creating storage', async () => {
     const f = await fixture();
     await f.manager.inspect();

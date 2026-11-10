@@ -5,13 +5,26 @@ import { buildContext, estimateTokens } from '../context/contextManager';
 import { commandPathRisks } from '../permissions/commands';
 import { decide, type AgentMode, type PolicySettings, type SessionGrants } from '../permissions/policy';
 import type { ApprovalPort, Logger, ProcessPort, WorkspacePort } from '../ports';
-import { capabilityKey, resolveToolMode, resolveVision, type CapabilityStore } from '../providers/capabilities';
+import {
+  capabilityKey,
+  resolveToolMode,
+  resolveVision,
+  type CapabilityStore,
+} from '../providers/capabilities';
 import { effectiveLimits } from '../providers/limits';
 import { ProviderError, errorFromException } from '../providers/errors';
 import type { ChatProvider, ModelConfig, ResolvedToolMode } from '../providers/types';
 import { PathError } from '../security/paths';
 import { redact } from '../security/redact';
-import { messagesForModel, type AssistantMessage, type ErrorInfo, type Session, type ToolCall, type ToolMessage, type ToolStatus } from '../sessions/model';
+import {
+  messagesForModel,
+  type AssistantMessage,
+  type ErrorInfo,
+  type Session,
+  type ToolCall,
+  type ToolMessage,
+  type ToolStatus,
+} from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
 import type { ToolRegistry } from '../tools/registry';
 import { ToolError, type AnyTool, type ToolContext, type ToolSettings } from '../tools/types';
@@ -72,7 +85,10 @@ export interface RunOptions {
   images?: ReadonlyMap<string, string>;
 }
 
-export type CompactOptions = Pick<RunOptions, 'session' | 'model' | 'settings' | 'signal' | 'emit' | 'secrets'>;
+export type CompactOptions = Pick<
+  RunOptions,
+  'session' | 'model' | 'settings' | 'signal' | 'emit' | 'secrets'
+>;
 
 interface TurnResult {
   text: string;
@@ -104,7 +120,11 @@ export class AgentRunner {
     let iteration = 0;
 
     const latest = [...o.session.messages].reverse().find((m) => m.role === 'user');
-    if (latest?.role === 'user' && latest.images?.length && !resolveVision(o.model.vision, this.deps.capabilities.get(key))) {
+    if (
+      latest?.role === 'user' &&
+      latest.images?.length &&
+      !resolveVision(o.model.vision, this.deps.capabilities.get(key))
+    ) {
       o.emit({
         type: 'notice',
         level: 'info',
@@ -145,19 +165,29 @@ export class AgentRunner {
             message: `Context window is full: ${built.droppedTurns} earlier exchange(s) are no longer sent to the model.`,
           });
         }
-        o.emit({ type: 'context', estimatedTokens: built.estimatedTokens, budgetTokens: built.budgetTokens, contextWindow: built.contextWindow });
+        o.emit({
+          type: 'context',
+          estimatedTokens: built.estimatedTokens,
+          budgetTokens: built.budgetTokens,
+          contextWindow: built.contextWindow,
+        });
         const request = built.request;
         offered = built.offered;
         o.session.messages.push(assistant);
         o.emit({ type: 'message_started', message: { ...assistant } });
         turn = await this.streamTurn(assistant, request, toolMode, o);
       } catch (e) {
-        const err = e instanceof ProviderError ? e : errorFromException(e, { url: o.providerId, secrets: o.secrets });
+        const err =
+          e instanceof ProviderError ? e : errorFromException(e, { url: o.providerId, secrets: o.secrets });
         // Like tools: an unconfigured model that refuses images is remembered as text-only, and the step is retried
         // with each image's name in its place. A model configured with `vision: true` reports the error instead.
         if (err.kind === 'vision_unsupported' && vision && o.model.vision === undefined && !visionRefused) {
           visionRefused = true;
-          this.deps.capabilities.set(key, { ...this.deps.capabilities.get(key), vision: false, updatedAt: this.now() });
+          this.deps.capabilities.set(key, {
+            ...this.deps.capabilities.get(key),
+            vision: false,
+            updatedAt: this.now(),
+          });
           this.removeMessage(o, assistant.id);
           o.emit({
             type: 'notice',
@@ -167,10 +197,19 @@ export class AgentRunner {
           iteration--;
           continue;
         }
-        if (err.kind === 'tools_unsupported' && toolMode === 'native' && (o.model.toolMode ?? 'auto') === 'auto' && !downgraded) {
+        if (
+          err.kind === 'tools_unsupported' &&
+          toolMode === 'native' &&
+          (o.model.toolMode ?? 'auto') === 'auto' &&
+          !downgraded
+        ) {
           downgraded = true;
           // Merge: the same record also holds the limits the server reported.
-          this.deps.capabilities.set(key, { ...this.deps.capabilities.get(key), toolMode: 'prompted', updatedAt: this.now() });
+          this.deps.capabilities.set(key, {
+            ...this.deps.capabilities.get(key),
+            toolMode: 'prompted',
+            updatedAt: this.now(),
+          });
           this.removeMessage(o, assistant.id);
           o.emit({
             type: 'notice',
@@ -185,7 +224,11 @@ export class AgentRunner {
           this.commitOrDrop(o, assistant);
           return { reason: 'cancelled' };
         }
-        const info: ErrorInfo = { kind: err.kind, message: redact(err.message, o.secrets ?? []), hint: err.hint };
+        const info: ErrorInfo = {
+          kind: err.kind,
+          message: redact(err.message, o.secrets ?? []),
+          hint: err.hint,
+        };
         assistant.error = info;
         this.deps.logger.warn(`Provider error (${err.kind}): ${info.message}`);
         o.emit({ type: 'message_committed', message: { ...assistant } });
@@ -246,6 +289,7 @@ export class AgentRunner {
         ? []
         : this.deps.registry.list(o.mode, {
             ...(o.policy?.() ?? o.settings.policy),
+            excludedToolGroups: o.session.excludedToolGroups,
             workspaceTrusted: this.deps.workspace.isTrusted(),
           });
     const schemas = this.deps.registry.schemas(tools);
@@ -261,7 +305,11 @@ export class AgentRunner {
       trusted: this.deps.workspace.isTrusted(),
       projectInstructions: o.projectInstructions,
     });
-    const { contextWindow, reserveTokens: maxOutput } = effectiveLimits(o.model, o.model.serverLimits, defaultsOf(o.settings));
+    const { contextWindow, reserveTokens: maxOutput } = effectiveLimits(
+      o.model,
+      o.model.serverLimits,
+      defaultsOf(o.settings),
+    );
     const schemaTokens = toolMode === 'native' ? estimateTokens(JSON.stringify(schemas)) : 0;
     const budgetTokens = Math.max(1024, contextWindow - maxOutput);
     const ctx = buildContext({
@@ -321,7 +369,11 @@ export class AgentRunner {
       if (o.signal.aborted) return false;
       const message = e instanceof Error ? redact(e.message, o.secrets ?? []) : String(e);
       this.deps.logger.warn(`Compaction failed: ${message}`);
-      o.emit({ type: 'notice', level: 'warning', message: `Could not summarize earlier messages (${message}). Older messages will be dropped instead.` });
+      o.emit({
+        type: 'notice',
+        level: 'warning',
+        message: `Could not summarize earlier messages (${message}). Older messages will be dropped instead.`,
+      });
       return false;
     }
   }
@@ -400,7 +452,11 @@ export class AgentRunner {
         calls.push(
           parsed.ok
             ? { id: `call_${this.newId()}`, name: parsed.name, arguments: parsed.argumentsJson }
-            : { id: `call_${this.newId()}`, name: '__invalid__', arguments: JSON.stringify({ error: parsed.error }) },
+            : {
+                id: `call_${this.newId()}`,
+                name: '__invalid__',
+                arguments: JSON.stringify({ error: parsed.error }),
+              },
         );
       }
     }
@@ -436,7 +492,10 @@ export class AgentRunner {
       return result('error', `Unknown tool "${call.name}". Available tools: ${names}.`);
     }
     if (o.mode === 'plan' && tool.risk !== 'read') {
-      return result('denied', `${tool.name} is not available in Plan mode (read-only). Describe the change in your plan instead.`);
+      return result(
+        'denied',
+        `${tool.name} is not available in Plan mode (read-only). Describe the change in your plan instead.`,
+      );
     }
 
     if (offered.get(call.name) !== tool) {
@@ -448,6 +507,7 @@ export class AgentRunner {
     const unavailable = () =>
       this.deps.registry.unavailable(tool, o.mode, {
         ...(o.policy?.() ?? o.settings.policy),
+        excludedToolGroups: o.session.excludedToolGroups,
         workspaceTrusted: this.deps.workspace.isTrusted(),
       });
     const unavailableReason = unavailable();
@@ -455,10 +515,13 @@ export class AgentRunner {
     if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.');
 
     const parsedJson = parseJsonLenient(call.arguments);
-    if (!parsedJson.ok) return result('error', `Arguments for ${tool.name} are not valid JSON: ${parsedJson.error}`);
+    if (!parsedJson.ok)
+      return result('error', `Arguments for ${tool.name} are not valid JSON: ${parsedJson.error}`);
     const parsed = tool.schema.safeParse(parsedJson.value);
     if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+      const issues = parsed.error.issues
+        .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+        .join('; ');
       return result('error', `Invalid arguments for ${tool.name}: ${issues}`);
     }
     const args = parsed.data;
@@ -488,10 +551,13 @@ export class AgentRunner {
     const evaluate = () => {
       const policy = o.policy?.() ?? o.settings.policy;
       const mcp = tool.mcpPolicy?.() ?? prepared.mcp;
-      const commandRisks = !mcp && prepared.command ? commandPathRisks(prepared.command, {
-        protectedPaths: policy.protectedPaths,
-        roots: this.deps.workspace.roots().map((r) => r.path),
-      }) : [];
+      const commandRisks =
+        !mcp && prepared.command
+          ? commandPathRisks(prepared.command, {
+              protectedPaths: policy.protectedPaths,
+              roots: this.deps.workspace.roots().map((r) => r.path),
+            })
+          : [];
       return decide({
         toolName: tool.name,
         risk: tool.risk,
@@ -513,17 +579,29 @@ export class AgentRunner {
 
     if (decision.action === 'ask') {
       o.emit({ type: 'tool_phase', callId: call.id, toolName: tool.name, label, phase: 'awaiting_approval' });
-      const detail = prepared.approval ?? { kind: 'read' as const, path: prepared.paths[0] ?? label, reason: decision.reason };
+      const detail = prepared.approval ?? {
+        kind: 'read' as const,
+        path: prepared.paths[0] ?? label,
+        reason: decision.reason,
+      };
       let response;
       try {
         response = await this.deps.approvals.request(
-          { id: this.newId(), callId: call.id, toolName: tool.name, title: label, detail, reason: decision.reason },
+          {
+            id: this.newId(),
+            callId: call.id,
+            toolName: tool.name,
+            title: label,
+            detail,
+            reason: decision.reason,
+          },
           o.signal,
         );
       } catch {
         return result('cancelled', 'The run was cancelled while waiting for approval.', { summary: label });
       }
-      if (o.signal.aborted) return result('cancelled', 'The run was cancelled while waiting for approval.', { summary: label });
+      if (o.signal.aborted)
+        return result('cancelled', 'The run was cancelled while waiting for approval.', { summary: label });
       if (!response.approved) {
         const feedback = response.feedback?.trim() ? ` User feedback: ${response.feedback.trim()}` : '';
         return result('denied', `The user rejected this action.${feedback}`, { summary: label });
@@ -564,9 +642,17 @@ export class AgentRunner {
     try {
       const r = await tool.execute(args, ctx, prepared);
       if (o.signal.aborted && tool.risk !== 'write') {
-        return result('cancelled', r.content || 'Cancelled.', { summary: r.summary ?? label, display: r.display, ...audit });
+        return result('cancelled', r.content || 'Cancelled.', {
+          summary: r.summary ?? label,
+          display: r.display,
+          ...audit,
+        });
       }
-      return result(r.isError ? 'error' : 'success', r.content, { summary: r.summary ?? label, display: r.display, ...audit });
+      return result(r.isError ? 'error' : 'success', r.content, {
+        summary: r.summary ?? label,
+        display: r.display,
+        ...audit,
+      });
     } catch (e) {
       if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.', { summary: label });
       this.deps.logger.warn(`Tool ${tool.name} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -616,7 +702,11 @@ export function canonicalArguments(raw: string): string {
     Array.isArray(v)
       ? v.map(sort)
       : v && typeof v === 'object'
-        ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, sort(x)]))
+        ? Object.fromEntries(
+            Object.entries(v as Record<string, unknown>)
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([k, x]) => [k, sort(x)]),
+          )
         : v;
   return JSON.stringify(sort(parsed.value));
 }

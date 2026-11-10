@@ -403,7 +403,7 @@ flowchart LR
   TF --> SRV2[remote server]
   HUB -- ToolSource --> REG[ToolRegistry]
   REG --> AR[AgentRunner]
-  MH -- McpView --> UI[Settings → MCP]
+  MH -- McpView --> UI[Settings → Tools]
 ```
 
 - **Core (`src/core/mcp`).** `McpHub` keeps one SDK `Client` per configured server and turns each tool of a connected
@@ -429,6 +429,22 @@ flowchart LR
   call time, so a tool turned off mid-run is refused.
 - **Lifecycle.** Servers start in the background at activation (and when the workspace is trusted), never blocking it;
   `deactivate` awaits `McpHost.dispose()`, which ends HTTP sessions and stops local processes.
+
+### Managed profiles and chat selection
+
+`core/mcp/catalog.ts` holds reviewed versions, profiles and explicit tool allowlists. The host owns installation in
+extension global storage via bundled lockfiles and `npm ci --ignore-scripts`; UI selection never starts I/O. Managed
+launch checks Node and known system Chrome, resolves an installed entrypoint and rejects altered endpoint/launch
+settings. Custom-server conversion is explicit. Remote extension-profile attachment is unavailable. Hub discovery,
+list refresh and dispatch retain the profile bound independently of Off/Ask/Allow. Browser outputs remain outside
+chat retention; returned local paths are data and are never dereferenced by the client.
+
+`Session.excludedToolGroups` stores chat exclusions; absence preserves existing behavior. `ToolRegistry` is still the
+single registry: model visibility and execution use the same selection, with current session exclusions read again
+before/after approval and by delayed-effect revalidation. Native user disabled/force-Ask overrides stay global.
+The controller projects available group counts and estimated schema cost per surface, refreshing after MCP, mode,
+trust or settings changes. Cost is an estimate, not a budget-based eviction mechanism. The UI keeps the internal
+`mcp` settings route for compatibility while presenting **Tools** with native controls and optional integrations.
 
 ## 13. Extension points for the future
 

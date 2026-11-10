@@ -35,7 +35,8 @@ vi.mock('vscode', async () => {
         return inside(abs) ? p.relative(root, abs).split(p.sep).join('/') : abs;
       },
       getConfiguration: (section: string) => ({
-        get: <T>(key: string, fallback?: T) => (`${section}.${key}` in h.config ? (h.config[`${section}.${key}`] as T) : fallback),
+        get: <T>(key: string, fallback?: T) =>
+          `${section}.${key}` in h.config ? (h.config[`${section}.${key}`] as T) : fallback,
         inspect: (key: string) => ({ globalValue: h.config[`${section}.${key}`] }),
       }),
       onDidGrantWorkspaceTrust: event(),
@@ -62,16 +63,27 @@ const { MemorySessionRepository } = await import('../../src/extension/adapters/F
 const { MemoryImageStore } = await import('../../src/extension/adapters/FsImageStore');
 const { mergeCommands } = await import('../../src/core/commands/slashCommands');
 type Controller = InstanceType<typeof SovranController>;
-type Panel = { reveal: ReturnType<typeof vi.fn>; setTitle: ReturnType<typeof vi.fn>; active: boolean; visible: boolean; viewColumn: number };
+type Panel = {
+  reveal: ReturnType<typeof vi.fn>;
+  setTitle: ReturnType<typeof vi.fn>;
+  active: boolean;
+  visible: boolean;
+  viewColumn: number;
+};
 
 const server = new MockOpenAIServer();
-const delta = (d: unknown, finish: string | null = null) => ({ choices: [{ index: 0, delta: d, finish_reason: finish }] });
+const delta = (d: unknown, finish: string | null = null) => ({
+  choices: [{ index: 0, delta: d, finish_reason: finish }],
+});
 
 beforeAll(async () => {
   await server.start();
   // The model edits the file named in the user's message, then answers "done" once it sees the tool result.
   server.handler = (req, res) => {
-    if (req.url.endsWith('/models')) return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ data: [{ id: 'm' }] }));
+    if (req.url.endsWith('/models'))
+      return res
+        .writeHead(200, { 'Content-Type': 'application/json' })
+        .end(JSON.stringify({ data: [{ id: 'm' }] }));
     const messages = (req.body?.messages ?? []) as Array<{ role: string; content: string }>;
     const last = messages[messages.length - 1];
     // Anything else (model-limit probes on other paths) is not a chat request.
@@ -79,7 +91,21 @@ beforeAll(async () => {
     if (last.role === 'tool') return sse(res, [delta({ content: 'done' }), delta({}, 'stop')]);
     const file = /edit (\w+)/.exec(last.content)?.[1] ?? 'x';
     const args = JSON.stringify({ path: `${file}.txt`, old_string: 'one', new_string: 'ONE' });
-    return sse(res, [delta({ tool_calls: [{ index: 0, id: `call-${file}`, type: 'function', function: { name: 'edit_file', arguments: args } }] }, 'tool_calls')]);
+    return sse(res, [
+      delta(
+        {
+          tool_calls: [
+            {
+              index: 0,
+              id: `call-${file}`,
+              type: 'function',
+              function: { name: 'edit_file', arguments: args },
+            },
+          ],
+        },
+        'tool_calls',
+      ),
+    ]);
   };
 });
 afterAll(() => server.stop());
@@ -105,7 +131,8 @@ function latest<K extends keyof AppState>(messages: HostMessage[], key: K): AppS
 const sessionOf = (messages: HostMessage[]) => latest(messages, 'session')?.id;
 const approvalsOf = (messages: HostMessage[]) => latest(messages, 'approvals') ?? [];
 /** Every chat a surface was sent messages about. */
-const chatsIn = (messages: HostMessage[]) => new Set(messages.flatMap((m) => ('sessionId' in m ? [m.sessionId] : [])));
+const chatsIn = (messages: HostMessage[]) =>
+  new Set(messages.flatMap((m) => ('sessionId' in m ? [m.sessionId] : [])));
 
 let repo: InstanceType<typeof MemorySessionRepository>;
 
@@ -113,7 +140,15 @@ beforeEach(async () => {
   h.info = [];
   h.warningAnswer = undefined;
   h.config = {
-    'sovran.providers': [{ id: 'mock', name: 'Mock', baseUrl: server.baseUrl, auth: { type: 'none' }, models: [{ id: 'm', toolMode: 'native' }] }],
+    'sovran.providers': [
+      {
+        id: 'mock',
+        name: 'Mock',
+        baseUrl: server.baseUrl,
+        auth: { type: 'none' },
+        models: [{ id: 'm', toolMode: 'native' }],
+      },
+    ],
     'sovran.defaultModel': 'mock/m',
     'sovran.sessions.generateTitles': false,
     'sovran.configFile.enabled': false,
@@ -136,11 +171,21 @@ beforeEach(async () => {
     capabilities: { get: () => undefined, set() {}, clear() {} },
     statusBar: { update() {} },
     repo: (repo = new MemorySessionRepository()),
-    checkpoints: { save: async () => undefined, load: async () => undefined, deleteForSession: async () => undefined },
+    checkpoints: {
+      save: async () => undefined,
+      load: async () => undefined,
+      deleteForSession: async () => undefined,
+    },
     images: new MemoryImageStore(),
     fileIndex: { suggest: async () => [] },
     commandLoader: { load: async () => mergeCommands([]), onDidChange: noop },
-    configFile: { displayPath: '~/.sovran/config.yaml', read: async () => ({ kind: 'missing' }), setProblems() {}, setSynced: async () => undefined, onDidChange: noop },
+    configFile: {
+      displayPath: '~/.sovran/config.yaml',
+      read: async () => ({ kind: 'missing' }),
+      setProblems() {},
+      setSynced: async () => undefined,
+      onDidChange: noop,
+    },
     reveal: revealSidebar,
     openPanel: async (sessionId: string | undefined, title: string) => {
       opened.push(sessionId);
@@ -159,6 +204,38 @@ beforeEach(async () => {
 
 afterEach(() => controller.dispose());
 
+it('keeps tool groups local to each chat and rejects a stale session intent', async () => {
+  const sidebarId = sessionOf(sidebar)!;
+  await controller.openInEditor();
+  const tabId = sessionOf(tabs.tab1!.messages)!;
+  await controller.handle({ type: 'setToolGroup', sessionId: tabId, group: 'git', selected: false }, 'tab1');
+  expect(latest(tabs.tab1!.messages, 'toolGroups')?.find((group) => group.id === 'git')?.selected).toBe(
+    false,
+  );
+  expect(latest(sidebar, 'toolGroups')?.find((group) => group.id === 'git')?.selected).toBe(true);
+  await controller.handle(
+    { type: 'setToolGroup', sessionId: sidebarId, group: 'git', selected: false },
+    'tab1',
+  );
+  expect(controller.snapshot().toolGroups?.find((group) => group.id === 'git')?.selected).toBe(true);
+});
+
+it('blocks an approved edit after the host excludes its group and persists the choice', async () => {
+  const sessionId = sessionOf(sidebar)!;
+  const running = controller.handle({ type: 'send', text: 'edit a' });
+  await vi.waitFor(() => expect(approvalsOf(sidebar)).toHaveLength(1));
+  await controller.handle({ type: 'setToolGroup', sessionId, group: 'editing', selected: false });
+  await controller.handle({ type: 'approval', id: approvalsOf(sidebar)[0]!.id, approved: true });
+  await running;
+  expect(workspace.get('a.txt')).toBe('one\n');
+  expect(
+    latest(sidebar, 'session')?.messages.some(
+      (message) => message.role === 'tool' && message.status === 'denied',
+    ),
+  ).toBe(true);
+  expect((await repo.load(sessionId))?.excludedToolGroups).toEqual(['editing']);
+});
+
 describe('surfaces', () => {
   it('gives every surface its own chat and answers requests where they came from', async () => {
     await controller.openInEditor();
@@ -175,7 +252,9 @@ describe('surfaces', () => {
     expect(tab.messages.some((m) => m.type === 'fileSuggestions' && m.requestId === 's1')).toBe(true);
     expect(latest(tab.messages, 'context')?.includeEditor).toBe(false);
     // Request ids are only unique within one webview, and the composer context is per surface.
-    expect(sidebar.filter((m) => m.type === 'fileSuggestions' || (m.type === 'patch' && 'context' in m.patch))).toEqual([]);
+    expect(
+      sidebar.filter((m) => m.type === 'fileSuggestions' || (m.type === 'patch' && 'context' in m.patch)),
+    ).toEqual([]);
   });
 
   it('runs chats in parallel and keeps each approval, delta and result with its own surface', async () => {
@@ -215,14 +294,21 @@ describe('surfaces', () => {
 
     expect(chatsIn(tab.messages)).toEqual(new Set([tabChat]));
     expect(chatsIn(sidebar)).toEqual(new Set([sideChat]));
-    expect(latest(sidebar, 'liveSessions')).toEqual([{ id: tabChat, inEditor: true, running: false, needsApproval: false }]);
+    expect(latest(sidebar, 'liveSessions')).toEqual([
+      { id: tabChat, inEditor: true, running: false, needsApproval: false },
+    ]);
   });
 
   it('refuses a second message in a chat that is still working', async () => {
     const run = controller.handle({ type: 'send', text: 'edit a' });
     await vi.waitFor(() => expect(approvalsOf(sidebar)).toHaveLength(1));
     await controller.handle({ type: 'send', text: 'edit b' });
-    expect(sidebar).toContainEqual(expect.objectContaining({ type: 'notice', message: expect.stringMatching(/still working in this chat/) }));
+    expect(sidebar).toContainEqual(
+      expect.objectContaining({
+        type: 'notice',
+        message: expect.stringMatching(/still working in this chat/),
+      }),
+    );
     controller.cancel();
     await run;
     expect(latest(sidebar, 'run')).toBeNull();
@@ -276,7 +362,9 @@ describe('surfaces', () => {
     const approval = approvalsOf(tab.messages)[0]!;
 
     controller.removePanel('tab1');
-    expect(latest(sidebar, 'liveSessions')).toEqual([expect.objectContaining({ inEditor: false, running: true, needsApproval: true })]);
+    expect(latest(sidebar, 'liveSessions')).toEqual([
+      expect.objectContaining({ inEditor: false, running: true, needsApproval: true }),
+    ]);
     await controller.decideProposal(false);
     await run;
     expect(workspace.get('a.txt')).toBe('one\n');
@@ -301,7 +389,8 @@ describe('surfaces', () => {
 
 describe('images in a chat', () => {
   type Part = { type: string; text?: string; image_url?: { url: string } };
-  const userContent = (body: { messages?: Array<{ role: string; content: unknown }> }) => body.messages?.filter((m) => m.role === 'user').at(-1)?.content;
+  const userContent = (body: { messages?: Array<{ role: string; content: unknown }> }) =>
+    body.messages?.filter((m) => m.role === 'user').at(-1)?.content;
 
   it('sends a pasted image to the model as an image part after its label, and keeps only its metadata in the chat', async () => {
     const original = server.handler;
@@ -318,13 +407,18 @@ describe('images in a chat', () => {
       const parts = userContent(bodies[0]!) as Part[];
       expect(parts).toEqual([
         { type: 'text', text: '<image name="Pasted image 1" type="PNG image" size="20×10"/>' },
-        { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from(png).toString('base64')}` } },
+        {
+          type: 'image_url',
+          image_url: { url: `data:image/png;base64,${Buffer.from(png).toString('base64')}` },
+        },
         { type: 'text', text: 'what is this?' },
       ]);
       // The saved chat names the image; its bytes stay in the image store.
       const saved = await repo.load(sessionOf(sidebar)!);
       const message = saved?.messages.find((m) => m.role === 'user');
-      expect(message).toMatchObject({ images: [{ name: 'Pasted image 1', source: 'pasted', mime: 'image/png', width: 20, height: 10 }] });
+      expect(message).toMatchObject({
+        images: [{ name: 'Pasted image 1', source: 'pasted', mime: 'image/png', width: 20, height: 10 }],
+      });
       expect(JSON.stringify(saved)).not.toContain('base64');
     } finally {
       server.handler = original;
@@ -337,7 +431,10 @@ describe('images in a chat', () => {
     server.handler = (req, res) => {
       if (!req.url.endsWith('/chat/completions')) return original(req, res);
       bodies.push(req.body as never);
-      if (bodies.length === 1) return res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: { message: 'm is not a multimodal model' } }));
+      if (bodies.length === 1)
+        return res
+          .writeHead(400, { 'Content-Type': 'application/json' })
+          .end(JSON.stringify({ error: { message: 'm is not a multimodal model' } }));
       return sse(res, [delta({ content: 'I cannot see it.' }), delta({}, 'stop')]);
     };
     try {
@@ -347,7 +444,13 @@ describe('images in a chat', () => {
       expect(userContent(bodies[1]!)).toBe(
         '<image name="Pasted image 1" type="PNG image" size="4×4" note="Not sent: this model does not accept images. Say so if the answer depends on it."/>\n\nlook',
       );
-      expect(sidebar.some((m) => m.type === 'notice' && /m does not accept images\. Sovran sent their names instead and retried/.test(m.message))).toBe(true);
+      expect(
+        sidebar.some(
+          (m) =>
+            m.type === 'notice' &&
+            /m does not accept images\. Sovran sent their names instead and retried/.test(m.message),
+        ),
+      ).toBe(true);
     } finally {
       server.handler = original;
     }

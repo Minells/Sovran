@@ -7,6 +7,7 @@ import { APPROVAL_OPTIONS } from '../lib/approvals';
 import { useStore } from '../state/store';
 import { getUiState, post, setUiState } from '../vscode';
 import { McpArea } from './McpSettings';
+import { ChatToolGroups, NativeToolSettings } from './ToolSettings';
 import { Button, CheckRow, Icon, IconButton } from './primitives';
 
 const update = (setting: SettingUpdate) => post({ type: 'updateSetting', setting });
@@ -17,17 +18,39 @@ const ref = (s: SelectedModel | null) => (s ? `${s.providerId}\u0000${s.modelId}
 export type SettingsArea = 'models' | 'approvals' | 'agent' | 'mcp' | 'context' | 'data';
 
 const AREAS: ReadonlyArray<{ id: SettingsArea; label: string; icon: string; description: string }> = [
-  { id: 'models', label: 'Models', icon: 'server-process', description: 'Which model answers in each mode, where it runs and how chats are named.' },
-  { id: 'approvals', label: 'Approvals', icon: 'shield', description: 'How much Act mode may do without asking you first.' },
+  {
+    id: 'models',
+    label: 'Models',
+    icon: 'server-process',
+    description: 'Which model answers in each mode, where it runs and how chats are named.',
+  },
+  {
+    id: 'approvals',
+    label: 'Approvals',
+    icon: 'shield',
+    description: 'How much Act mode may do without asking you first.',
+  },
   { id: 'agent', label: 'Agent', icon: 'hubot', description: 'Limits and visibility for each request.' },
   {
     id: 'mcp',
-    label: 'MCP',
+    label: 'Tools',
     icon: 'mcp',
-    description: 'Connect MCP servers to give the agent tools from other programs and services. Only you can add them: a repository never can.',
+    description:
+      'Choose tools for this chat, set built-in tool permissions and connect optional integrations.',
   },
-  { id: 'context', label: 'Context', icon: 'book', description: 'What Sovran sends to the model with your messages.' },
-  { id: 'data', label: 'Data', icon: 'lock', description: 'Sovran has no server and no telemetry. Requests go to configured endpoints and public web URLs you approve. Read web content can be sent to your model and saved in chat history.' },
+  {
+    id: 'context',
+    label: 'Context',
+    icon: 'book',
+    description: 'What Sovran sends to the model with your messages.',
+  },
+  {
+    id: 'data',
+    label: 'Data',
+    icon: 'lock',
+    description:
+      'Sovran has no server and no telemetry. Requests go to configured endpoints and public web URLs you approve. Read web content can be sent to your model and saved in chat history.',
+  },
 ];
 
 const isArea = (v: unknown): v is SettingsArea => AREAS.some((a) => a.id === v);
@@ -79,7 +102,12 @@ function AreaTabs({ current, onSelect }: { current: SettingsArea; onSelect: (are
 function AreaPanel({ area, children }: { area: SettingsArea; children: ReactNode }) {
   const a = AREAS.find((x) => x.id === area)!;
   return (
-    <section className="sv-settings__area" role="tabpanel" id={`sv-area-${area}`} aria-labelledby={`sv-tab-${area}`}>
+    <section
+      className="sv-settings__area"
+      role="tabpanel"
+      id={`sv-area-${area}`}
+      aria-labelledby={`sv-tab-${area}`}
+    >
       <p className="sv-settings__intro">{a.description}</p>
       <div className="sv-settings__body">{children}</div>
     </section>
@@ -92,8 +120,14 @@ const OVERRIDE_NOTE = 'This workspace overrides this setting in its .vscode/sett
 
 const MODEL_ROLE = {
   act: { label: 'Act model', help: 'Used for new chats and in Act mode.' },
-  plan: { label: 'Plan model', help: 'Plan mode can use a larger reasoning model, while Act uses a fast coder.' },
-  title: { label: 'Title model', help: 'A small, fast model is enough: the title is generated while the answer streams.' },
+  plan: {
+    label: 'Plan model',
+    help: 'Plan mode can use a larger reasoning model, while Act uses a fast coder.',
+  },
+  title: {
+    label: 'Title model',
+    help: 'A small, fast model is enough: the title is generated while the answer streams.',
+  },
 } as const;
 
 function ModelSelect({ role }: { role: 'act' | 'plan' | 'title' }) {
@@ -103,12 +137,19 @@ function ModelSelect({ role }: { role: 'act' | 'plan' | 'title' }) {
   const choices = app.providers.flatMap((p) => p.models.map((m) => ({ provider: p, model: m })));
   const onChange = (raw: string) => {
     const [providerId, modelId] = raw.split('\u0000');
-    post(providerId && modelId ? { type: 'setModel', role, providerId, modelId } : { type: 'setModel', role });
+    post(
+      providerId && modelId ? { type: 'setModel', role, providerId, modelId } : { type: 'setModel', role },
+    );
   };
   return (
     <div className="sv-field">
       <label htmlFor={id}>{MODEL_ROLE[role].label}</label>
-      <select id={id} value={ref(value)} onChange={(e) => onChange(e.target.value)} disabled={!choices.length}>
+      <select
+        id={id}
+        value={ref(value)}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={!choices.length}
+      >
         {role === 'plan' ? <option value="">Same as Act model</option> : null}
         {role === 'title' ? <option value="">Same as the chat's model</option> : null}
         {role === 'act' && !value ? <option value="">Choose a model</option> : null}
@@ -139,13 +180,21 @@ const SOURCE_LABEL: Record<LimitSource, string> = {
 /** The limits a request with this model will use, and where each comes from. */
 function ModelLimits({ selection }: { selection: SelectedModel | null }) {
   const { app } = useStore();
-  const m = selection && app.providers.find((p) => p.id === selection.providerId)?.models.find((x) => x.id === selection.modelId);
+  const m =
+    selection &&
+    app.providers.find((p) => p.id === selection.providerId)?.models.find((x) => x.id === selection.modelId);
   if (!m) return null;
   const e = effectiveLimits(m, m.serverLimits);
   return (
     <span className="sv-field__help sv-tabular" data-testid="model-limits">
-      Context {e.contextWindow.toLocaleString('en-US')} tokens ({SOURCE_LABEL[e.contextSource]}) · {e.reserveTokens.toLocaleString('en-US')} kept for
-      the reply ({e.reserveSource === 'model' ? 'set for this model' : e.reserveSource === 'server' ? "the server's limit" : 'default'})
+      Context {e.contextWindow.toLocaleString('en-US')} tokens ({SOURCE_LABEL[e.contextSource]}) ·{' '}
+      {e.reserveTokens.toLocaleString('en-US')} kept for the reply (
+      {e.reserveSource === 'model'
+        ? 'set for this model'
+        : e.reserveSource === 'server'
+          ? "the server's limit"
+          : 'default'}
+      )
     </span>
   );
 }
@@ -178,7 +227,11 @@ function ProvidersSummary() {
             const needsKey = p.authType !== 'none' && !p.hasKey;
             return (
               <li key={p.id}>
-                <span className="sv-dot" data-state={insecure || needsKey ? 'warn' : 'ok'} aria-hidden="true" />
+                <span
+                  className="sv-dot"
+                  data-state={insecure || needsKey ? 'warn' : 'ok'}
+                  aria-hidden="true"
+                />
                 <span className="sv-provider-list__name">{p.name}</span>
                 <span className="sv-provider-list__meta">
                   {p.models.length} model{p.models.length === 1 ? '' : 's'}
@@ -215,7 +268,9 @@ function ConfigFileField() {
   const status = {
     missing: 'Not created. Providers live in Settings only.',
     ok: `In sync with Settings · ${n ? providers : 'no providers yet'}`,
-    error: n ? `Has problems · Settings keep the last valid version (${providers})` : 'Has problems · not applied',
+    error: n
+      ? `Has problems · Settings keep the last valid version (${providers})`
+      : 'Has problems · not applied',
     ignored: 'Ignored · Settings are used alone',
   }[f.state];
   const icon = { missing: 'file-code', ok: 'sync', error: 'error', ignored: 'circle-slash' }[f.state];
@@ -223,8 +278,10 @@ function ConfigFileField() {
     missing:
       'Prefer text? Create the file: it starts with the providers you have in Settings, and from then on the two stay in sync. Save the file and Settings follow; change providers here and the file follows, keeping your comments.',
     ok: 'Save the file and Settings follow; change providers here and the file follows, keeping your comments. API keys stay in Secret Storage, never in the file.',
-    error: 'Fix the problems and save: the file then wins. Changes made here meanwhile are kept in Settings only.',
-    ignored: 'Use it again to sync once more: providers missing on either side are added, and where both define one, Settings win.',
+    error:
+      'Fix the problems and save: the file then wins. Changes made here meanwhile are kept in Settings only.',
+    ignored:
+      'Use it again to sync once more: providers missing on either side are added, and where both define one, Settings win.',
   }[f.state];
   return (
     <div className="sv-field">
@@ -280,7 +337,12 @@ function ApprovalModeChoice() {
     <fieldset className="sv-field sv-options" disabled={disabled}>
       <legend>Approvals in this window</legend>
       {APPROVAL_OPTIONS.map((o) => (
-        <label key={o.value} className="sv-option" data-tone={o.tone} data-checked={app.approvalMode === o.value}>
+        <label
+          key={o.value}
+          className="sv-option"
+          data-tone={o.tone}
+          data-checked={app.approvalMode === o.value}
+        >
           <input
             type="radio"
             name="sv-approval-mode"
@@ -310,7 +372,11 @@ function DefaultApprovalMode() {
   return (
     <div className="sv-field">
       <label htmlFor={id}>When a window opens, start in</label>
-      <select id={id} value={app.settings.defaultApprovalMode} onChange={(e) => update({ key: 'approvals.mode', value: e.target.value as ApprovalMode })}>
+      <select
+        id={id}
+        value={app.settings.defaultApprovalMode}
+        onChange={(e) => update({ key: 'approvals.mode', value: e.target.value as ApprovalMode })}
+      >
         {APPROVAL_OPTIONS.map((o) => (
           <option key={o.value} value={o.value}>
             {o.label}
@@ -318,7 +384,9 @@ function DefaultApprovalMode() {
         ))}
       </select>
       {app.settings.defaultApprovalMode === 'auto' ? (
-        <span className="sv-field__note">Every new window starts without approvals. Prefer Ask and switch to Auto per task.</span>
+        <span className="sv-field__note">
+          Every new window starts without approvals. Prefer Ask and switch to Auto per task.
+        </span>
       ) : null}
     </div>
   );
@@ -347,7 +415,9 @@ function ListEditor({
   const [draft, setDraft] = useState('');
   const id = useId();
   const value = draft.trim();
-  const error = value ? (validate?.(value) ?? '') || (items.includes(value) ? 'Already in the list.' : '') : '';
+  const error = value
+    ? (validate?.(value) ?? '') || (items.includes(value) ? 'Already in the list.' : '')
+    : '';
   const add = () => {
     if (!value || error) return;
     onChange([...items, value]);
@@ -361,7 +431,11 @@ function ListEditor({
           {items.map((item) => (
             <li key={item}>
               <code className={mono ? undefined : 'sv-plain'}>{item}</code>
-              <IconButton icon="close" label={`Remove ${item}`} onClick={() => onChange(items.filter((x) => x !== item))} />
+              <IconButton
+                icon="close"
+                label={`Remove ${item}`}
+                onClick={() => onChange(items.filter((x) => x !== item))}
+              />
             </li>
           ))}
         </ul>
@@ -442,7 +516,9 @@ function NumberSetting({
           if (e.key === 'Escape') setDraft(null);
         }}
       />
-      <span className={invalid ? 'sv-field__error' : 'sv-field__help'}>{invalid ? `Enter a number from ${min} to ${max}.` : help}</span>
+      <span className={invalid ? 'sv-field__error' : 'sv-field__help'}>
+        {invalid ? `Enter a number from ${min} to ${max}.` : help}
+      </span>
       {note ? <span className="sv-field__note">{note}</span> : null}
     </div>
   );
@@ -471,9 +547,18 @@ export function SettingsView() {
     <div className="sv-panel sv-settings">
       <div className="sv-settings__top">
         <div className="sv-panel__head">
-          <IconButton icon="arrow-left" label="Back to chat" onClick={() => post({ type: 'setView', view: 'chat' })} />
+          <IconButton
+            icon="arrow-left"
+            label="Back to chat"
+            onClick={() => post({ type: 'setView', view: 'chat' })}
+          />
           <h2>Settings</h2>
-          <Button variant="ghost" icon="json" title="Open all Sovran settings in the VS Code settings editor" onClick={() => post({ type: 'openSettings' })}>
+          <Button
+            variant="ghost"
+            icon="json"
+            title="Open all Sovran settings in the VS Code settings editor"
+            onClick={() => post({ type: 'openSettings' })}
+          >
             All settings
           </Button>
         </div>
@@ -499,7 +584,9 @@ export function SettingsView() {
             help='Commands that start with an entry run without asking, e.g. "npm test". Risky commands still ask.'
             items={s.allowedCommands}
             placeholder="npm test"
-            validate={(v) => (hasShellMetacharacters(v) ? 'Shell operators such as ; | & $ > < cannot be allowed.' : '')}
+            validate={(v) =>
+              hasShellMetacharacters(v) ? 'Shell operators such as ; | & $ > < cannot be allowed.' : ''
+            }
             onChange={(value) => update({ key: 'approvals.allowedCommands', value })}
           />
           <ListEditor
@@ -519,30 +606,6 @@ export function SettingsView() {
 
       {area === 'agent' ? (
         <AreaPanel area="agent">
-          <ListEditor
-            label="Disabled native tools"
-            help="Tool names excluded from requests and blocked during execution, including pending approvals."
-            items={s.disabledTools}
-            placeholder="execute_terminal"
-            validate={(v) =>
-              /^[a-zA-Z0-9_-]{1,64}$/.test(v)
-                ? ''
-                : 'Use a tool name with letters, digits, underscores or hyphens.'
-            }
-            onChange={(value) => update({ key: 'tools.disabled', value })}
-          />
-          <ListEditor
-            label="Always review native tools"
-            help="These native tools ask before running, including reads and tools in Auto mode. MCP permissions are set in MCP."
-            items={s.forceAskTools}
-            placeholder="read_file"
-            validate={(v) =>
-              /^[a-zA-Z0-9_-]{1,64}$/.test(v)
-                ? ''
-                : 'Use a tool name with letters, digits, underscores or hyphens.'
-            }
-            onChange={(value) => update({ key: 'tools.forceAsk', value })}
-          />
           <NumberSetting
             label="Maximum steps per request"
             help="Model round-trips before Sovran stops and asks you to continue."
@@ -578,6 +641,35 @@ export function SettingsView() {
 
       {area === 'mcp' ? (
         <AreaPanel area="mcp">
+          <ChatToolGroups />
+          <NativeToolSettings />
+          <details>
+            <summary>Advanced native overrides</summary>
+            <ListEditor
+              label="Disabled native tools"
+              help="Tool names excluded from requests and blocked during execution, including pending approvals."
+              items={s.disabledTools}
+              placeholder="execute_terminal"
+              validate={(v) =>
+                /^[a-zA-Z0-9_-]{1,64}$/.test(v)
+                  ? ''
+                  : 'Use a tool name with letters, digits, underscores or hyphens.'
+              }
+              onChange={(value) => update({ key: 'tools.disabled', value })}
+            />
+            <ListEditor
+              label="Always review native tools"
+              help="These native tools ask before running, including reads and tools in Auto mode. Integration permissions are set below."
+              items={s.forceAskTools}
+              placeholder="read_file"
+              validate={(v) =>
+                /^[a-zA-Z0-9_-]{1,64}$/.test(v)
+                  ? ''
+                  : 'Use a tool name with letters, digits, underscores or hyphens.'
+              }
+              onChange={(value) => update({ key: 'tools.forceAsk', value })}
+            />
+          </details>
           <McpArea />
         </AreaPanel>
       ) : null}

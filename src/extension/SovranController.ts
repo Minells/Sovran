@@ -5,15 +5,41 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import picomatch from 'picomatch';
 import { AgentRunner } from '../core/agent/agentRunner';
-import { CheckpointRecorder, planRestore, restoreFiles, type Checkpoint, type FileSnapshot } from '../core/checkpoints/checkpoints';
+import {
+  CheckpointRecorder,
+  planRestore,
+  restoreFiles,
+  type Checkpoint,
+  type FileSnapshot,
+} from '../core/checkpoints/checkpoints';
 import { expandCommand, mergeCommands, parseSlash, type SlashCommand } from '../core/commands/slashCommands';
 import { planCompaction } from '../core/context/compaction';
-import { configFileTemplate, mergeProviders, parseConfigFile, sameProviders, updateConfigText, type FileConfig, type ModelChoiceKey } from '../core/config/configFile';
+import {
+  configFileTemplate,
+  mergeProviders,
+  parseConfigFile,
+  sameProviders,
+  updateConfigText,
+  type FileConfig,
+  type ModelChoiceKey,
+} from '../core/config/configFile';
 import type { AgentEvent } from '../core/agent/events';
 import { matchesAllowList, suggestAllowPrefix } from '../core/permissions/commands';
 import type { AgentMode, ApprovalMode, SessionGrants } from '../core/permissions/policy';
+import { TOOL_GROUP_LABELS, normalizeExcludedGroups } from '../core/tools/groups';
+import { estimateTokens } from '../core/context/contextManager';
 import { isProtectedPath } from '../core/permissions/policy';
-import type { ApprovalPort, ApprovalRequest, ApprovalResponse, DirEntry, DocumentConverterPort, FileStat, ImageStorePort, WorkspacePort, WorkspaceRoot } from '../core/ports';
+import type {
+  ApprovalPort,
+  ApprovalRequest,
+  ApprovalResponse,
+  DirEntry,
+  DocumentConverterPort,
+  FileStat,
+  ImageStorePort,
+  WorkspacePort,
+  WorkspaceRoot,
+} from '../core/ports';
 import { capabilityKey, resolveVision, type CapabilityStore } from '../core/providers/capabilities';
 import { ProviderError, errorFromException } from '../core/providers/errors';
 import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
@@ -22,7 +48,13 @@ import type { ModelInfo, ServerLimits } from '../core/providers/limits';
 import type { ModelConfig, ProviderConfig } from '../core/providers/types';
 import { PathError, resolveAndVerify, resolveWorkspacePath, type ResolvedPath } from '../core/security/paths';
 import { compareEntries, displayPath } from '../core/util/files';
-import { decodeText, describeDocumentError, describeUnsupported, sniffFile, type TextEncodingName } from '../core/documents/detect';
+import {
+  decodeText,
+  describeDocumentError,
+  describeUnsupported,
+  sniffFile,
+  type TextEncodingName,
+} from '../core/documents/detect';
 import { DOCUMENT_LIMITS, DocumentError, type DocumentResult } from '../core/documents/types';
 import { DocumentReader } from '../core/documents/reader';
 import { IMAGE_LIMITS, imageInfo, type ImageInfo, type ImageMime } from '../core/images/images';
@@ -304,7 +336,16 @@ export class SovranController implements vscode.Disposable {
   }
 
   private createSurface(id: string, kind: SurfaceKind, session: Session, panel?: PanelHost): Surface {
-    return { id, kind, post: undefined, session, view: 'chat', attachments: [], includeEditor: this.settings.includeActiveEditor, panel };
+    return {
+      id,
+      kind,
+      post: undefined,
+      session,
+      view: 'chat',
+      attachments: [],
+      includeEditor: this.settings.includeActiveEditor,
+      panel,
+    };
   }
 
   // ------------------------------------------------------------------ lifecycle
@@ -319,7 +360,9 @@ export class SovranController implements vscode.Disposable {
     await this.reloadConfigFile('startup');
     const def = readDefaultModel();
     const [pid, ...rest] = def.split('/');
-    this.selected = this.validSelection(pid && rest.length ? { providerId: pid, modelId: rest.join('/') } : null);
+    this.selected = this.validSelection(
+      pid && rest.length ? { providerId: pid, modelId: rest.join('/') } : null,
+    );
     this.planModel = this.parseModelRef(readPlanModel());
     this.titleModel = this.parseModelRef(readTitleModel());
     this.commands = await this.deps.commandLoader.load().catch(() => mergeCommands([]));
@@ -335,19 +378,28 @@ export class SovranController implements vscode.Disposable {
       vscode.workspace.onDidGrantWorkspaceTrust(async () => {
         this.commands = await this.deps.commandLoader.load();
         this.patch({ workspace: this.workspaceView(), commands: this.commandViews() });
+        this.refreshTools();
       }),
       this.deps.commandLoader.onDidChange(async () => {
         this.commands = await this.deps.commandLoader.load();
         this.patch({ commands: this.commandViews() });
       }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.patch({ workspace: this.workspaceView() })),
-      ...(this.deps.mcp ? [this.deps.mcp.onDidChange(() => this.patch({ mcp: this.mcpView() }))] : []),
+      ...(this.deps.mcp
+        ? [
+            this.deps.mcp.onDidChange(() => {
+              this.patch({ mcp: this.mcpView() });
+              this.refreshTools();
+            }),
+          ]
+        : []),
       this.deps.configFile.onDidChange(() => void this.reloadConfigFile('change')),
       vscode.workspace.onDidChangeConfiguration(async (e) => {
         if (!e.affectsConfiguration('sovran')) return;
         this.settings = readSettings();
         await this.reloadProviders();
-        if (e.affectsConfiguration('sovran.configFile.enabled')) void this.reloadConfigFile(readConfigFileEnabled() ? 'enable' : 'startup');
+        if (e.affectsConfiguration('sovran.configFile.enabled'))
+          void this.reloadConfigFile(readConfigFileEnabled() ? 'enable' : 'startup');
         // Providers or model choices changed in Settings (the panel, the composer or settings.json): mirror them.
         else if (this.syncing) void this.queueConfig(() => this.pushSettingsToFile());
         this.selected = this.validSelection(this.selected);
@@ -363,6 +415,7 @@ export class SovranController implements vscode.Disposable {
           settings: readSettingsView(this.settings),
         });
         this.patchContexts();
+        this.refreshTools();
       }),
     );
   }
@@ -382,7 +435,12 @@ export class SovranController implements vscode.Disposable {
    * Registers an editor tab. It shows `sessionId` when that chat exists (a restored tab, or "Open in Editor"), else a
    * new chat. A chat shown by another surface moves here, so every chat has one place. Call before the webview loads.
    */
-  async addPanel(id: string, post: (m: HostMessage) => void, panel: PanelHost, sessionId?: string): Promise<void> {
+  async addPanel(
+    id: string,
+    post: (m: HostMessage) => void,
+    panel: PanelHost,
+    sessionId?: string,
+  ): Promise<void> {
     const session = (sessionId && (await this.loadSession(sessionId))) || this.blankSession();
     const surface = this.createSurface(id, 'panel', session, panel);
     surface.post = post;
@@ -443,7 +501,8 @@ export class SovranController implements vscode.Disposable {
 
   /** Drops an empty chat nobody shows any more from memory (it was never saved). */
   private forget(session: Session) {
-    if (session.messages.length === 0 && !this.surfaceFor(session.id) && !this.runs.has(session.id)) this.loaded.delete(session.id);
+    if (session.messages.length === 0 && !this.surfaceFor(session.id) && !this.runs.has(session.id))
+      this.loaded.delete(session.id);
   }
 
   /** Shows `session` in `surface` and sends the surface a full snapshot. */
@@ -478,7 +537,9 @@ export class SovranController implements vscode.Disposable {
   private sessionChanged(session: Session) {
     const surface = this.surfaceFor(session.id);
     if (!surface) return;
-    this.patchSurface(surface, { session: { id: session.id, title: session.title, messages: session.messages } });
+    this.patchSurface(surface, {
+      session: { id: session.id, title: session.title, messages: session.messages },
+    });
     surface.panel?.setTitle(this.tabTitle(session));
   }
 
@@ -488,7 +549,10 @@ export class SovranController implements vscode.Disposable {
     const shown = sessionId ? this.surfaceFor(sessionId) : undefined;
     if (shown?.panel) return shown.panel.reveal();
     // The chat may not be loaded yet (opened from the list): its summary has the title.
-    const title = (sessionId && (this.loaded.get(sessionId)?.title ?? this.sessions.find((s) => s.id === sessionId)?.title)) || DEFAULT_TITLE;
+    const title =
+      (sessionId &&
+        (this.loaded.get(sessionId)?.title ?? this.sessions.find((s) => s.id === sessionId)?.title)) ||
+      DEFAULT_TITLE;
     await this.deps.openPanel(sessionId, this.titleForTab(title));
   }
 
@@ -529,7 +593,12 @@ export class SovranController implements vscode.Disposable {
         case 'cancel':
           return this.cancel(surface.session.id);
         case 'approval':
-          return await this.resolveApproval(msg.id, { approved: msg.approved, grant: msg.grant, feedback: msg.feedback }, msg.allowCommand, msg.allowTool);
+          return await this.resolveApproval(
+            msg.id,
+            { approved: msg.approved, grant: msg.grant, feedback: msg.feedback },
+            msg.allowCommand,
+            msg.allowTool,
+          );
         case 'openApprovalDiff':
           return await this.showApprovalDiff(msg.id);
         case 'newSession':
@@ -544,6 +613,18 @@ export class SovranController implements vscode.Disposable {
           return await this.deleteSession(msg.id);
         case 'setMode':
           return this.setMode(msg.mode);
+        case 'setToolGroup': {
+          if (surface.session.id !== msg.sessionId) return;
+          const session = surface.session;
+          const excluded = normalizeExcludedGroups(session.excludedToolGroups);
+          session.excludedToolGroups = msg.selected
+            ? excluded.filter((id) => id !== msg.group)
+            : [...new Set([...excluded, msg.group])];
+          session.updatedAt = Date.now();
+          this.schedulePersist(session);
+          this.patchSurface(surface, this.toolsView(session));
+          return;
+        }
         case 'setApprovalMode':
           return await this.setApprovalMode(msg.mode);
         case 'pickModel':
@@ -551,7 +632,10 @@ export class SovranController implements vscode.Disposable {
         case 'selectModel':
           return await this.selectModel({ providerId: msg.providerId, modelId: msg.modelId });
         case 'setModel':
-          return await this.setModel(msg.role, msg.providerId && msg.modelId ? { providerId: msg.providerId, modelId: msg.modelId } : null);
+          return await this.setModel(
+            msg.role,
+            msg.providerId && msg.modelId ? { providerId: msg.providerId, modelId: msg.modelId } : null,
+          );
         case 'openConfigFile':
           return await this.openConfigFile();
         case 'reloadConfigFile':
@@ -620,7 +704,11 @@ export class SovranController implements vscode.Disposable {
         case 'compact':
           return await this.compactNow(surface);
         case 'suggestFiles':
-          return this.sendTo(surface, { type: 'fileSuggestions', requestId: msg.requestId, items: await this.suggestFiles(msg.query) });
+          return this.sendTo(surface, {
+            type: 'fileSuggestions',
+            requestId: msg.requestId,
+            items: await this.suggestFiles(msg.query),
+          });
         case 'attachPath':
           return await this.attachPath(surface, msg.path);
         case 'listDirectory':
@@ -665,6 +753,7 @@ export class SovranController implements vscode.Disposable {
       settings: readSettingsView(this.settings),
       configFile: this.configFileView,
       mcp: this.mcpView(),
+      ...this.toolsView(session),
     };
   }
 
@@ -672,12 +761,74 @@ export class SovranController implements vscode.Disposable {
     return this.deps.mcp?.view() ?? { active: false, servers: [] };
   }
 
+  private toolsView(session: Session): Pick<AppState, 'toolGroups' | 'nativeTools'> {
+    const definitions = this.registry.all();
+    const modelSelection = this.effectiveModel();
+    const model = this.providers
+      .find((provider) => provider.id === modelSelection?.providerId)
+      ?.models?.find((item) => item.id === modelSelection?.modelId);
+    const toolsEnabled = model?.toolMode !== 'none';
+    const selection = { ...this.settings.agent.policy, workspaceTrusted: this.deps.workspace.isTrusted() };
+    const groups = new Map<string, NonNullable<AppState['toolGroups']>[number]>();
+    const servers = this.deps.mcp?.view().servers ?? [];
+    // Include disconnected integrations so the chat choice survives connection and list changes.
+    for (const server of servers) {
+      const id = `mcp:${server.id}`;
+      groups.set(id, {
+        id,
+        label: server.name,
+        selected: !session.excludedToolGroups?.includes(id),
+        availableTools: 0,
+        definitionTokens: 0,
+      });
+    }
+    for (const tool of definitions) {
+      const id = tool.group ?? 'other';
+      const group = groups.get(id) ?? {
+        id,
+        label: TOOL_GROUP_LABELS[id] ?? id,
+        selected: !session.excludedToolGroups?.includes(id),
+        availableTools: 0,
+        definitionTokens: 0,
+      };
+      if (toolsEnabled && !this.registry.unavailable(tool, this.mode, selection)) {
+        group.availableTools++;
+        group.definitionTokens += estimateTokens(JSON.stringify(this.registry.schema(tool)));
+      }
+      groups.set(id, group);
+    }
+    return {
+      toolGroups: [...groups.values()],
+      nativeTools: definitions
+        .filter((tool) => tool.source?.kind !== 'mcp')
+        .map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          group: tool.group ?? 'other',
+          risk: tool.risk,
+          unavailable: this.registry.unavailable(tool, this.mode, {
+            ...selection,
+            excludedToolGroups: session.excludedToolGroups,
+          }),
+        })),
+    };
+  }
+
+  private refreshTools(): void {
+    for (const surface of this.surfaces.values()) this.patchSurface(surface, this.toolsView(surface.session));
+  }
+
   /** Chats open in editor tabs or running, so the chat list can show where each one is and whether it needs you. */
   private liveSessionViews(): LiveSessionView[] {
     const ids = new Set<string>(this.runs.keys());
     for (const s of this.surfaces.values()) if (s.kind === 'panel') ids.add(s.session.id);
     const awaiting = new Set([...this.approvals.values()].map((a) => a.sessionId));
-    return [...ids].map((id) => ({ id, inEditor: this.surfaceFor(id)?.kind === 'panel', running: this.runs.has(id), needsApproval: awaiting.has(id) }));
+    return [...ids].map((id) => ({
+      id,
+      inEditor: this.surfaceFor(id)?.kind === 'panel',
+      running: this.runs.has(id),
+      needsApproval: awaiting.has(id),
+    }));
   }
 
   private liveSessionsChanged() {
@@ -685,7 +836,9 @@ export class SovranController implements vscode.Disposable {
   }
 
   private usageView(s: Session): AppState['usage'] {
-    return s.usage ? { tokens: s.usage.tokens, contextWindow: s.usage.contextWindow, source: s.usage.source } : null;
+    return s.usage
+      ? { tokens: s.usage.tokens, contextWindow: s.usage.contextWindow, source: s.usage.source }
+      : null;
   }
 
   private compactionView(s: Session): AppState['compaction'] {
@@ -747,7 +900,11 @@ export class SovranController implements vscode.Disposable {
 
   private workspaceView(): AppState['workspace'] {
     const folders = vscode.workspace.workspaceFolders ?? [];
-    return { name: vscode.workspace.name ?? null, trusted: vscode.workspace.isTrusted, hasFolder: folders.length > 0 };
+    return {
+      name: vscode.workspace.name ?? null,
+      trusted: vscode.workspace.isTrusted,
+      hasFolder: folders.length > 0,
+    };
   }
 
   private providerViews(): ProviderView[] {
@@ -803,7 +960,9 @@ export class SovranController implements vscode.Disposable {
   private updateStatusBar() {
     const effective = this.effectiveModel();
     const model = effective ? this.modelLabel(effective) : null;
-    const baseUrl = effective ? this.providers.find((p) => p.id === effective.providerId)?.baseUrl : undefined;
+    const baseUrl = effective
+      ? this.providers.find((p) => p.id === effective.providerId)?.baseUrl
+      : undefined;
     this.deps.statusBar.update({
       model,
       location: endpointLocation(baseUrl),
@@ -846,20 +1005,30 @@ export class SovranController implements vscode.Disposable {
     if (active) return (this.lastTextEditor = active);
     const last = this.lastTextEditor;
     const chatTabActive = [...this.surfaces.values()].some((s) => s.panel?.active);
-    return chatTabActive && last && (vscode.window.visibleTextEditors ?? []).includes(last) ? last : undefined;
+    return chatTabActive && last && (vscode.window.visibleTextEditors ?? []).includes(last)
+      ? last
+      : undefined;
   }
 
   private updateEditorContext(push = false) {
     const ed = this.textEditor();
     let next: EditorContextView | null = null;
     if (ed && ed.document.uri.scheme === 'file') {
-      const rel = vscode.workspace.asRelativePath(ed.document.uri, (vscode.workspace.workspaceFolders?.length ?? 0) > 1);
+      const rel = vscode.workspace.asRelativePath(
+        ed.document.uri,
+        (vscode.workspace.workspaceFolders?.length ?? 0) > 1,
+      );
       const sel = ed.selection;
       const base = path.basename(ed.document.uri.fsPath);
       const blocked = this.editorBlock(ed.document.uri, rel);
       next = sel.isEmpty
         ? { path: rel, label: base }
-        : { path: rel, label: `${base}:${sel.start.line + 1}-${sel.end.line + 1}`, startLine: sel.start.line + 1, endLine: sel.end.line + 1 };
+        : {
+            path: rel,
+            label: `${base}:${sel.start.line + 1}-${sel.end.line + 1}`,
+            startLine: sel.start.line + 1,
+            endLine: sel.end.line + 1,
+          };
       if (blocked) next.blocked = blocked;
     }
     if (JSON.stringify(next) === JSON.stringify(this.editor)) return;
@@ -871,9 +1040,17 @@ export class SovranController implements vscode.Disposable {
     const out: ContextAttachment[] = [];
     const ed = this.textEditor();
     if (surface.includeEditor && ed && ed.document.uri.scheme === 'file') {
-      const rel = vscode.workspace.asRelativePath(ed.document.uri, (vscode.workspace.workspaceFolders?.length ?? 0) > 1);
+      const rel = vscode.workspace.asRelativePath(
+        ed.document.uri,
+        (vscode.workspace.workspaceFolders?.length ?? 0) > 1,
+      );
       // The lexical check drives the chip; the send-time check also follows symbolic links.
-      const allowed = !this.editorBlock(ed.document.uri, rel) && (await resolveAndVerify(ed.document.uri.fsPath, this.deps.workspace).then(() => true, () => false));
+      const allowed =
+        !this.editorBlock(ed.document.uri, rel) &&
+        (await resolveAndVerify(ed.document.uri.fsPath, this.deps.workspace).then(
+          () => true,
+          () => false,
+        ));
       if (allowed) {
         const sel = ed.selection;
         if (!sel.isEmpty) {
@@ -888,7 +1065,12 @@ export class SovranController implements vscode.Disposable {
           });
         } else {
           const text = ed.document.getText();
-          out.push({ kind: 'file', path: rel, content: text.slice(0, MAX_EDITOR_FILE_CHARS), truncated: text.length > MAX_EDITOR_FILE_CHARS || undefined });
+          out.push({
+            kind: 'file',
+            path: rel,
+            content: text.slice(0, MAX_EDITOR_FILE_CHARS),
+            truncated: text.length > MAX_EDITOR_FILE_CHARS || undefined,
+          });
         }
       }
     }
@@ -931,7 +1113,10 @@ export class SovranController implements vscode.Disposable {
         }
         // UTF-8 goes through the workspace, which prefers the unsaved text of an open editor.
         const encoding = content.encoding ?? 'utf-8';
-        const text = encoding === 'utf-8' ? await this.deps.workspace.readFile(a.absolute) : decodeText(await fs.readFile(a.absolute), encoding);
+        const text =
+          encoding === 'utf-8'
+            ? await this.deps.workspace.readFile(a.absolute)
+            : decodeText(await fs.readFile(a.absolute), encoding);
         out.push({
           kind: 'file',
           path: a.path,
@@ -940,7 +1125,11 @@ export class SovranController implements vscode.Disposable {
           ...(a.external ? { external: true } : {}),
         });
       } catch (e) {
-        this.notice('warning', `Could not attach ${a.path}: ${e instanceof Error ? e.message : String(e)}`, surface);
+        this.notice(
+          'warning',
+          `Could not attach ${a.path}: ${e instanceof Error ? e.message : String(e)}`,
+          surface,
+        );
       }
     }
     return out;
@@ -951,7 +1140,11 @@ export class SovranController implements vscode.Disposable {
     const uris = await vscode.workspace.findFiles('**/*', '{**/node_modules/**,**/.git/**}', 5000);
     const multi = (vscode.workspace.workspaceFolders?.length ?? 0) > 1;
     const items = uris
-      .map((u) => ({ label: path.basename(u.fsPath), description: vscode.workspace.asRelativePath(u, multi), uri: u }))
+      .map((u) => ({
+        label: path.basename(u.fsPath),
+        description: vscode.workspace.asRelativePath(u, multi),
+        uri: u,
+      }))
       .sort((a, b) => a.description.localeCompare(b.description));
     const picked = await vscode.window.showQuickPick(items, {
       canPickMany: true,
@@ -980,7 +1173,11 @@ export class SovranController implements vscode.Disposable {
     if (!uris?.length) return;
     for (const uri of uris) {
       if (uri.scheme !== 'file') {
-        this.notice('warning', `${path.basename(uri.path)} is not a local file, so it cannot be attached.`, surface);
+        this.notice(
+          'warning',
+          `${path.basename(uri.path)} is not a local file, so it cannot be attached.`,
+          surface,
+        );
         continue;
       }
       if (vscode.workspace.getWorkspaceFolder(uri)) {
@@ -1008,10 +1205,17 @@ export class SovranController implements vscode.Disposable {
       return { kind: 'image', mime: sniffed.mime, stat };
     }
     if (sniffed.kind === 'document') {
-      if (stat.size <= DOCUMENT_LIMITS.maxFileBytes) return { kind: 'document', container: sniffed.container, textFallback: sniffed.textFallback, stat };
-      if (!sniffed.textFallback) return { problem: `${shown} is larger than ${DOCUMENT_LIMITS.maxFileBytes / 1024 / 1024} MB. Attach a smaller excerpt of it.` };
+      if (stat.size <= DOCUMENT_LIMITS.maxFileBytes)
+        return { kind: 'document', container: sniffed.container, textFallback: sniffed.textFallback, stat };
+      if (!sniffed.textFallback)
+        return {
+          problem: `${shown} is larger than ${DOCUMENT_LIMITS.maxFileBytes / 1024 / 1024} MB. Attach a smaller excerpt of it.`,
+        };
     }
-    if (stat.size > MAX_ATTACHMENT_BYTES) return { problem: `${shown} is larger than 5 MB. Attach an excerpt, or ask Sovran to read the part you need.` };
+    if (stat.size > MAX_ATTACHMENT_BYTES)
+      return {
+        problem: `${shown} is larger than 5 MB. Attach an excerpt, or ask Sovran to read the part you need.`,
+      };
     return { kind: 'text', encoding: sniffed.kind === 'text' ? sniffed.encoding : 'utf-8' };
   }
 
@@ -1020,7 +1224,11 @@ export class SovranController implements vscode.Disposable {
    * looked like one (it is not a valid PDF or ZIP) and has no binary content is attached as text, as it was before
    * documents were supported; a valid document that cannot be read (no text, a password) is refused with the reason.
    */
-  private async readChecked(absolute: string, shown: string, check: Exclude<FileCheck, { problem: string }>): Promise<FileContent> {
+  private async readChecked(
+    absolute: string,
+    shown: string,
+    check: Exclude<FileCheck, { problem: string }>,
+  ): Promise<FileContent> {
     if (check.kind === 'text') return { encoding: check.encoding };
     if (check.kind === 'image') {
       const data = new Uint8Array(await fs.readFile(absolute));
@@ -1032,15 +1240,23 @@ export class SovranController implements vscode.Disposable {
     } catch (e) {
       this.deps.logger.warn(`Could not convert ${shown}: ${e instanceof Error ? e.message : String(e)}`);
       const notADocument = e instanceof DocumentError && (e.code === 'corrupt' || e.code === 'unsupported');
-      if (notADocument && check.textFallback && check.stat.size <= MAX_ATTACHMENT_BYTES) return { encoding: 'utf-8' };
+      if (notADocument && check.textFallback && check.stat.size <= MAX_ATTACHMENT_BYTES)
+        return { encoding: 'utf-8' };
       return { problem: describeDocumentError(e, shown, check.container === 'pdf' ? 'pdf' : undefined) };
     }
   }
 
   /** Converts a document in the worker, or returns the conversion of the same unchanged file. */
   private async convertDocument(absolute: string, stat: FileStat): Promise<DocumentResult> {
-    return await vscode.window.withProgress({ location: vscode.ProgressLocation.Window, title: `Sovran: Reading ${path.basename(absolute)}…` }, () =>
-      this.documentReader.read(absolute, stat, async () => new Uint8Array(await fs.readFile(absolute)), MAX_ATTACHMENT_CHARS),
+    return await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Window, title: `Sovran: Reading ${path.basename(absolute)}…` },
+      () =>
+        this.documentReader.read(
+          absolute,
+          stat,
+          async () => new Uint8Array(await fs.readFile(absolute)),
+          MAX_ATTACHMENT_CHARS,
+        ),
     );
   }
 
@@ -1052,12 +1268,16 @@ export class SovranController implements vscode.Disposable {
     if (surface.attachments.some((a) => a.absolute === absolute)) return;
     const check = await this.checkFile(absolute, shown);
     if (check.problem !== undefined) return this.notice('warning', check.problem, surface);
-    if (check.kind === 'image' && this.imageCount(surface) >= IMAGE_LIMITS.maxPerMessage) return this.notice('warning', TOO_MANY_IMAGES, surface);
+    if (check.kind === 'image' && this.imageCount(surface) >= IMAGE_LIMITS.maxPerMessage)
+      return this.notice('warning', TOO_MANY_IMAGES, surface);
     const label = path.basename(absolute);
     if (isProtectedPath(shown, this.settings.agent.policy.protectedPaths)) {
       const choice = await vscode.window.showWarningMessage(
         `Attach ${label}?`,
-        { modal: true, detail: `${shown} matches a protected-path pattern. Its contents are sent to the model with your next message.` },
+        {
+          modal: true,
+          detail: `${shown} matches a protected-path pattern. Its contents are sent to the model with your next message.`,
+        },
         'Attach',
       );
       if (choice !== 'Attach' || surface.attachments.some((a) => a.absolute === absolute)) return;
@@ -1071,7 +1291,12 @@ export class SovranController implements vscode.Disposable {
       label,
       absolute,
       ...(external ? { external: true } : {}),
-      ...(content.document ? { format: content.document.format, ...(content.document.detail ? { detail: content.document.detail } : {}) } : {}),
+      ...(content.document
+        ? {
+            format: content.document.format,
+            ...(content.document.detail ? { detail: content.document.detail } : {}),
+          }
+        : {}),
       ...(content.encoding && content.encoding !== 'utf-8' ? { encoding: content.encoding } : {}),
       ...(content.image ? { image: imageView(content.image) } : {}),
     });
@@ -1085,23 +1310,48 @@ export class SovranController implements vscode.Disposable {
   /** Says so when the chat's model is known not to accept images, so the user is not surprised by its answer. */
   private warnIfImagesUnseen(surface: Surface) {
     const sel = this.effectiveModel();
-    const model = sel ? this.providers.find((p) => p.id === sel.providerId)?.models?.find((m) => m.id === sel.modelId) : undefined;
-    if (!sel || !model || resolveVision(model.vision, this.deps.capabilities.get(capabilityKey(sel.providerId, model.id)))) return;
-    this.notice('info', `${model.name ?? model.id} does not accept images: it will receive only the image's name. Choose a vision model to show it the image.`, surface);
+    const model = sel
+      ? this.providers.find((p) => p.id === sel.providerId)?.models?.find((m) => m.id === sel.modelId)
+      : undefined;
+    if (
+      !sel ||
+      !model ||
+      resolveVision(model.vision, this.deps.capabilities.get(capabilityKey(sel.providerId, model.id)))
+    )
+      return;
+    this.notice(
+      'info',
+      `${model.name ?? model.id} does not accept images: it will receive only the image's name. Choose a vision model to show it the image.`,
+      surface,
+    );
   }
 
   /** An image pasted into the chat input (a screenshot): checked like a file, kept in memory until the message is sent. */
   private attachPastedImage(surface: Surface, base64: string) {
     const data = new Uint8Array(Buffer.from(base64, 'base64'));
     const image = imageInfo(data);
-    if (!image) return this.notice('warning', 'The pasted content is not an image Sovran can send. Paste a PNG, JPEG, WebP or GIF image.', surface);
-    if (data.length > IMAGE_LIMITS.maxBytes) return this.notice('warning', tooLargeImage('The pasted image'), surface);
-    if (this.imageCount(surface) >= IMAGE_LIMITS.maxPerMessage) return this.notice('warning', TOO_MANY_IMAGES, surface);
+    if (!image)
+      return this.notice(
+        'warning',
+        'The pasted content is not an image Sovran can send. Paste a PNG, JPEG, WebP or GIF image.',
+        surface,
+      );
+    if (data.length > IMAGE_LIMITS.maxBytes)
+      return this.notice('warning', tooLargeImage('The pasted image'), surface);
+    if (this.imageCount(surface) >= IMAGE_LIMITS.maxPerMessage)
+      return this.notice('warning', TOO_MANY_IMAGES, surface);
     const id = imageId(data);
     // The same image pasted twice is attached once.
     if (surface.attachments.some((a) => a.absolute === `pasted:${id}`)) return;
     const name = `Pasted image ${surface.attachments.filter((a) => a.pasted).length + 1}`;
-    surface.attachments.push({ id: randomUUID(), path: name, label: name, absolute: `pasted:${id}`, pasted: data, image: { ...imageView(image), pasted: true } });
+    surface.attachments.push({
+      id: randomUUID(),
+      path: name,
+      label: name,
+      absolute: `pasted:${id}`,
+      pasted: data,
+      image: { ...imageView(image), pasted: true },
+    });
     this.warnIfImagesUnseen(surface);
     this.patchSurface(surface, { context: this.contextView(surface) });
   }
@@ -1119,9 +1369,14 @@ export class SovranController implements vscode.Disposable {
         if (!data) {
           if (!a.external) await resolveAndVerify(a.absolute, this.deps.workspace);
           const check = await this.checkFile(a.absolute, a.path);
-          const content = check.problem !== undefined ? check : await this.readChecked(a.absolute, a.path, check);
+          const content =
+            check.problem !== undefined ? check : await this.readChecked(a.absolute, a.path, check);
           if (content.problem !== undefined || !content.image) {
-            this.notice('warning', content.problem ?? `${a.path} is no longer an image, so it was not attached.`, surface);
+            this.notice(
+              'warning',
+              content.problem ?? `${a.path} is no longer an image, so it was not attached.`,
+              surface,
+            );
             continue;
           }
           data = content.data;
@@ -1140,7 +1395,11 @@ export class SovranController implements vscode.Disposable {
           ...(info.width && info.height ? { width: info.width, height: info.height } : {}),
         });
       } catch (e) {
-        this.notice('warning', `Could not attach ${a.path}: ${e instanceof Error ? e.message : String(e)}`, surface);
+        this.notice(
+          'warning',
+          `Could not attach ${a.path}: ${e instanceof Error ? e.message : String(e)}`,
+          surface,
+        );
       }
     }
     return out;
@@ -1150,9 +1409,14 @@ export class SovranController implements vscode.Disposable {
    * Data URLs of the images the model will receive in this chat, read from the image store. Nothing is loaded for a
    * model known not to accept images; an image that is gone is sent as its name only.
    */
-  private async imageUrls(session: Session, model: ModelConfig, providerId: string): Promise<Map<string, string>> {
+  private async imageUrls(
+    session: Session,
+    model: ModelConfig,
+    providerId: string,
+  ): Promise<Map<string, string>> {
     const urls = new Map<string, string>();
-    if (!resolveVision(model.vision, this.deps.capabilities.get(capabilityKey(providerId, model.id)))) return urls;
+    if (!resolveVision(model.vision, this.deps.capabilities.get(capabilityKey(providerId, model.id))))
+      return urls;
     for (const m of messagesForModel(session)) {
       if (m.role !== 'user') continue;
       for (const img of m.images ?? []) {
@@ -1178,23 +1442,36 @@ export class SovranController implements vscode.Disposable {
       .filter((rel) => !isProtectedPath(rel, this.settings.agent.policy.protectedPaths));
     const open = new Set(preferred);
     const items = await this.deps.fileIndex.suggest('', 20, preferred);
-    return items.map((i) => (open.has(i.path) ? { ...i, hint: i.path === activeRel ? 'active' : 'open' } : i));
+    return items.map((i) =>
+      open.has(i.path) ? { ...i, hint: i.path === activeRel ? 'active' : 'open' } : i,
+    );
   }
 
   /** One folder of the workspace for the attach menu, confined to the workspace like every other path. */
   private async listDirectory(surface: Surface, requestId: string, requested: string) {
-    const reply = (listing: DirectoryListingView) => this.sendTo(surface, { type: 'directoryListing', requestId, listing });
+    const reply = (listing: DirectoryListingView) =>
+      this.sendTo(surface, { type: 'directoryListing', requestId, listing });
     const roots = this.deps.workspace.roots();
-    const dir = requested.trim().replace(/^\.\/?$/, '').replace(/\/+$/, '');
+    const dir = requested
+      .trim()
+      .replace(/^\.\/?$/, '')
+      .replace(/\/+$/, '');
     if (!roots.length) return reply({ path: '', entries: [], error: 'Open a folder to browse its files.' });
     if (!dir && roots.length > 1) {
-      return reply({ path: '', entries: roots.map((r) => ({ name: r.name, path: r.name, type: 'directory' as const })) });
+      return reply({
+        path: '',
+        entries: roots.map((r) => ({ name: r.name, path: r.name, type: 'directory' as const })),
+      });
     }
     let resolved: ResolvedPath;
     try {
       resolved = await resolveAndVerify(dir || '.', this.deps.workspace);
     } catch (e) {
-      return reply({ path: dir, entries: [], error: e instanceof PathError ? e.message : `${dir} is not inside the workspace.` });
+      return reply({
+        path: dir,
+        entries: [],
+        error: e instanceof PathError ? e.message : `${dir} is not inside the workspace.`,
+      });
     }
     let raw: DirEntry[];
     try {
@@ -1209,18 +1486,33 @@ export class SovranController implements vscode.Disposable {
     const entries: DirectoryEntryView[] = [];
     for (const e of raw) {
       if ((e.type !== 'file' && e.type !== 'directory') || BROWSE_HIDDEN.has(e.name)) continue;
-      const inRoot = path.relative(resolved.root.path, path.join(resolved.absolute, e.name)).split(path.sep).join('/');
+      const inRoot = path
+        .relative(resolved.root.path, path.join(resolved.absolute, e.name))
+        .split(path.sep)
+        .join('/');
       if (excluded(inRoot)) continue;
       const p = base ? `${base}/${e.name}` : e.name;
-      entries.push({ name: e.name, path: p, type: e.type, ...(e.type === 'file' && isProtectedPath(p, protectedPaths) ? { protected: true } : {}) });
+      entries.push({
+        name: e.name,
+        path: p,
+        type: e.type,
+        ...(e.type === 'file' && isProtectedPath(p, protectedPaths) ? { protected: true } : {}),
+      });
     }
     entries.sort(compareEntries);
-    reply({ path: base, entries: entries.slice(0, MAX_LISTING), ...(entries.length > MAX_LISTING ? { truncated: true } : {}) });
+    reply({
+      path: base,
+      entries: entries.slice(0, MAX_LISTING),
+      ...(entries.length > MAX_LISTING ? { truncated: true } : {}),
+    });
   }
 
   /** The user's `files.exclude` patterns (those set to true) for one workspace folder, as the Explorer applies them. */
   private filesExclude(root: WorkspaceRoot): (pathInRoot: string) => boolean {
-    const config = vscode.workspace.getConfiguration('files', vscode.Uri.file(root.path)).get<Record<string, unknown>>('exclude') ?? {};
+    const config =
+      vscode.workspace
+        .getConfiguration('files', vscode.Uri.file(root.path))
+        .get<Record<string, unknown>>('exclude') ?? {};
     const globs = Object.entries(config)
       .filter(([, on]) => on === true)
       .map(([glob]) => glob);
@@ -1301,7 +1593,11 @@ export class SovranController implements vscode.Disposable {
 
   private async deleteSession(id: string) {
     const summary = this.sessions.find((s) => s.id === id);
-    const choice = await vscode.window.showWarningMessage(`Delete "${summary?.title ?? 'this chat'}"?`, { modal: true, detail: 'This cannot be undone.' }, 'Delete');
+    const choice = await vscode.window.showWarningMessage(
+      `Delete "${summary?.title ?? 'this chat'}"?`,
+      { modal: true, detail: 'This cannot be undone.' },
+      'Delete',
+    );
     if (choice !== 'Delete') return;
     this.deleted.add(id);
     this.cancel(id);
@@ -1349,7 +1645,10 @@ export class SovranController implements vscode.Disposable {
 
   setMode(mode: AgentMode) {
     if (mode === 'act' && !vscode.workspace.isTrusted) {
-      this.notice('warning', 'Act mode needs a trusted workspace. Use "Manage Workspace Trust" to trust this folder.');
+      this.notice(
+        'warning',
+        'Act mode needs a trusted workspace. Use "Manage Workspace Trust" to trust this folder.',
+      );
       mode = 'plan';
     }
     this.mode = mode;
@@ -1357,6 +1656,7 @@ export class SovranController implements vscode.Disposable {
     for (const s of this.surfaces.values()) s.session.mode = mode;
     this.updateStatusBar();
     this.patch({ mode });
+    this.refreshTools();
   }
 
   toggleMode() {
@@ -1369,7 +1669,10 @@ export class SovranController implements vscode.Disposable {
    */
   async setApprovalMode(mode: ApprovalMode): Promise<void> {
     if (mode !== 'ask' && !vscode.workspace.isTrusted) {
-      this.notice('warning', 'Automatic approvals need a trusted workspace. Use "Manage Workspace Trust" to trust this folder.');
+      this.notice(
+        'warning',
+        'Automatic approvals need a trusted workspace. Use "Manage Workspace Trust" to trust this folder.',
+      );
       return this.patch({ approvalMode: this.approvalMode });
     }
     if (mode === 'auto' && !this.autoConfirmed) {
@@ -1405,7 +1708,10 @@ export class SovranController implements vscode.Disposable {
       label: `${o.value === this.approvalMode ? '$(check) ' : ''}$(${o.icon}) ${APPROVAL_LABEL[o.value]}`,
       description: o.description,
     }));
-    const pick = await vscode.window.showQuickPick(items, { title: 'Sovran: Approvals in Act Mode', placeHolder: `Current: ${APPROVAL_LABEL[this.approvalMode]}` });
+    const pick = await vscode.window.showQuickPick(items, {
+      title: 'Sovran: Approvals in Act Mode',
+      placeHolder: `Current: ${APPROVAL_LABEL[this.approvalMode]}`,
+    });
     if (pick) await this.setApprovalMode(pick.value);
   }
 
@@ -1442,21 +1748,26 @@ export class SovranController implements vscode.Disposable {
       await writeProviders(this.settingsProviders);
       this.useProviders();
     }
-    if (select && provider.models?.some((m) => m.id === select)) await this.setModel('act', { providerId, modelId: select });
+    if (select && provider.models?.some((m) => m.id === select))
+      await this.setModel('act', { providerId, modelId: select });
     this.patch({ providers: this.providerViews(), selected: this.selected });
   }
 
   private async updateSetting(update: SettingUpdate) {
     await writeSetting(update);
     if (update.key === 'sessions.persist') {
-      const choice = await vscode.window.showInformationMessage('Sovran: the chat history setting applies after the window reloads.', 'Reload Window');
+      const choice = await vscode.window.showInformationMessage(
+        'Sovran: the chat history setting applies after the window reloads.',
+        'Reload Window',
+      );
       if (choice) await vscode.commands.executeCommand('workbench.action.reloadWindow');
     }
     // onDidChangeConfiguration refreshes the state and pushes it to the webview.
   }
 
   private validSelection(sel: SelectedModel | null): SelectedModel | null {
-    const has = (s: SelectedModel | null) => !!s && !!this.providers.find((p) => p.id === s.providerId)?.models?.some((m) => m.id === s.modelId);
+    const has = (s: SelectedModel | null) =>
+      !!s && !!this.providers.find((p) => p.id === s.providerId)?.models?.some((m) => m.id === s.modelId);
     if (has(sel)) return sel;
     for (const p of this.providers) {
       const m = p.models?.[0];
@@ -1466,7 +1777,10 @@ export class SovranController implements vscode.Disposable {
   }
 
   private exists(sel: SelectedModel | null): sel is SelectedModel {
-    return !!sel && !!this.providers.find((p) => p.id === sel.providerId)?.models?.some((m) => m.id === sel.modelId);
+    return (
+      !!sel &&
+      !!this.providers.find((p) => p.id === sel.providerId)?.models?.some((m) => m.id === sel.modelId)
+    );
   }
 
   private parseModelRef(ref: string): SelectedModel | null {
@@ -1516,17 +1830,32 @@ export class SovranController implements vscode.Disposable {
     for (const p of this.providers) {
       items.push({ label: p.name, kind: vscode.QuickPickItemKind.Separator });
       for (const m of p.models ?? []) {
-        const current = (this.mode !== 'plan' || this.planModel) && effective?.providerId === p.id && effective.modelId === m.id;
-        items.push({ label: `${current ? '$(check) ' : ''}${m.name ?? m.id}`, description: m.name ? m.id : undefined, sel: { providerId: p.id, modelId: m.id } });
+        const current =
+          (this.mode !== 'plan' || this.planModel) &&
+          effective?.providerId === p.id &&
+          effective.modelId === m.id;
+        items.push({
+          label: `${current ? '$(check) ' : ''}${m.name ?? m.id}`,
+          description: m.name ? m.id : undefined,
+          sel: { providerId: p.id, modelId: m.id },
+        });
       }
-      if (!p.models?.length) items.push({ label: '$(warning) No models configured', description: 'Use Discover models', action: 'discover' });
+      if (!p.models?.length)
+        items.push({
+          label: '$(warning) No models configured',
+          description: 'Use Discover models',
+          action: 'discover',
+        });
     }
     items.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
     items.push({ label: '$(refresh) Discover models from servers…', action: 'discover' });
     items.push({ label: '$(server-environment) Manage providers…', action: 'manage' });
     const pick = await vscode.window.showQuickPick(items, {
       title: this.mode === 'plan' ? 'Sovran: Select Model for Plan Mode' : 'Sovran: Select Model',
-      placeHolder: this.mode === 'plan' ? 'Plan mode can use a different (e.g. larger) model than Act mode' : 'Choose the model for this chat',
+      placeHolder:
+        this.mode === 'plan'
+          ? 'Plan mode can use a different (e.g. larger) model than Act mode'
+          : 'Choose the model for this chat',
     });
     if (!pick) return;
     if (pick.sel) return this.selectModel(pick.sel);
@@ -1545,11 +1874,20 @@ export class SovranController implements vscode.Disposable {
 
   private async discoverAndPick() {
     const found = await vscode.window.withProgress(
-      { location: vscode.ProgressLocation.Notification, title: 'Sovran: Discovering models…', cancellable: true },
+      {
+        location: vscode.ProgressLocation.Notification,
+        title: 'Sovran: Discovering models…',
+        cancellable: true,
+      },
       async (_p, token) => {
         const ac = new AbortController();
         token.onCancellationRequested(() => ac.abort());
-        const results: Array<{ provider: ProviderConfig; models: string[]; info?: ModelInfo[]; error?: string }> = [];
+        const results: Array<{
+          provider: ProviderConfig;
+          models: string[];
+          info?: ModelInfo[];
+          error?: string;
+        }> = [];
         await Promise.all(
           this.providers.map(async (provider) => {
             try {
@@ -1571,10 +1909,18 @@ export class SovranController implements vscode.Disposable {
       if (r.error) items.push({ label: `$(error) ${r.error}` });
       for (const m of r.models) {
         const known = r.provider.models?.some((x) => x.id === m);
-        items.push({ label: m, description: known ? 'configured' : 'add', providerId: r.provider.id, modelId: m });
+        items.push({
+          label: m,
+          description: known ? 'configured' : 'add',
+          providerId: r.provider.id,
+          modelId: m,
+        });
       }
     }
-    const pick = await vscode.window.showQuickPick(items, { title: 'Sovran: Discovered Models', placeHolder: 'Pick a model to add and select' });
+    const pick = await vscode.window.showQuickPick(items, {
+      title: 'Sovran: Discovered Models',
+      placeHolder: 'Pick a model to add and select',
+    });
     if (!pick?.providerId || !pick.modelId) return;
     const provider = this.providers.find((p) => p.id === pick.providerId);
     if (!provider) return;
@@ -1596,7 +1942,9 @@ export class SovranController implements vscode.Disposable {
   private async reloadProviders() {
     this.settingsProviders = readProviders(this.deps.logger);
     this.useProviders();
-    await Promise.all(this.providers.map(async (p) => this.keyStatus.set(p.id, await this.deps.secrets.has(p.id))));
+    await Promise.all(
+      this.providers.map(async (p) => this.keyStatus.set(p.id, await this.deps.secrets.has(p.id))),
+    );
     this.detectServerLimits();
   }
 
@@ -1608,7 +1956,9 @@ export class SovranController implements vscode.Disposable {
 
   private queueConfig(task: () => Promise<void>): Promise<void> {
     this.configQueue = this.configQueue.then(() =>
-      task().catch((e) => this.deps.logger.error(`config.yaml sync failed: ${e instanceof Error ? e.message : String(e)}`)),
+      task().catch((e) =>
+        this.deps.logger.error(`config.yaml sync failed: ${e instanceof Error ? e.message : String(e)}`),
+      ),
     );
     return this.configQueue;
   }
@@ -1620,7 +1970,11 @@ export class SovranController implements vscode.Disposable {
 
   private modelRefs(): Record<ModelChoiceKey, string> {
     const ref = (s: SelectedModel | null) => (s ? `${s.providerId}/${s.modelId}` : '');
-    return { defaultModel: ref(this.selected), planModel: ref(this.planModel), titleModel: ref(this.titleModel) };
+    return {
+      defaultModel: ref(this.selected),
+      planModel: ref(this.planModel),
+      titleModel: ref(this.titleModel),
+    };
   }
 
   private settingsModelRefs(): Set<string> {
@@ -1642,14 +1996,23 @@ export class SovranController implements vscode.Disposable {
     try {
       next = updateConfigText(current, providers, choices);
     } catch (e) {
-      this.notice('warning', `${what} saved in Settings but not in ${file.displayPath}: ${e instanceof Error ? e.message : String(e)}`);
+      this.notice(
+        'warning',
+        `${what} saved in Settings but not in ${file.displayPath}: ${e instanceof Error ? e.message : String(e)}`,
+      );
       return false;
     }
     if (next === current) return true;
-    const known = new Set([...this.settingsModelRefs(), ...providers.flatMap((p) => (p.models ?? []).map((m) => `${p.id}/${m.id}`))]);
+    const known = new Set([
+      ...this.settingsModelRefs(),
+      ...providers.flatMap((p) => (p.models ?? []).map((m) => `${p.id}/${m.id}`)),
+    ]);
     const check = parseConfigFile(next, { otherModels: known });
     if (!check.ok) {
-      this.notice('warning', `${what} saved in Settings but cannot be written to ${file.displayPath}: ${check.problems[0]!.message}`);
+      this.notice(
+        'warning',
+        `${what} saved in Settings but cannot be written to ${file.displayPath}: ${check.problems[0]!.message}`,
+      );
       return false;
     }
     try {
@@ -1688,7 +2051,10 @@ export class SovranController implements vscode.Disposable {
       const discarded = !sameProviders(this.settingsProviders, this.fileProviders);
       await this.loadConfigFile('change');
       if (discarded) {
-        this.notice('warning', `${this.deps.configFile.displayPath} changed at the same time and its version was applied. Repeat your change if you still need it.`);
+        this.notice(
+          'warning',
+          `${this.deps.configFile.displayPath} changed at the same time and its version was applied. Repeat your change if you still need it.`,
+        );
       }
       return;
     }
@@ -1706,7 +2072,10 @@ export class SovranController implements vscode.Disposable {
   private async loadConfigFile(trigger: 'startup' | 'change' | 'enable') {
     const file = this.deps.configFile;
     const read = await file.read();
-    const view = (state: ConfigFileView['state'], problems: ConfigFileView['problems'] = []): ConfigFileView => ({
+    const view = (
+      state: ConfigFileView['state'],
+      problems: ConfigFileView['problems'] = [],
+    ): ConfigFileView => ({
       path: file.displayPath,
       state,
       providers: this.syncing ? this.fileProviders.length : 0,
@@ -1730,7 +2099,10 @@ export class SovranController implements vscode.Disposable {
     const result =
       read.kind === 'text'
         ? parseConfigFile(read.text, { otherModels: this.settingsModelRefs() })
-        : { ok: false as const, problems: [{ message: read.message, line: 0, column: 0, endLine: 0, endColumn: 0 }] };
+        : {
+            ok: false as const,
+            problems: [{ message: read.message, line: 0, column: 0, endLine: 0, endColumn: 0 }],
+          };
     if (!result.ok) {
       file.setProblems(result.problems);
       this.configFileView = view(
@@ -1738,7 +2110,9 @@ export class SovranController implements vscode.Disposable {
         result.problems.slice(0, 5).map((p) => ({ line: p.line + 1, message: p.message })),
       );
       this.patch({ configFile: this.configFileView });
-      this.deps.logger.warn(`config.yaml has ${result.problems.length} problem(s); keeping the last valid version.`);
+      this.deps.logger.warn(
+        `config.yaml has ${result.problems.length} problem(s); keeping the last valid version.`,
+      );
       if (trigger !== 'startup') {
         const count = result.problems.length;
         void vscode.window
@@ -1771,9 +2145,11 @@ export class SovranController implements vscode.Disposable {
         trigger === 'enable'
           ? mergeProviders(providers, this.settingsProviders).providers
           : mergeProviders(this.settingsProviders, providers).providers;
-      if (!sameProviders(providers, result.config.providers)) await this.writeConfigText(text, providers, 'The providers from Settings are');
+      if (!sameProviders(providers, result.config.providers))
+        await this.writeConfigText(text, providers, 'The providers from Settings are');
       await file.setSynced(true);
-      if (trigger === 'enable') this.notice('info', `Using ${file.displayPath} again, in sync with Settings.`);
+      if (trigger === 'enable')
+        this.notice('info', `Using ${file.displayPath} again, in sync with Settings.`);
     }
     this.syncing = true;
     this.fileProviders = providers;
@@ -1784,7 +2160,10 @@ export class SovranController implements vscode.Disposable {
       } catch (e) {
         // Sovran keeps working from the file; only the Settings copy is behind.
         this.settingsStale = true;
-        this.notice('warning', `Could not update Settings from ${file.displayPath}: ${e instanceof Error ? e.message : String(e)}`);
+        this.notice(
+          'warning',
+          `Could not update Settings from ${file.displayPath}: ${e instanceof Error ? e.message : String(e)}`,
+        );
       }
     }
     await this.reloadProviders();
@@ -1888,7 +2267,8 @@ export class SovranController implements vscode.Disposable {
     const result = await this.checkConnection(current);
     this.send({ type: 'providerTest', requestId: `config-${p.id}-${Date.now()}`, providerId: p.id, result });
     if (result.ok) {
-      const noModels = !current.models?.length && result.models?.length ? ' Add the models you want under "models:".' : '';
+      const noModels =
+        !current.models?.length && result.models?.length ? ' Add the models you want under "models:".' : '';
       void vscode.window.showInformationMessage(`Sovran: ${p.name}: ${result.message}.${noModels}`);
     } else {
       void vscode.window.showWarningMessage(
@@ -1909,7 +2289,12 @@ export class SovranController implements vscode.Disposable {
   }
 
   private slug(name: string): string {
-    const base = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'provider';
+    const base =
+      name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'provider';
     let id = base;
     for (let i = 2; this.providers.some((p) => p.id === id); i++) id = `${base}-${i}`;
     return id;
@@ -1922,13 +2307,21 @@ export class SovranController implements vscode.Disposable {
       id,
       name: input.name,
       baseUrl: input.baseUrl.replace(/\/+$/, ''),
-      auth: { type: input.authType, ...(input.authType === 'header' && input.headerName ? { headerName: input.headerName } : {}) },
+      auth: {
+        type: input.authType,
+        ...(input.authType === 'header' && input.headerName ? { headerName: input.headerName } : {}),
+      },
       ...(existing?.headers ? { headers: existing.headers } : {}),
       ...(input.timeoutSeconds ? { timeoutSeconds: input.timeoutSeconds } : {}),
       models: input.models.map((m) => {
         // Keep what the form does not edit (name, temperature); the form's fields replace the old values, and an
         // emptied field removes them, so the model falls back to what the server reports or to the default.
-        const { contextWindow: _c, maxOutputTokens: _o, toolMode: _t, ...kept } = existing?.models?.find((x) => x.id === m.id) ?? { id: m.id };
+        const {
+          contextWindow: _c,
+          maxOutputTokens: _o,
+          toolMode: _t,
+          ...kept
+        } = existing?.models?.find((x) => x.id === m.id) ?? { id: m.id };
         return {
           ...kept,
           id: m.id,
@@ -1941,7 +2334,9 @@ export class SovranController implements vscode.Disposable {
     if (existing && existing.baseUrl !== config.baseUrl) {
       for (const m of existing.models ?? []) this.deps.capabilities.clear(capabilityKey(id, m.id));
     }
-    this.settingsProviders = existing ? this.settingsProviders.map((p) => (p.id === id ? config : p)) : [...this.settingsProviders, config];
+    this.settingsProviders = existing
+      ? this.settingsProviders.map((p) => (p.id === id ? config : p))
+      : [...this.settingsProviders, config];
     await writeProviders(this.settingsProviders);
     this.useProviders();
     if (config.auth?.type !== 'none' && !(await this.deps.secrets.has(id))) await this.promptApiKey(id);
@@ -1961,7 +2356,11 @@ export class SovranController implements vscode.Disposable {
   private async deleteProvider(id: string) {
     const p = this.settingsProviders.find((x) => x.id === id);
     if (!p) return;
-    const choice = await vscode.window.showWarningMessage(`Remove provider "${p.name}"?`, { modal: true, detail: 'Its stored API key is deleted too.' }, 'Remove');
+    const choice = await vscode.window.showWarningMessage(
+      `Remove provider "${p.name}"?`,
+      { modal: true, detail: 'Its stored API key is deleted too.' },
+      'Remove',
+    );
     if (choice !== 'Remove') return;
     this.settingsProviders = this.settingsProviders.filter((x) => x.id !== id);
     await writeProviders(this.settingsProviders);
@@ -1986,7 +2385,8 @@ export class SovranController implements vscode.Disposable {
     if (!provider || !id) return;
     const value = await vscode.window.showInputBox({
       title: `API key for ${provider.name}`,
-      prompt: 'Paste the key only, without "Bearer ". Stored in VS Code Secret Storage, never in settings. Leave empty and press Enter to remove the key.',
+      prompt:
+        'Paste the key only, without "Bearer ". Stored in VS Code Secret Storage, never in settings. Leave empty and press Enter to remove the key.',
       password: true,
       ignoreFocusOut: true,
     });
@@ -1996,7 +2396,8 @@ export class SovranController implements vscode.Disposable {
     else await this.deps.secrets.delete(id);
     this.keyStatus.set(id, !!key);
     if (key) this.detectServerLimits();
-    if (key && notes.length) this.notice('info', `Saved the key for ${provider.name} without ${notes.join(', ')}.`);
+    if (key && notes.length)
+      this.notice('info', `Saved the key for ${provider.name} without ${notes.join(', ')}.`);
     this.patch({ providers: this.providerViews() });
   }
 
@@ -2004,13 +2405,22 @@ export class SovranController implements vscode.Disposable {
   private async testProvider(requestId: string, providerId: string, from: Surface) {
     const config = this.providers.find((p) => p.id === providerId);
     if (!config) return;
-    this.sendTo(from, { type: 'providerTest', requestId, providerId, result: await this.checkConnection(config) });
+    this.sendTo(from, {
+      type: 'providerTest',
+      requestId,
+      providerId,
+      result: await this.checkConnection(config),
+    });
   }
 
   /** Lists the server's models, or (for gateways without /models) sends a one-token completion. */
   /** Lists the server's models, or (for gateways without /models, or that refuse it to the key) pings the chat. */
   private async checkConnection(config: ProviderConfig): Promise<ProviderTestResult> {
-    const { info, ...result } = await probeConnection(this.createProvider(config), config.models?.[0]?.id, config.baseUrl);
+    const { info, ...result } = await probeConnection(
+      this.createProvider(config),
+      config.models?.[0]?.id,
+      config.baseUrl,
+    );
     if (info && this.storeServerLimits(config, info)) this.patch({ providers: this.providerViews() });
     return result;
   }
@@ -2019,7 +2429,9 @@ export class SovranController implements vscode.Disposable {
 
   private serverLimits(providerId: string, modelId: string): ServerLimits | undefined {
     const c = this.deps.capabilities.get(capabilityKey(providerId, modelId));
-    return c?.contextWindow || c?.maxOutputTokens ? { contextWindow: c.contextWindow, maxOutputTokens: c.maxOutputTokens } : undefined;
+    return c?.contextWindow || c?.maxOutputTokens
+      ? { contextWindow: c.contextWindow, maxOutputTokens: c.maxOutputTokens }
+      : undefined;
   }
 
   /**
@@ -2032,7 +2444,11 @@ export class SovranController implements vscode.Disposable {
     for (const m of info) {
       if (!wanted.has(m.id)) continue;
       const key = capabilityKey(provider.id, m.id);
-      const { contextWindow: oldCtx, maxOutputTokens: oldOut, ...rest } = this.deps.capabilities.get(key) ?? { updatedAt: 0 };
+      const {
+        contextWindow: oldCtx,
+        maxOutputTokens: oldOut,
+        ...rest
+      } = this.deps.capabilities.get(key) ?? { updatedAt: 0 };
       if (oldCtx === m.contextWindow && oldOut === m.maxOutputTokens) continue;
       this.deps.capabilities.set(key, {
         ...rest,
@@ -2059,10 +2475,14 @@ export class SovranController implements vscode.Disposable {
       const provider = this.createProvider(p);
       void (async () => {
         try {
-          const info = provider.listModelInfo ? await provider.listModelInfo(AbortSignal.timeout(15_000)) : [];
+          const info = provider.listModelInfo
+            ? await provider.listModelInfo(AbortSignal.timeout(15_000))
+            : [];
           if (this.storeServerLimits(p, info)) this.patch({ providers: this.providerViews() });
         } catch (e) {
-          this.deps.logger.debug(`Could not read model limits from ${p.id}: ${e instanceof Error ? e.message : String(e)}`);
+          this.deps.logger.debug(
+            `Could not read model limits from ${p.id}: ${e instanceof Error ? e.message : String(e)}`,
+          );
         }
       })();
     }
@@ -2073,7 +2493,11 @@ export class SovranController implements vscode.Disposable {
   private async sendPrompt(surface: Surface, text: string) {
     const session = surface.session;
     if (this.runs.has(session.id)) {
-      this.notice('warning', 'Sovran is still working in this chat. Stop it before sending another message.', surface);
+      this.notice(
+        'warning',
+        'Sovran is still working in this chat. Stop it before sending another message.',
+        surface,
+      );
       return;
     }
     const slash = parseSlash(text);
@@ -2113,7 +2537,9 @@ export class SovranController implements vscode.Disposable {
 
   /** A runner for one chat: its approval requests carry the chat, so they reach the surface that shows it. */
   private createRunner(provider: ProviderConfig, workspace: WorkspacePort, sessionId: string) {
-    const approvals: ApprovalPort = { request: (request, signal) => this.request(sessionId, request, signal) };
+    const approvals: ApprovalPort = {
+      request: (request, signal) => this.request(sessionId, request, signal),
+    };
     return new AgentRunner({
       provider: this.createProvider(provider),
       registry: this.registry,
@@ -2129,7 +2555,13 @@ export class SovranController implements vscode.Disposable {
 
   private beginRun(session: Session, activity: RunView['activity']): ActiveRun {
     const abort = new AbortController();
-    const view: RunView = { sessionId: session.id, iteration: 0, maxIterations: this.settings.agent.maxIterations, startedAt: Date.now(), activity };
+    const view: RunView = {
+      sessionId: session.id,
+      iteration: 0,
+      maxIterations: this.settings.agent.maxIterations,
+      startedAt: Date.now(),
+      activity,
+    };
     const run: ActiveRun = { sessionId: session.id, abort, view };
     this.runs.set(session.id, run);
     this.patchSession(session.id, { run: view });
@@ -2146,7 +2578,8 @@ export class SovranController implements vscode.Disposable {
 
   /** Settles the chat's pending approvals as rejected (its run ended or was stopped). Other chats keep theirs. */
   private dropApprovals(sessionId: string) {
-    for (const a of [...this.approvals.values()]) if (a.sessionId === sessionId) a.settle({ approved: false });
+    for (const a of [...this.approvals.values()])
+      if (a.sessionId === sessionId) a.settle({ approved: false });
   }
 
   /** Appends `user` (if needed) and runs the agent for it. `mergeInto` keeps an earlier checkpoint when retrying. */
@@ -2157,7 +2590,11 @@ export class SovranController implements vscode.Disposable {
     if (!resolved) return;
     const { provider, model } = resolved;
     if (provider.auth?.type !== 'none' && !this.keyStatus.get(provider.id)) {
-      this.notice('warning', `${provider.name} has no API key stored. Requests are sent without credentials.`, this.surfaceFor(session.id));
+      this.notice(
+        'warning',
+        `${provider.name} has no API key stored. Requests are sent without credentials.`,
+        this.surfaceFor(session.id),
+      );
     }
 
     if (!session.messages.includes(user)) session.messages.push(user);
@@ -2200,7 +2637,9 @@ export class SovranController implements vscode.Disposable {
         policy: () => ({ ...this.settings.agent.policy, approvalMode: this.approvalMode }),
         images: await this.imageUrls(session, model, provider.id),
       });
-      this.deps.logger.info(`Run finished · ${outcome.reason}${outcome.error ? ` · ${outcome.error.kind}` : ''}`);
+      this.deps.logger.info(
+        `Run finished · ${outcome.reason}${outcome.error ? ` · ${outcome.error.kind}` : ''}`,
+      );
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       this.deps.logger.error(`Run crashed: ${message}`);
@@ -2213,7 +2652,11 @@ export class SovranController implements vscode.Disposable {
       session.updatedAt = Date.now();
       this.cancelPersist(session.id);
       await this.persist(session);
-      this.patchSession(session.id, { run: null, approvals: [], grants: { edits: this.grantsFor(session.id).edits } });
+      this.patchSession(session.id, {
+        run: null,
+        approvals: [],
+        grants: { edits: this.grantsFor(session.id).edits },
+      });
     }
   }
 
@@ -2222,7 +2665,11 @@ export class SovranController implements vscode.Disposable {
    * title model when one is set, else on the chat's model. The title is kept only if the user has not renamed the chat
    * or deleted it meanwhile; any failure keeps the first-words title.
    */
-  private async nameSession(session: Session, text: string, chat: { provider: ProviderConfig; model: ModelConfig }) {
+  private async nameSession(
+    session: Session,
+    text: string,
+    chat: { provider: ProviderConfig; model: ModelConfig },
+  ) {
     const derived = session.title;
     const sel = this.exists(this.titleModel) ? this.titleModel : null;
     const provider = sel ? this.providers.find((p) => p.id === sel.providerId) : chat.provider;
@@ -2246,10 +2693,21 @@ export class SovranController implements vscode.Disposable {
     }
   }
 
-  private async saveCheckpoint(session: Session, user: UserMessage, files: FileSnapshot[], mergeInto?: Checkpoint) {
+  private async saveCheckpoint(
+    session: Session,
+    user: UserMessage,
+    files: FileSnapshot[],
+    mergeInto?: Checkpoint,
+  ) {
     const merged = mergeInto ? mergeSnapshots(mergeInto.files, files) : files;
     if (merged.length === 0) return;
-    const checkpoint: Checkpoint = { id: mergeInto?.id ?? randomUUID(), sessionId: session.id, userMessageId: user.id, createdAt: Date.now(), files: merged };
+    const checkpoint: Checkpoint = {
+      id: mergeInto?.id ?? randomUUID(),
+      sessionId: session.id,
+      userMessageId: user.id,
+      createdAt: Date.now(),
+      files: merged,
+    };
     try {
       await this.deps.checkpoints.save(checkpoint);
     } catch (e) {
@@ -2264,16 +2722,21 @@ export class SovranController implements vscode.Disposable {
 
   private async restoreCheckpoint(surface: Surface, messageId: string) {
     const session = surface.session;
-    if (this.runs.has(session.id)) return this.notice('warning', 'Stop the current run before undoing changes.', surface);
+    if (this.runs.has(session.id))
+      return this.notice('warning', 'Stop the current run before undoing changes.', surface);
     const user = session.messages.find((m): m is UserMessage => m.id === messageId && m.role === 'user');
     if (!user?.checkpoint || user.checkpoint.restoredAt) return;
     const checkpoint = await this.deps.checkpoints.load(session.id, user.checkpoint.id);
-    if (!checkpoint) return this.notice('error', 'The snapshot for these changes is no longer available.', surface);
+    if (!checkpoint)
+      return this.notice('error', 'The snapshot for these changes is no longer available.', surface);
     const plan = await planRestore(checkpoint.files, this.deps.workspace);
     const modified = plan.filter((p) => p.state === 'modified');
     let includeModified = false;
     if (modified.length) {
-      const names = modified.slice(0, 6).map((p) => this.rel(p.snapshot.absolutePath)).join('\n');
+      const names = modified
+        .slice(0, 6)
+        .map((p) => this.rel(p.snapshot.absolutePath))
+        .join('\n');
       const choice = await vscode.window.showWarningMessage(
         `${modified.length} file${modified.length === 1 ? ' was' : 's were'} changed after Sovran edited ${modified.length === 1 ? 'it' : 'them'}.`,
         { modal: true, detail: `${names}\n\nRestoring discards those later changes.` },
@@ -2301,7 +2764,10 @@ export class SovranController implements vscode.Disposable {
     const files = [...new Set(pending.flatMap((u) => u.checkpoint!.files))];
     const choice = await vscode.window.showWarningMessage(
       `Also undo the file changes from the discarded response${pending.length === 1 ? '' : 's'}?`,
-      { modal: true, detail: `${files.length} file${files.length === 1 ? '' : 's'} changed:\n${files.slice(0, 8).join('\n')}${files.length > 8 ? '\n…' : ''}` },
+      {
+        modal: true,
+        detail: `${files.length} file${files.length === 1 ? '' : 's'} changed:\n${files.slice(0, 8).join('\n')}${files.length > 8 ? '\n…' : ''}`,
+      },
       'Undo changes',
       'Keep changes',
     );
@@ -2314,21 +2780,32 @@ export class SovranController implements vscode.Disposable {
       if (!u.checkpoint || u.checkpoint.restoredAt) continue;
       const cp = await this.deps.checkpoints.load(session.id, u.checkpoint.id);
       if (!cp) continue;
-      const result = await restoreFiles(await planRestore(cp.files, this.deps.workspace), this.deps.workspace, false);
+      const result = await restoreFiles(
+        await planRestore(cp.files, this.deps.workspace),
+        this.deps.workspace,
+        false,
+      );
       skipped += result.skipped.length;
       u.checkpoint.restoredAt = Date.now();
     }
-    if (skipped) this.notice('warning', `Kept ${skipped} file${skipped === 1 ? '' : 's'} you changed after Sovran edited ${skipped === 1 ? 'it' : 'them'}.`, surface);
+    if (skipped)
+      this.notice(
+        'warning',
+        `Kept ${skipped} file${skipped === 1 ? '' : 's'} you changed after Sovran edited ${skipped === 1 ? 'it' : 'them'}.`,
+        surface,
+      );
   }
 
   /** Drops the compaction boundary when the message it points to no longer exists. */
   private fixCompaction(session: Session) {
-    if (session.compaction && !session.messages.some((m) => m.id === session.compaction!.firstKeptId)) delete session.compaction;
+    if (session.compaction && !session.messages.some((m) => m.id === session.compaction!.firstKeptId))
+      delete session.compaction;
   }
 
   private async retry(surface: Surface) {
     const session = surface.session;
-    if (this.runs.has(session.id)) return this.notice('warning', 'Stop the current run before retrying.', surface);
+    if (this.runs.has(session.id))
+      return this.notice('warning', 'Stop the current run before retrying.', surface);
     let i = session.messages.length - 1;
     while (i >= 0 && session.messages[i]!.role !== 'user') i--;
     if (i < 0) return;
@@ -2350,7 +2827,8 @@ export class SovranController implements vscode.Disposable {
 
   private async editMessage(surface: Surface, messageId: string, text: string) {
     const session = surface.session;
-    if (this.runs.has(session.id)) return this.notice('warning', 'Stop the current run before editing a message.', surface);
+    if (this.runs.has(session.id))
+      return this.notice('warning', 'Stop the current run before editing a message.', surface);
     const i = session.messages.findIndex((m) => m.id === messageId && m.role === 'user');
     if (i < 0) return;
     const original = session.messages[i] as UserMessage;
@@ -2361,7 +2839,9 @@ export class SovranController implements vscode.Disposable {
     session.messages.length = i;
     this.fixCompaction(session);
     const slash = parseSlash(text);
-    const command = slash ? this.commands.find((c) => c.name === slash.name && c.kind === 'prompt') : undefined;
+    const command = slash
+      ? this.commands.find((c) => c.name === slash.name && c.kind === 'prompt')
+      : undefined;
     const user: UserMessage = {
       role: 'user',
       id: randomUUID(),
@@ -2384,7 +2864,8 @@ export class SovranController implements vscode.Disposable {
   /** Summarizes the older messages of `surface`'s chat (the last chat used, from the command). */
   async compactNow(surface: Surface = this.target()) {
     const session = surface.session;
-    if (this.runs.has(session.id)) return this.notice('warning', 'Stop the current run before compacting.', surface);
+    if (this.runs.has(session.id))
+      return this.notice('warning', 'Stop the current run before compacting.', surface);
     if (!planCompaction(messagesForModel(session), 1)) {
       return this.notice('info', 'There is not enough conversation to summarize yet.', surface);
     }
@@ -2394,7 +2875,14 @@ export class SovranController implements vscode.Disposable {
     const secret = await this.deps.secrets.get(resolved.provider.id);
     try {
       await this.createRunner(resolved.provider, this.deps.workspace, session.id).compact(
-        { session, model: resolved.model, settings: this.settings.agent, signal: run.abort.signal, emit: (e) => this.onAgentEvent(session, e), secrets: [secret] },
+        {
+          session,
+          model: resolved.model,
+          settings: this.settings.agent,
+          signal: run.abort.signal,
+          emit: (e) => this.onAgentEvent(session, e),
+          secrets: [secret],
+        },
         1,
       );
     } finally {
@@ -2411,7 +2899,11 @@ export class SovranController implements vscode.Disposable {
       // Symlink-aware: a link inside the repository must not attach a file from outside it.
       resolved = await resolveAndVerify(p, this.deps.workspace);
     } catch (e) {
-      return this.notice('warning', e instanceof PathError ? e.message : `${p} is not inside the workspace.`, surface);
+      return this.notice(
+        'warning',
+        e instanceof PathError ? e.message : `${p} is not inside the workspace.`,
+        surface,
+      );
     }
     await this.addAttachment(surface, resolved.absolute, resolved.relative);
     if (push) this.patchSurface(surface, { context: this.contextView(surface) });
@@ -2419,7 +2911,11 @@ export class SovranController implements vscode.Disposable {
 
   /** Stops the run of one chat. Without an id ("Stop Agent"): the last chat used, or every run when it is idle. */
   cancel(sessionId?: string) {
-    const ids = sessionId ? [sessionId] : this.runs.has(this.target().session.id) ? [this.target().session.id] : [...this.runs.keys()];
+    const ids = sessionId
+      ? [sessionId]
+      : this.runs.has(this.target().session.id)
+        ? [this.target().session.id]
+        : [...this.runs.keys()];
     for (const id of ids) {
       const run = this.runs.get(id);
       if (!run) continue;
@@ -2451,30 +2947,49 @@ export class SovranController implements vscode.Disposable {
     };
     switch (e.type) {
       case 'iteration':
-        return setActivity({ phase: 'thinking', label: 'Thinking' }, { iteration: e.iteration, maxIterations: e.maxIterations });
+        return setActivity(
+          { phase: 'thinking', label: 'Thinking' },
+          { iteration: e.iteration, maxIterations: e.maxIterations },
+        );
       case 'message_started':
         this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: e.message });
         return;
       case 'text_delta':
       case 'reasoning_delta': {
         const field = e.type === 'text_delta' ? 'content' : 'reasoning';
-        if (run && run.view.activity.phase === 'thinking' && field === 'content') setActivity({ phase: 'streaming', label: 'Writing' });
+        if (run && run.view.activity.phase === 'thinking' && field === 'content')
+          setActivity({ phase: 'streaming', label: 'Writing' });
         if (!visible) return;
         const key = `${e.messageId}:${field}`;
         const prev = this.deltas.get(key);
         if (prev) prev.text += e.text;
-        else this.deltas.set(key, { type: 'messageDelta', sessionId: session.id, messageId: e.messageId, field, text: e.text });
+        else
+          this.deltas.set(key, {
+            type: 'messageDelta',
+            sessionId: session.id,
+            messageId: e.messageId,
+            field,
+            text: e.text,
+          });
         return this.scheduleFlush();
       }
       case 'tool_call_streaming':
-        return setActivity({ phase: 'streaming', label: `Preparing ${this.deps.mcp?.describe(e.name) ?? e.name.replace(/_/g, ' ')}`, toolName: e.name });
+        return setActivity({
+          phase: 'streaming',
+          label: `Preparing ${this.deps.mcp?.describe(e.name) ?? e.name.replace(/_/g, ' ')}`,
+          toolName: e.name,
+        });
       case 'message_committed':
         this.flush();
         this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: e.message });
         return this.schedulePersist(session);
       case 'message_removed':
         this.flush();
-        this.sendToSession(session.id, { type: 'messageRemoved', sessionId: session.id, messageId: e.messageId });
+        this.sendToSession(session.id, {
+          type: 'messageRemoved',
+          sessionId: session.id,
+          messageId: e.messageId,
+        });
         return;
       case 'tool_phase':
         return setActivity({ phase: e.phase, label: e.label, toolName: e.toolName, callId: e.callId });
@@ -2482,7 +2997,13 @@ export class SovranController implements vscode.Disposable {
         if (!visible) return;
         const prev = this.outputs.get(e.callId);
         if (prev) prev.chunk += e.chunk;
-        else this.outputs.set(e.callId, { type: 'toolOutput', sessionId: session.id, callId: e.callId, chunk: e.chunk });
+        else
+          this.outputs.set(e.callId, {
+            type: 'toolOutput',
+            sessionId: session.id,
+            callId: e.callId,
+            chunk: e.chunk,
+          });
         return this.scheduleFlush();
       }
       case 'notice':
@@ -2490,12 +3011,22 @@ export class SovranController implements vscode.Disposable {
         if (!visible) return this.deps.logger.info(`Notice in a chat that is not shown: ${e.message}`);
         return this.notice(e.level, e.message, this.surfaceFor(session.id));
       case 'context':
-        session.usage = { tokens: e.estimatedTokens, contextWindow: e.contextWindow, source: 'estimate', updatedAt: Date.now() };
+        session.usage = {
+          tokens: e.estimatedTokens,
+          contextWindow: e.contextWindow,
+          source: 'estimate',
+          updatedAt: Date.now(),
+        };
         this.patchSession(session.id, { usage: this.usageView(session) });
         return;
       case 'usage':
         if (e.promptTokens && session.usage) {
-          session.usage = { ...session.usage, tokens: e.promptTokens, source: 'server', updatedAt: Date.now() };
+          session.usage = {
+            ...session.usage,
+            tokens: e.promptTokens,
+            source: 'server',
+            updatedAt: Date.now(),
+          };
           this.patchSession(session.id, { usage: this.usageView(session) });
         }
         return;
@@ -2504,7 +3035,11 @@ export class SovranController implements vscode.Disposable {
       case 'compacted':
         this.patchSession(session.id, { compaction: this.compactionView(session) });
         if (visible) {
-          this.notice('info', `Summarized ${e.compaction.summarizedCount} earlier messages to free context. The full transcript is still shown here.`, this.surfaceFor(session.id));
+          this.notice(
+            'info',
+            `Summarized ${e.compaction.summarizedCount} earlier messages to free context. The full transcript is still shown here.`,
+            this.surfaceFor(session.id),
+          );
         }
         return this.schedulePersist(session);
     }
@@ -2527,7 +3062,11 @@ export class SovranController implements vscode.Disposable {
   // ------------------------------------------------------------------ approvals
 
   /** The approval port of one chat's runs (see createRunner): the request is shown by the surface showing that chat. */
-  private request(sessionId: string, request: ApprovalRequest, signal: AbortSignal): Promise<ApprovalResponse> {
+  private request(
+    sessionId: string,
+    request: ApprovalRequest,
+    signal: AbortSignal,
+  ): Promise<ApprovalResponse> {
     return new Promise<ApprovalResponse>((resolve, reject) => {
       const d = request.detail;
       const view: ApprovalView = {
@@ -2539,18 +3078,43 @@ export class SovranController implements vscode.Disposable {
           d.kind === 'web'
             ? { kind: 'web', url: d.url }
             : d.kind === 'git'
-            ? {
-                kind: 'git', operation: d.operation, repository: d.repository, branch: d.branch,
-                files: [...d.files], ...(d.message !== undefined ? { message: d.message } : {}),
-                preview: d.preview, warnings: [...d.warnings],
-              }
-            : d.kind === 'edit'
-              ? { kind: 'edit', path: d.path, isNew: d.isNew, diff: d.diff, added: d.added, removed: d.removed }
-              : d.kind === 'command'
-                ? { kind: 'command', command: d.command, cwd: d.cwd, warnings: d.warnings, allowPrefix: d.warnings.length ? null : suggestAllowPrefix(d.command) }
-                : d.kind === 'mcp'
-                  ? { kind: 'mcp', server: d.server, tool: d.tool, ...(d.title ? { title: d.title } : {}), arguments: d.arguments, hints: d.hints }
-                  : { kind: 'read', path: d.path, reason: d.reason },
+              ? {
+                  kind: 'git',
+                  operation: d.operation,
+                  repository: d.repository,
+                  branch: d.branch,
+                  files: [...d.files],
+                  ...(d.message !== undefined ? { message: d.message } : {}),
+                  preview: d.preview,
+                  warnings: [...d.warnings],
+                }
+              : d.kind === 'edit'
+                ? {
+                    kind: 'edit',
+                    path: d.path,
+                    isNew: d.isNew,
+                    diff: d.diff,
+                    added: d.added,
+                    removed: d.removed,
+                  }
+                : d.kind === 'command'
+                  ? {
+                      kind: 'command',
+                      command: d.command,
+                      cwd: d.cwd,
+                      warnings: d.warnings,
+                      allowPrefix: d.warnings.length ? null : suggestAllowPrefix(d.command),
+                    }
+                  : d.kind === 'mcp'
+                    ? {
+                        kind: 'mcp',
+                        server: d.server,
+                        tool: d.tool,
+                        ...(d.title ? { title: d.title } : {}),
+                        arguments: d.arguments,
+                        hints: d.hints,
+                      }
+                    : { kind: 'read', path: d.path, reason: d.reason },
         ...(request.reason ? { reason: request.reason } : {}),
       };
       const cleanup = () => {
@@ -2577,16 +3141,19 @@ export class SovranController implements vscode.Disposable {
       const shown = this.surfaceFor(sessionId);
       if (d.kind === 'edit') {
         this.deps.diff.register(request.id, d.proposedContent);
-        if (this.settings.openDiffOnProposal) void this.deps.diff.show(request.id, d.path, d.absolutePath, d.isNew, this.editorColumn(shown));
+        if (this.settings.openDiffOnProposal)
+          void this.deps.diff.show(request.id, d.path, d.absolutePath, d.isNew, this.editorColumn(shown));
       }
       this.approvalsChanged(sessionId);
       // Nobody sees the request: the view is collapsed, or the chat's tab is closed or behind another tab.
       if (!shown?.post || (shown.panel && !shown.panel.visible)) {
-        void vscode.window.showInformationMessage(`Sovran needs your approval: ${request.title}`, 'Review').then((c) => {
-          if (!c) return;
-          const s = this.surfaceFor(sessionId);
-          void (s ? this.revealSurface(s) : this.openInEditor(sessionId));
-        });
+        void vscode.window
+          .showInformationMessage(`Sovran needs your approval: ${request.title}`, 'Review')
+          .then((c) => {
+            if (!c) return;
+            const s = this.surfaceFor(sessionId);
+            void (s ? this.revealSurface(s) : this.openInEditor(sessionId));
+          });
       }
     });
   }
@@ -2601,7 +3168,14 @@ export class SovranController implements vscode.Disposable {
   private async showApprovalDiff(id: string) {
     const pending = this.approvals.get(id);
     const d = pending?.request.detail;
-    if (pending && d?.kind === 'edit') await this.deps.diff.show(id, d.path, d.absolutePath, d.isNew, this.editorColumn(this.surfaceFor(pending.sessionId)));
+    if (pending && d?.kind === 'edit')
+      await this.deps.diff.show(
+        id,
+        d.path,
+        d.absolutePath,
+        d.isNew,
+        this.editorColumn(this.surfaceFor(pending.sessionId)),
+      );
   }
 
   /**
@@ -2613,7 +3187,8 @@ export class SovranController implements vscode.Disposable {
     const fromDiff = DiffPresenter.approvalId(uri);
     const pending = fromDiff
       ? edits.find((a) => a.request.id === fromDiff)
-      : (edits.find((a) => a.sessionId === this.target().session.id) ?? (edits.length === 1 ? edits[0] : undefined));
+      : (edits.find((a) => a.sessionId === this.target().session.id) ??
+        (edits.length === 1 ? edits[0] : undefined));
     if (!pending) {
       void vscode.window.showInformationMessage('No file change is waiting for your approval.');
       return;
@@ -2621,7 +3196,12 @@ export class SovranController implements vscode.Disposable {
     await this.resolveApproval(pending.request.id, { approved });
   }
 
-  private async resolveApproval(id: string, response: ApprovalResponse, allowCommand?: string, allowTool?: boolean) {
+  private async resolveApproval(
+    id: string,
+    response: ApprovalResponse,
+    allowCommand?: string,
+    allowTool?: boolean,
+  ) {
     const pending = this.approvals.get(id);
     if (!pending) return;
     const detail = pending.request.detail;
@@ -2632,7 +3212,11 @@ export class SovranController implements vscode.Disposable {
       if (matchesAllowList(detail.command, [allowCommand])) {
         await addAllowedCommand(allowCommand);
         this.settings = readSettings(); // the running agent reads the policy live, so the next command benefits
-        this.notice('info', `Commands starting with "${allowCommand}" now run without asking. Manage the list in Settings.`, this.surfaceFor(pending.sessionId));
+        this.notice(
+          'info',
+          `Commands starting with "${allowCommand}" now run without asking. Manage the list in Settings.`,
+          this.surfaceFor(pending.sessionId),
+        );
       } else {
         this.deps.logger.warn('Ignored an allow-list entry that does not match the approved command.');
       }
@@ -2641,7 +3225,11 @@ export class SovranController implements vscode.Disposable {
     if (response.approved && allowTool && detail.kind === 'mcp') {
       // The call runs either way: failing to save the choice must not leave the run waiting.
       await this.deps.mcp?.allowTool(detail.serverId, detail.tool).catch((e: unknown) => {
-        this.notice('error', `Could not save "always allow" for ${detail.tool}: ${e instanceof Error ? e.message : String(e)}`, this.surfaceFor(pending.sessionId));
+        this.notice(
+          'error',
+          `Could not save "always allow" for ${detail.tool}: ${e instanceof Error ? e.message : String(e)}`,
+          this.surfaceFor(pending.sessionId),
+        );
       });
     }
     pending.settle(response);
@@ -2669,7 +3257,11 @@ export class SovranController implements vscode.Disposable {
     }
     const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(resolved.absolute));
     const pos = new vscode.Position(Math.max(0, (line ?? 1) - 1), 0);
-    await vscode.window.showTextDocument(doc, { selection: new vscode.Range(pos, pos), preview: true, viewColumn: this.editorColumn(surface) });
+    await vscode.window.showTextDocument(doc, {
+      selection: new vscode.Range(pos, pos),
+      preview: true,
+      viewColumn: this.editorColumn(surface),
+    });
   }
 
   private async openExternal(url: string) {

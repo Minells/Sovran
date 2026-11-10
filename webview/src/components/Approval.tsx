@@ -48,20 +48,30 @@ export function approvalCopy(approval: ApprovalView) {
   const d = approval.detail;
   if (d.kind === 'web') return { title: 'Read this public web page?', verb: 'Fetch', icon: 'globe' };
   if (d.kind === 'edit') {
-    return { title: d.isNew ? 'Create this file?' : 'Apply these changes?', verb: d.isNew ? 'Create' : 'Apply', icon: 'git-pull-request-go-to-changes' };
+    return {
+      title: d.isNew ? 'Create this file?' : 'Apply these changes?',
+      verb: d.isNew ? 'Create' : 'Apply',
+      icon: 'git-pull-request-go-to-changes',
+    };
   }
   if (d.kind === 'command') return { title: 'Run this command?', verb: 'Run', icon: 'terminal' };
   if (d.kind === 'git') {
     const verb = { stage: 'Stage', unstage: 'Unstage', commit: 'Commit' }[d.operation];
-    return { title: d.operation === 'commit' ? 'Commit these staged changes?' : `${verb} these files?`, verb, icon: 'git-commit' };
+    return {
+      title: d.operation === 'commit' ? 'Commit these staged changes?' : `${verb} these files?`,
+      verb,
+      icon: 'git-commit',
+    };
   }
   if (d.kind === 'mcp') return { title: 'Run this MCP tool?', verb: 'Run', icon: 'mcp' };
   return { title: 'Allow reading a protected file?', verb: 'Allow', icon: 'shield' };
 }
 
-const TEXT_FIELD = 'textarea, select, [contenteditable]:not([contenteditable="false"]), input:not([type="checkbox"]):not([type="radio"])';
+const TEXT_FIELD =
+  'textarea, select, [contenteditable]:not([contenteditable="false"]), input:not([type="checkbox"]):not([type="radio"])';
 /** Controls Enter already activates. A checkbox is not one of them: Enter there approves, with the box as ticked. */
-const ENTER_CONTROL = 'button, a[href], summary, [role="button"], [role="tab"], [role="radio"], [role="option"], [role^="menuitem"]';
+const ENTER_CONTROL =
+  'button, a[href], summary, [role="button"], [role="tab"], [role="radio"], [role="option"], [role^="menuitem"]';
 
 /**
  * What a key press means for a pending approval: Enter approves, Escape rejects. The keys stay with whatever has them
@@ -71,7 +81,8 @@ const ENTER_CONTROL = 'button, a[href], summary, [role="button"], [role="tab"], 
  */
 export function approvalKey(e: KeyboardEvent): 'approve' | 'reject' | null {
   if (e.key !== 'Enter' && e.key !== 'Escape') return null;
-  if (e.defaultPrevented || e.isComposing || e.repeat || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return null;
+  if (e.defaultPrevented || e.isComposing || e.repeat || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey)
+    return null;
   const t = e.target instanceof Element ? e.target : null;
   if (t?.closest('[role="menu"], [role="dialog"], [role="listbox"]')) return null;
   if (t?.matches(TEXT_FIELD)) {
@@ -139,13 +150,16 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
 
   const showDetail = () => {
     const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
-    document.getElementById(approvalAnchor(approval.id))?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
+    document
+      .getElementById(approvalAnchor(approval.id))
+      ?.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
   };
 
   // In an unattended mode the bar explains why this action still needs a human, without repeating a listed warning.
   const paused = app.approvalMode !== 'ask' && !!approval.reason;
   const reasonListed = d.kind === 'command' && !!approval.reason && d.warnings.includes(approval.reason);
-  const target = d.kind === 'web' ? d.url : d.kind === 'command' || d.kind === 'mcp' || d.kind === 'git' ? null : d.path;
+  const target =
+    d.kind === 'web' ? d.url : d.kind === 'command' || d.kind === 'mcp' || d.kind === 'git' ? null : d.path;
 
   return (
     <section className="sv-approval-bar" aria-label={copy.title} data-kind={d.kind}>
@@ -155,7 +169,12 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
           <span className="sv-approval-bar__title">{copy.title}</span>
           {target ? (
             d.kind === 'edit' ? (
-              <button type="button" className="sv-approval-bar__target" title="Show the changes in the chat" onClick={showDetail}>
+              <button
+                type="button"
+                className="sv-approval-bar__target"
+                title="Show the changes in the chat"
+                onClick={showDetail}
+              >
                 <code>{target}</code>
                 <span className="sv-tabular sv-approval-bar__stats">
                   <span className="sv-plus">+{d.added}</span> <span className="sv-minus">−{d.removed}</span>
@@ -176,7 +195,14 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
         </div>
         {step === 'decide' ? (
           <div className="sv-approval-bar__actions">
-            <button type="button" className="sv-btn" onClick={() => respond(false)} title="Reject (Esc)" aria-label="Reject" aria-keyshortcuts="Escape">
+            <button
+              type="button"
+              className="sv-btn"
+              onClick={() => respond(false)}
+              title="Reject (Esc)"
+              aria-label="Reject"
+              aria-keyshortcuts="Escape"
+            >
               Reject <kbd aria-hidden="true">Esc</kbd>
             </button>
             <button
@@ -206,8 +232,9 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
 
       {d.kind === 'web' ? (
         <div className="sv-approval__meta">
-          Reads this public URL and its robots.txt, with up to 3 redirects per resource within the same origin.
-          No login or browser cookies. Page body up to 1 MiB, robots.txt up to 128 KiB and 30 seconds total. Every URL asks for approval.
+          Reads this public URL and its robots.txt, with up to 3 redirects per resource within the same
+          origin. No login or browser cookies. Page body up to 1 MiB, robots.txt up to 128 KiB and 30 seconds
+          total. Every URL asks for approval.
         </div>
       ) : d.kind === 'git' ? (
         <>
@@ -215,7 +242,9 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
             Review {d.files.length} file(s){d.message !== undefined ? ' and commit message' : ''}
           </button>
           <ul className="sv-approval__warnings">
-            {d.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+            {d.warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
           </ul>
         </>
       ) : d.kind === 'command' ? (
@@ -275,7 +304,7 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
             <button
               type="button"
               className="sv-link-btn"
-              title={`Run now and stop asking for ${d.tool}. Change it in Settings → MCP.`}
+              title={`Run now and stop asking for ${d.tool}. Change it in Settings → Tools.`}
               onClick={() => respond(true, { allowTool: true })}
             >
               Always allow {d.tool}
@@ -346,7 +375,12 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
             <Button variant="ghost" onClick={() => setStep('decide')}>
               Back
             </Button>
-            <Button variant="primary" icon="check" disabled={!!allowError} onClick={() => respond(true, { allowCommand: allowEntry.trim() })}>
+            <Button
+              variant="primary"
+              icon="check"
+              disabled={!!allowError}
+              onClick={() => respond(true, { allowCommand: allowEntry.trim() })}
+            >
               Run and always allow
             </Button>
           </div>
@@ -370,14 +404,22 @@ export function ApprovalDetail({ approval }: { approval: ApprovalView }) {
             <code>{revealHidden(d.repository)}</code> · {revealHidden(d.branch)}
           </div>
           <ul className="sv-list" aria-label="Files included in the Git action">
-            {d.files.map((file) => <li key={file}><code>{revealHidden(JSON.stringify(file))}</code></li>)}
+            {d.files.map((file) => (
+              <li key={file}>
+                <code>{revealHidden(JSON.stringify(file))}</code>
+              </li>
+            ))}
           </ul>
           {d.message !== undefined ? (
-            <pre className="sv-approval__command" aria-label="Commit message">{revealHidden(d.message)}</pre>
+            <pre className="sv-approval__command" aria-label="Commit message">
+              {revealHidden(d.message)}
+            </pre>
           ) : null}
           {d.preview ? (
             <>
-              <p className="sv-approval__meta">The preview may be shortened. Inspect truncated sections before approving.</p>
+              <p className="sv-approval__meta">
+                The preview may be shortened. Inspect truncated sections before approving.
+              </p>
               <DiffView diff={d.preview} label="Git change preview" />
             </>
           ) : null}
@@ -390,7 +432,11 @@ export function ApprovalDetail({ approval }: { approval: ApprovalView }) {
               {d.isNew ? ' · new file' : ''}
             </span>
             <span className="sv-composer__spacer" />
-            <Button variant="ghost" icon="diff" onClick={() => post({ type: 'openApprovalDiff', id: approval.id })}>
+            <Button
+              variant="ghost"
+              icon="diff"
+              onClick={() => post({ type: 'openApprovalDiff', id: approval.id })}
+            >
               Open diff editor
             </Button>
           </div>

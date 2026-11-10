@@ -277,7 +277,7 @@ export class McpHost implements vscode.Disposable {
     if (config.auth.type !== 'none' && !this.tokens.has(config.id)) {
       this.deps.notify(
         'info',
-        `${config.name} needs a token before it can connect. Use Set token on its card in Settings → MCP.`,
+        `${config.name} needs a token before it can connect. Use Set token on its card in Settings → Tools.`,
       );
     }
     this.changed();
@@ -358,7 +358,7 @@ export class McpHost implements vscode.Disposable {
     await this.setToolPolicy(serverId, tool, 'allow');
     this.deps.notify(
       'info',
-      `${tool} of ${server.name} now runs without asking. Change it in Settings → MCP.`,
+      `${tool} of ${server.name} now runs without asking. Change it in Settings → Tools.`,
     );
   }
 

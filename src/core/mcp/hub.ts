@@ -457,7 +457,7 @@ export class McpHub implements ToolSource {
     const name = conn?.config.name ?? serverId;
     if (!conn?.client || conn.status !== 'connected') {
       throw new ToolError(
-        `The MCP server ${name} is not connected${conn?.error ? ` (${conn.error})` : ''}. Restart it in Sovran Settings → MCP.`,
+        `The MCP server ${name} is not connected${conn?.error ? ` (${conn.error})` : ''}. Restart it in Sovran Settings → Tools.`,
       );
     }
     if (signal.aborted) throw new ToolError('Cancelled by the user.');
@@ -519,13 +519,13 @@ export class McpHub implements ToolSource {
   private describeCallFailure(e: unknown, conn: Connection): string {
     const name = conn.config.name;
     if (SdkError.isInstance(e) && e.code === SdkErrorCode.RequestTimeout) {
-      return `${name} did not answer within ${conn.config.timeoutSeconds} seconds. If this tool is slow, raise the timeout in Sovran Settings → MCP.`;
+      return `${name} did not answer within ${conn.config.timeoutSeconds} seconds. If this tool is slow, raise the timeout in Sovran Settings → Tools.`;
     }
     if (
       SdkError.isInstance(e) &&
       (e.code === SdkErrorCode.ConnectionClosed || e.code === SdkErrorCode.NotConnected)
     ) {
-      return `${name} stopped during the call. Restart it in Sovran Settings → MCP.`;
+      return `${name} stopped during the call. Restart it in Sovran Settings → Tools.`;
     }
     if (ProtocolError.isInstance(e)) return `${name} refused the call: ${this.clean(e.message)}`;
     return `The call to ${name} failed: ${this.clean(e instanceof Error ? e.message : String(e))}`;

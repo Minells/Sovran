@@ -11,6 +11,7 @@ export interface ToolSource {
 export interface ToolSelection {
   disabledTools?: readonly string[];
   workspaceTrusted?: boolean;
+  excludedToolGroups?: readonly string[];
 }
 
 export class ToolRegistry {
@@ -36,15 +37,20 @@ export class ToolRegistry {
 
   /** Tools offered to the model in a mode. Plan mode only ever sees read-only tools. */
   list(mode: AgentMode, selection: ToolSelection = {}): AnyTool[] {
-    return [...this.tools.values(), ...this.fromSources()].filter(
-      (t) => !this.unavailable(t, mode, selection),
-    );
+    return this.all().filter((t) => !this.unavailable(t, mode, selection));
+  }
+
+  /** Current definitions for settings; permission checks still apply when listing for a model or dispatching. */
+  all(): AnyTool[] {
+    return [...this.tools.values(), ...this.fromSources()];
   }
 
   /** Visibility and dispatch share the same checks. A replaced definition needs a fresh model request. */
   unavailable(tool: AnyTool, mode: AgentMode, selection: ToolSelection = {}): string | undefined {
     if (this.get(tool.name) !== tool)
       return `${tool.name} is no longer available. Request its current definition before retrying.`;
+    if (selection.excludedToolGroups?.includes(tool.group ?? 'other'))
+      return `${tool.name} belongs to a tool group excluded from this chat.`;
     if (mode === 'plan' && tool.risk !== 'read')
       return `${tool.name} is not available in Plan mode (read-only).`;
     if ((tool.risk !== 'read' || tool.requiresTrust) && selection.workspaceTrusted === false) {
@@ -75,7 +81,10 @@ export class ToolRegistry {
       };
     let cached = this.schemaCache.get(tool);
     if (!cached) {
-      const json = z.toJSONSchema(tool.schema, { io: 'input', unrepresentable: 'any' }) as Record<string, unknown>;
+      const json = z.toJSONSchema(tool.schema, { io: 'input', unrepresentable: 'any' }) as Record<
+        string,
+        unknown
+      >;
       delete json.$schema;
       cached = {
         type: 'function',

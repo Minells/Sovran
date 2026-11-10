@@ -151,12 +151,12 @@
       },
       {
         "command": "sovran.selectModel",
-        "title": "Select Model…",
+        "title": "Select Model\u2026",
         "category": "Sovran"
       },
       {
         "command": "sovran.setApiKey",
-        "title": "Set Provider API Key…",
+        "title": "Set Provider API Key\u2026",
         "category": "Sovran"
       },
       {
@@ -166,7 +166,7 @@
       },
       {
         "command": "sovran.setApprovalMode",
-        "title": "Change Approval Mode…",
+        "title": "Change Approval Mode\u2026",
         "category": "Sovran"
       },
       {
@@ -181,7 +181,7 @@
       },
       {
         "command": "sovran.attachFiles",
-        "title": "Add Files to Context…",
+        "title": "Add Files to Context\u2026",
         "category": "Sovran"
       },
       {
@@ -317,7 +317,7 @@
             "type": "array",
             "scope": "application",
             "default": [],
-            "markdownDescription": "Model providers (OpenAI-compatible endpoints). API keys are **not** stored here; use `SOVRAN: Set Provider API Key…`. Only user settings are honored, workspace settings are ignored for security.",
+            "markdownDescription": "Model providers (OpenAI-compatible endpoints). API keys are **not** stored here; use `SOVRAN: Set Provider API Key\u2026`. Only user settings are honored, workspace settings are ignored for security.",
             "items": {
               "type": "object",
               "required": [
@@ -465,7 +465,7 @@
               "Apply file changes without asking. Commands still ask unless they are in `#sovran.approvals.allowedCommands#`.",
               "Edit files and run commands without asking. Protected files, risky commands (delete, push, publish, `sudo`, network, paths outside the workspace) and hidden characters still ask. **Use only in repositories you trust.**"
             ],
-            "markdownDescription": "Approval mode Act mode starts in when a window opens. Change it for the current window from the composer, from Sovran Settings or with `Sovran: Change Approval Mode…`. Plan mode is always read-only.",
+            "markdownDescription": "Approval mode Act mode starts in when a window opens. Change it for the current window from the composer, from Sovran Settings or with `Sovran: Change Approval Mode\u2026`. Plan mode is always read-only.",
             "order": 1
           },
           "sovran.approvals.allowedCommands": {
@@ -475,7 +475,7 @@
               "type": "string"
             },
             "default": [],
-            "markdownDescription": "Commands that run without approval when the requested command equals an entry or starts with it followed by a space (e.g. `npm test`). Commands containing shell operators (`; & | $ > <` …) and risky commands (delete, push, publish, `sudo`, network, paths outside the workspace) always ask. Add entries from an approval card with **Always allow**.",
+            "markdownDescription": "Commands that run without approval when the requested command equals an entry or starts with it followed by a space (e.g. `npm test`). Commands containing shell operators (`; & | $ > <` \u2026) and risky commands (delete, push, publish, `sudo`, network, paths outside the workspace) always ask. Add entries from an approval card with **Always allow**.",
             "order": 2
           },
           "sovran.security.protectedPaths": {
@@ -585,14 +585,14 @@
       },
       {
         "id": "sovran-mcp",
-        "title": "MCP",
+        "title": "Tools: Integrations",
         "order": 4,
         "properties": {
           "sovran.mcp.servers": {
             "type": "array",
             "scope": "application",
             "default": [],
-            "markdownDescription": "MCP servers whose tools the agent can use in Act mode. Each tool asks before it runs, in every approval mode, until you allow it. Manage them in **Sovran Settings → MCP**. Tokens are **not** stored here: use *Set token*, which keeps them in Secret Storage. Only user settings are honored: a workspace can never start a server.",
+            "markdownDescription": "MCP servers whose tools the agent can use in Act mode. Each tool asks before it runs, in every approval mode, until you allow it. Manage them in **Sovran Settings \u2192 Tools**. Tokens are **not** stored here: use *Set token*, which keeps them in Secret Storage. Only user settings are honored: a workspace can never start a server.",
             "items": {
               "type": "object",
               "required": [
@@ -689,6 +689,44 @@
                     "type": "string"
                   },
                   "description": "Tools never offered to the model."
+                },
+                "managed": {
+                  "type": "object",
+                  "description": "Catalog provenance. Managed launch uses the reviewed version and profile. Edit as a custom server to use custom launch settings.",
+                  "required": [
+                    "id",
+                    "profile",
+                    "version"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "enum": [
+                        "playwright",
+                        "devtools",
+                        "github"
+                      ]
+                    },
+                    "profile": {
+                      "type": "string",
+                      "enum": [
+                        "isolated",
+                        "extension",
+                        "readonly",
+                        "collaboration"
+                      ]
+                    },
+                    "version": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 40
+                    },
+                    "browserProfile": {
+                      "type": "string",
+                      "pattern": "^[a-zA-Z0-9 _-]{1,80}$"
+                    }
+                  }
                 }
               }
             },
@@ -776,7 +814,8 @@
     "test:extension": "node scripts/test-extension.mjs",
     "check": "npm run typecheck && npm run lint && npm run test",
     "package": "vsce package --no-dependencies",
-    "vscode:prepublish": "npm run build"
+    "vscode:prepublish": "npm run build",
+    "verify:vsix": "node scripts/verify-vsix.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "^2.4.0",

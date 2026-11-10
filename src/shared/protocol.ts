@@ -3,6 +3,7 @@
  * Every webview → host message is validated with `webviewMessageSchema` before it is handled.
  */
 import { z } from 'zod';
+import { TOOL_GROUP_PATTERN } from '../core/tools/groups';
 import { hasShellMetacharacters } from '../core/permissions/shell';
 import type { AgentMode, ApprovalMode } from '../core/permissions/policy';
 import type { ToolMode } from '../core/providers/types';
@@ -25,7 +26,18 @@ import type { McpStatus } from '../core/mcp/status';
 import type { GitApprovalDetail, McpToolHint } from '../core/ports';
 import { INTEGRATION_IDS, type ManagedIntegration, type IntegrationCatalogView } from '../core/mcp/catalog';
 
-export type { SessionMessage, SessionSummary, AgentMode, ApprovalMode, ToolMode, McpAuth, McpStatus, McpToolHint, McpToolPolicy, McpTransportKind };
+export type {
+  SessionMessage,
+  SessionSummary,
+  AgentMode,
+  ApprovalMode,
+  ToolMode,
+  McpAuth,
+  McpStatus,
+  McpToolHint,
+  McpToolPolicy,
+  McpTransportKind,
+};
 
 export type View = 'chat' | 'history' | 'providers' | 'settings';
 
@@ -263,6 +275,8 @@ export interface McpView {
 }
 
 export interface AppState {
+  toolGroups?: ToolGroupView[];
+  nativeTools?: NativeToolView[];
   /** The webview this state is for. A chat in an editor tab only shows chats; lists and settings live in the view. */
   surface: SurfaceKind;
   view: View;
@@ -292,6 +306,21 @@ export interface AppState {
   mcp: McpView;
 }
 
+export interface ToolGroupView {
+  id: string;
+  label: string;
+  selected: boolean;
+  availableTools: number;
+  definitionTokens: number;
+}
+export interface NativeToolView {
+  name: string;
+  description: string;
+  group: string;
+  risk: 'read' | 'write' | 'execute';
+  unavailable?: string;
+}
+
 export interface ProviderTestResult {
   ok: boolean;
   latencyMs?: number;
@@ -305,7 +334,13 @@ export type HostMessage =
   | { type: 'patch'; patch: Partial<AppState> }
   | { type: 'messageUpsert'; sessionId: string; message: SessionMessage }
   | { type: 'messageRemoved'; sessionId: string; messageId: string }
-  | { type: 'messageDelta'; sessionId: string; messageId: string; field: 'content' | 'reasoning'; text: string }
+  | {
+      type: 'messageDelta';
+      sessionId: string;
+      messageId: string;
+      field: 'content' | 'reasoning';
+      text: string;
+    }
   | { type: 'toolOutput'; sessionId: string; callId: string; chunk: string }
   | { type: 'notice'; id: string; level: 'info' | 'warning' | 'error'; message: string }
   | { type: 'providerTest'; requestId: string; providerId: string; result: ProviderTestResult }
@@ -344,8 +379,14 @@ export const mcpServerInputSchema = z
     token: z.string().max(8000).optional(),
   })
   .superRefine((s, ctx) => {
-    if (s.transport === 'stdio' && !s.command) ctx.addIssue({ code: 'custom', path: ['command'], message: 'Enter the command that starts the server.' });
-    else if (s.transport === 'http' && !s.url) ctx.addIssue({ code: 'custom', path: ['url'], message: 'Enter the URL of the server.' });
+    if (s.transport === 'stdio' && !s.command)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['command'],
+        message: 'Enter the command that starts the server.',
+      });
+    else if (s.transport === 'http' && !s.url)
+      ctx.addIssue({ code: 'custom', path: ['url'], message: 'Enter the URL of the server.' });
     else for (const message of transportProblems(s)) ctx.addIssue({ code: 'custom', message });
   });
 export type McpServerInput = z.infer<typeof mcpServerInputSchema>;
@@ -366,7 +407,12 @@ export const providerInputSchema = z.object({
       }
     }, 'Enter a full http(s) URL, e.g. http://localhost:11434/v1'),
   authType: z.enum(['none', 'bearer', 'header']),
-  headerName: z.string().trim().max(100).regex(/^[A-Za-z0-9-]*$/).optional(),
+  headerName: z
+    .string()
+    .trim()
+    .max(100)
+    .regex(/^[A-Za-z0-9-]*$/)
+    .optional(),
   timeoutSeconds: z.number().int().min(5).max(1800).optional(),
   models: z
     .array(
@@ -389,7 +435,10 @@ const allowEntry = z
   .trim()
   .min(1)
   .max(200)
-  .refine((v) => !hasShellMetacharacters(v), 'Allowed commands cannot contain shell operators such as ; | & $ > <');
+  .refine(
+    (v) => !hasShellMetacharacters(v),
+    'Allowed commands cannot contain shell operators such as ; | & $ > <',
+  );
 
 /**
  * The settings the Settings view may change, each with its own value schema. Anything else (providers, headers,
@@ -406,7 +455,10 @@ export const settingUpdateSchema = z.discriminatedUnion('key', [
   }),
   z.object({ key: z.literal('approvals.mode'), value: approvalModeSchema }),
   z.object({ key: z.literal('approvals.allowedCommands'), value: z.array(allowEntry).max(200) }),
-  z.object({ key: z.literal('security.protectedPaths'), value: z.array(z.string().trim().min(1).max(300)).max(200) }),
+  z.object({
+    key: z.literal('security.protectedPaths'),
+    value: z.array(z.string().trim().min(1).max(300)).max(200),
+  }),
   z.object({ key: z.literal('agent.maxIterations'), value: z.number().int().min(1).max(200) }),
   z.object({ key: z.literal('terminal.timeoutSeconds'), value: z.number().int().min(5).max(3600) }),
   z.object({ key: z.literal('terminal.mirrorToTerminal'), value: z.boolean() }),
@@ -446,6 +498,12 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('renameSession'), id, title: z.string().trim().min(1).max(120) }),
   z.object({ type: z.literal('deleteSession'), id }),
   z.object({ type: z.literal('setMode'), mode: z.enum(['plan', 'act']) }),
+  z.object({
+    type: z.literal('setToolGroup'),
+    sessionId: id,
+    group: z.string().regex(TOOL_GROUP_PATTERN),
+    selected: z.boolean(),
+  }),
   z.object({ type: z.literal('setApprovalMode'), mode: approvalModeSchema }),
   z.object({ type: z.literal('pickModel') }),
   z.object({ type: z.literal('selectModel'), providerId, modelId: z.string().min(1).max(200) }),
@@ -469,7 +527,11 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('attachFiles') }),
   z.object({ type: z.literal('removeAttachment'), id }),
   z.object({ type: z.literal('setIncludeEditor'), value: z.boolean() }),
-  z.object({ type: z.literal('openFile'), path: z.string().min(1).max(2000), line: z.number().int().min(1).optional() }),
+  z.object({
+    type: z.literal('openFile'),
+    path: z.string().min(1).max(2000),
+    line: z.number().int().min(1).optional(),
+  }),
   z.object({ type: z.literal('openExternal'), url: z.string().max(4000) }),
   z.object({ type: z.literal('insertCode'), code: z.string().max(500_000) }),
   z.object({ type: z.literal('setView'), view: z.enum(['chat', 'history', 'providers', 'settings']) }),
@@ -489,13 +551,22 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('useConfigFile') }),
   /** Adds a server (no id) or replaces one, keeping its tool policies. */
   z.object({ type: z.literal('saveMcpServer'), server: mcpServerInputSchema }),
-  z.object({ type: z.literal('addMcpIntegration'), integration: z.enum(INTEGRATION_IDS), profile: z.enum(['isolated', 'extension', 'readonly', 'collaboration']) }),
+  z.object({
+    type: z.literal('addMcpIntegration'),
+    integration: z.enum(INTEGRATION_IDS),
+    profile: z.enum(['isolated', 'extension', 'readonly', 'collaboration']),
+  }),
   z.object({ type: z.literal('installMcpIntegration'), integration: z.enum(INTEGRATION_IDS) }),
   /** The host confirms first: the server's stored token is deleted too. */
   z.object({ type: z.literal('deleteMcpServer'), id: mcpId }),
   z.object({ type: z.literal('setMcpServerEnabled'), id: mcpId, enabled: z.boolean() }),
   z.object({ type: z.literal('restartMcpServer'), id: mcpId }),
-  z.object({ type: z.literal('setMcpToolPolicy'), id: mcpId, tool: z.string().min(1).max(200), policy: z.enum(['off', 'ask', 'allow']) }),
+  z.object({
+    type: z.literal('setMcpToolPolicy'),
+    id: mcpId,
+    tool: z.string().min(1).max(200),
+    policy: z.enum(['off', 'ask', 'allow']),
+  }),
   /** Asks for the server's token in a password box (Secret Storage). */
   z.object({ type: z.literal('setMcpToken'), id: mcpId }),
   z.object({ type: z.literal('restoreCheckpoint'), messageId: id }),

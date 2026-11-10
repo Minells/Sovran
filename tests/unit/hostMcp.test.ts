@@ -320,7 +320,7 @@ describe('MCP in the host', () => {
       summary: 'Read note · Notes',
     });
     expect(servers()[0]).toMatchObject({ allowedTools: ['read_note'] });
-    expect(notices).toContain('read_note of Notes now runs without asking. Change it in Settings → MCP.');
+    expect(notices).toContain('read_note of Notes now runs without asking. Change it in Settings → Tools.');
     expect(mcpView().servers[0]!.tools[0]!.policy).toBe('allow');
 
     await controller.handle({ type: 'send', text: 'again' });

@@ -87,6 +87,7 @@ export function integrationArguments(managed: ManagedIntegration): string[] {
         : ['--isolated']),
       '--browser',
       'chrome',
+      '--sandbox',
       '--no-webmcp',
       '--image-responses',
       'omit',

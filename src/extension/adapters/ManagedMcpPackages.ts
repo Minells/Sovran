@@ -242,6 +242,19 @@ export class ManagedMcpPackages {
       throw new Error(
         'Existing desktop Chrome profiles are unavailable on Remote hosts. Use a separate browser on the extension host.',
       );
+    if (
+      server.url ||
+      server.command !== 'node' ||
+      server.auth.type !== 'none' ||
+      server.args?.length ||
+      Object.keys(server.env ?? {}).length ||
+      server.cwd ||
+      Object.keys(server.headers ?? {}).length
+    ) {
+      throw new Error(
+        'The managed browser launch configuration changed. Add the catalog entry again, or explicitly edit it as a custom server.',
+      );
+    }
     let installed: Awaited<ReturnType<ManagedMcpPackages['installed']>>;
     try {
       installed = await this.installed(managed.id);

@@ -1,6 +1,12 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { summarize, type Session, type SessionRepository, type SessionSummary } from '../../core/sessions/model';
+import { normalizeExcludedGroups } from '../../core/tools/groups';
+import {
+  summarize,
+  type Session,
+  type SessionRepository,
+  type SessionSummary,
+} from '../../core/sessions/model';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 
@@ -36,7 +42,9 @@ export class FsSessionRepository implements SessionRepository {
     if (this.index) return this.index;
     try {
       const parsed = JSON.parse(await fs.readFile(path.join(this.dir, 'index.json'), 'utf8')) as unknown;
-      this.index = Array.isArray(parsed) ? (parsed.filter((s) => s && typeof s.id === 'string' && ID_RE.test(s.id)) as SessionSummary[]) : [];
+      this.index = Array.isArray(parsed)
+        ? (parsed.filter((s) => s && typeof s.id === 'string' && ID_RE.test(s.id)) as SessionSummary[])
+        : [];
     } catch {
       this.index = [];
     }
@@ -50,6 +58,8 @@ export class FsSessionRepository implements SessionRepository {
   async load(id: string): Promise<Session | undefined> {
     try {
       const s = JSON.parse(await fs.readFile(this.file(id), 'utf8')) as Session;
+      if (s?.excludedToolGroups !== undefined)
+        s.excludedToolGroups = normalizeExcludedGroups(s.excludedToolGroups);
       return s && s.id === id && Array.isArray(s.messages) ? s : undefined;
     } catch {
       return undefined;

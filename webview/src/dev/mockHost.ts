@@ -6,6 +6,7 @@
 import '../../../media/sovran.css';
 import type { AppState, HostMessage, McpServerView, SessionMessage } from '../../../src/shared/protocol';
 import { onPost, setUiState } from '../vscode';
+import { INTEGRATIONS } from '../../../src/core/mcp/catalog';
 
 const params = new URLSearchParams(location.search);
 const theme = params.get('theme') === 'light' ? 'light' : 'dark';
@@ -107,7 +108,9 @@ const THEMES: Record<string, Record<string, string>> = {
 const style = document.createElement('style');
 style.textContent = `:root{${Object.entries(THEMES[theme]!)
   .map(([k, v]) => `--vscode-${k.replace(/\./g, '-')}:${v}`)
-  .join(';')}} body{max-width:${surface === 'panel' ? 'none' : `${params.get('width') ?? '420'}px`};height:100vh;border-right:1px solid var(--vscode-panel-border)}`;
+  .join(
+    ';',
+  )}} body{max-width:${surface === 'panel' ? 'none' : `${params.get('width') ?? '420'}px`};height:100vh;border-right:1px solid var(--vscode-panel-border)}`;
 document.head.appendChild(style);
 document.body.classList.add(theme === 'light' ? 'vscode-light' : 'vscode-dark');
 // The host sets this on <body> (see webviewHtml).
@@ -135,7 +138,12 @@ const providers: AppState['providers'] = [
     hasKey: true,
     models: [
       { id: 'coder-large', contextWindow: 131072, toolMode: 'native' },
-      { id: 'glm-5.3-flash', toolMode: 'auto', maxOutputTokens: 8192, serverLimits: { contextWindow: 131072, maxOutputTokens: 32768 } },
+      {
+        id: 'glm-5.3-flash',
+        toolMode: 'auto',
+        maxOutputTokens: 8192,
+        serverLimits: { contextWindow: 131072, maxOutputTokens: 32768 },
+      },
     ],
   },
 ];
@@ -148,16 +156,20 @@ const configFile: AppState['configFile'] =
     : configParam === 'ignored'
       ? { path: '~/.sovran/config.yaml', state: 'ignored', providers: 0, problems: [] }
       : configParam === 'error'
-      ? {
-          path: '~/.sovran/config.yaml',
-          state: 'error',
-          providers: 1,
-          problems: [
-            { line: 7, message: 'Unknown field "base_url". Did you mean "baseUrl"?' },
-            { line: 12, message: 'API keys are never read from config.yaml. Use "Set key" in Sovran: keys are kept in VS Code Secret Storage.' },
-          ],
-        }
-      : { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] };
+        ? {
+            path: '~/.sovran/config.yaml',
+            state: 'error',
+            providers: 1,
+            problems: [
+              { line: 7, message: 'Unknown field "base_url". Did you mean "baseUrl"?' },
+              {
+                line: 12,
+                message:
+                  'API keys are never read from config.yaml. Use "Set key" in Sovran: keys are kept in VS Code Secret Storage.',
+              },
+            ],
+          }
+        : { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] };
 
 /** `?mcp=empty` previews the first-run presets; `?mcp=restricted` an untrusted workspace. */
 const mcpParam = params.get('mcp');
@@ -176,10 +188,39 @@ const mcpServers: McpServerView[] = [
     server: { name: 'github-mcp-server', version: '1.4.2' },
     toolTokens: 2140,
     tools: [
-      { name: 'search_issues', title: 'Search issues', modelName: 'mcp__github__search_issues', policy: 'allow', hints: ['read-only'], description: 'Search issues and pull requests across GitHub repositories using the GitHub search syntax.' },
-      { name: 'get_pull_request', title: 'Get pull request', modelName: 'mcp__github__get_pull_request', policy: 'ask', hints: ['read-only'], description: 'Get the details of a pull request: title, body, state, reviewers and checks.' },
-      { name: 'create_issue', title: 'Create issue', modelName: 'mcp__github__create_issue', policy: 'ask', hints: [], description: 'Create a new issue in a GitHub repository.' },
-      { name: 'merge_pull_request', title: 'Merge pull request', modelName: 'mcp__github__merge_pull_request', policy: 'off', hints: ['destructive'], description: 'Merge a pull request into its base branch.' },
+      {
+        name: 'search_issues',
+        title: 'Search issues',
+        modelName: 'mcp__github__search_issues',
+        policy: 'allow',
+        hints: ['read-only'],
+        description:
+          'Search issues and pull requests across GitHub repositories using the GitHub search syntax.',
+      },
+      {
+        name: 'get_pull_request',
+        title: 'Get pull request',
+        modelName: 'mcp__github__get_pull_request',
+        policy: 'ask',
+        hints: ['read-only'],
+        description: 'Get the details of a pull request: title, body, state, reviewers and checks.',
+      },
+      {
+        name: 'create_issue',
+        title: 'Create issue',
+        modelName: 'mcp__github__create_issue',
+        policy: 'ask',
+        hints: [],
+        description: 'Create a new issue in a GitHub repository.',
+      },
+      {
+        name: 'merge_pull_request',
+        title: 'Merge pull request',
+        modelName: 'mcp__github__merge_pull_request',
+        policy: 'off',
+        hints: ['destructive'],
+        description: 'Merge a pull request into its base branch.',
+      },
     ],
   },
   {
@@ -232,9 +273,19 @@ const mcpServers: McpServerView[] = [
 ];
 
 /** `?scenario=mcp`: the agent wants to open a GitHub issue through MCP. */
-const issueArgs = { owner: 'acme', repo: 'acme-api', title: 'Session TTL ignores SESSION_TTL in staging', labels: ['bug', 'auth'] };
+const issueArgs = {
+  owner: 'acme',
+  repo: 'acme-api',
+  title: 'Session TTL ignores SESSION_TTL in staging',
+  labels: ['bug', 'auth'],
+};
 const mcpConversation: SessionMessage[] = [
-  { role: 'user', id: 'm0', createdAt: now - 40_000, content: 'Open an issue for the session TTL bug we just found, and link the failing test.' },
+  {
+    role: 'user',
+    id: 'm0',
+    createdAt: now - 40_000,
+    content: 'Open an issue for the session TTL bug we just found, and link the failing test.',
+  },
   {
     role: 'assistant',
     id: 'm1',
@@ -242,7 +293,11 @@ const mcpConversation: SessionMessage[] = [
     model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
     content: "I'll check for an existing issue first, then open one.",
     toolCalls: [
-      { id: 'g1', name: 'mcp__github__search_issues', arguments: JSON.stringify({ q: 'repo:acme/acme-api session TTL is:open' }) },
+      {
+        id: 'g1',
+        name: 'mcp__github__search_issues',
+        arguments: JSON.stringify({ q: 'repo:acme/acme-api session TTL is:open' }),
+      },
       { id: 'g2', name: 'mcp__github__create_issue', arguments: JSON.stringify(issueArgs) },
     ],
   },
@@ -285,7 +340,8 @@ const conversation: SessionMessage[] = [
     role: 'user',
     id: 'u1',
     createdAt: now - 60_000,
-    content: 'Sessions expire too early in staging. Make the session TTL configurable and keep the current default.',
+    content:
+      'Sessions expire too early in staging. Make the session TTL configurable and keep the current default.',
     attachments: [{ kind: 'file', path: 'src/auth/session.ts', content: '' }],
   },
   {
@@ -309,9 +365,26 @@ const conversation: SessionMessage[] = [
     status: 'success',
     summary: '3 matches',
     content: '',
-    display: { kind: 'list', items: ['src/auth/session.ts:4: const TTL = 3600;', 'src/auth/session.ts:31: expiresAt: now + TTL * 1000,', 'src/auth/refresh.ts:12: if (age > TTL) {'], total: 3 },
+    display: {
+      kind: 'list',
+      items: [
+        'src/auth/session.ts:4: const TTL = 3600;',
+        'src/auth/session.ts:31: expiresAt: now + TTL * 1000,',
+        'src/auth/refresh.ts:12: if (age > TTL) {',
+      ],
+      total: 3,
+    },
   },
-  { role: 'tool', id: 'r2', toolCallId: 't2', toolName: 'read_file', createdAt: now - 53_000, status: 'success', summary: '48 lines', content: '' },
+  {
+    role: 'tool',
+    id: 'r2',
+    toolCallId: 't2',
+    toolName: 'read_file',
+    createdAt: now - 53_000,
+    status: 'success',
+    summary: '48 lines',
+    content: '',
+  },
   {
     role: 'assistant',
     id: 'a2',
@@ -324,7 +397,12 @@ const conversation: SessionMessage[] = [
 ];
 
 const autoConversation: SessionMessage[] = [
-  { role: 'user', id: 'v0', createdAt: now - 45_000, content: 'Rename getUser to fetchUser everywhere, run the tests and push.' },
+  {
+    role: 'user',
+    id: 'v0',
+    createdAt: now - 45_000,
+    content: 'Rename getUser to fetchUser everywhere, run the tests and push.',
+  },
   {
     role: 'assistant',
     id: 'v1',
@@ -337,14 +415,42 @@ const autoConversation: SessionMessage[] = [
     ],
   },
   {
-    role: 'tool', id: 'y1', toolCallId: 'x1', toolName: 'apply_diff', createdAt: now - 43_000, status: 'success', summary: '+3 −3', content: '',
+    role: 'tool',
+    id: 'y1',
+    toolCallId: 'x1',
+    toolName: 'apply_diff',
+    createdAt: now - 43_000,
+    status: 'success',
+    summary: '+3 −3',
+    content: '',
     autoApproved: 'Applied without asking (Auto mode).',
-    display: { kind: 'diff', path: 'src/users/api.ts', diff: '@@ -1,3 +1,3 @@\n-export async function getUser(id: string) {\n+export async function fetchUser(id: string) {', added: 3, removed: 3, isNew: false },
+    display: {
+      kind: 'diff',
+      path: 'src/users/api.ts',
+      diff: '@@ -1,3 +1,3 @@\n-export async function getUser(id: string) {\n+export async function fetchUser(id: string) {',
+      added: 3,
+      removed: 3,
+      isNew: false,
+    },
   },
   {
-    role: 'tool', id: 'y2', toolCallId: 'x2', toolName: 'execute_terminal', createdAt: now - 42_000, status: 'success', summary: 'exit 0 · 4.2s', content: '',
+    role: 'tool',
+    id: 'y2',
+    toolCallId: 'x2',
+    toolName: 'execute_terminal',
+    createdAt: now - 42_000,
+    status: 'success',
+    summary: 'exit 0 · 4.2s',
+    content: '',
     autoApproved: 'Ran without asking (in your allowed commands).',
-    display: { kind: 'command', command: 'npm test', cwd: '.', output: 'Test Files  12 passed (12)\n     Tests  148 passed (148)', exitCode: 0, timedOut: false },
+    display: {
+      kind: 'command',
+      command: 'npm test',
+      cwd: '.',
+      output: 'Test Files  12 passed (12)\n     Tests  148 passed (148)',
+      exitCode: 0,
+      timedOut: false,
+    },
   },
   {
     role: 'assistant',
@@ -352,7 +458,9 @@ const autoConversation: SessionMessage[] = [
     createdAt: now - 41_000,
     model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
     content: 'All 148 tests pass. Pushing the branch.',
-    toolCalls: [{ id: 'x3', name: 'execute_terminal', arguments: JSON.stringify({ command: 'git push origin main' }) }],
+    toolCalls: [
+      { id: 'x3', name: 'execute_terminal', arguments: JSON.stringify({ command: 'git push origin main' }) },
+    ],
   },
 ];
 
@@ -373,16 +481,44 @@ const doneConversation: SessionMessage[] = [
 const longAnswer = (topic: string) =>
   [
     `Here is how ${topic} works, step by step.`,
-    ...Array.from({ length: 6 }, (_, i) => `**Step ${i + 1}.** The request goes through \`src/http/client.ts\`, which retries idempotent calls with exponential backoff and jitter, and gives up after the configured budget so a slow dependency cannot hold the worker.`),
+    ...Array.from(
+      { length: 6 },
+      (_, i) =>
+        `**Step ${i + 1}.** The request goes through \`src/http/client.ts\`, which retries idempotent calls with exponential backoff and jitter, and gives up after the configured budget so a slow dependency cannot hold the worker.`,
+    ),
     'That covers the whole path.',
   ].join('\n\n');
 const longConversation: SessionMessage[] = [
   { role: 'user', id: 'l0', createdAt: now - 900_000, content: 'Explain the retry logic in http/client.ts' },
-  { role: 'assistant', id: 'l1', createdAt: now - 890_000, model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' }, content: longAnswer('the retry logic') },
-  { role: 'user', id: 'l2', createdAt: now - 600_000, content: 'And how are timeouts chosen? I want to understand why some calls wait 30 seconds and others give up after 5, and whether that is configurable per endpoint.' },
-  { role: 'assistant', id: 'l3', createdAt: now - 590_000, model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' }, content: longAnswer('timeout selection') },
+  {
+    role: 'assistant',
+    id: 'l1',
+    createdAt: now - 890_000,
+    model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
+    content: longAnswer('the retry logic'),
+  },
+  {
+    role: 'user',
+    id: 'l2',
+    createdAt: now - 600_000,
+    content:
+      'And how are timeouts chosen? I want to understand why some calls wait 30 seconds and others give up after 5, and whether that is configurable per endpoint.',
+  },
+  {
+    role: 'assistant',
+    id: 'l3',
+    createdAt: now - 590_000,
+    model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
+    content: longAnswer('timeout selection'),
+  },
   { role: 'user', id: 'l4', createdAt: now - 300_000, content: 'Summarize it in three bullets' },
-  { role: 'assistant', id: 'l5', createdAt: now - 290_000, model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' }, content: longAnswer('the summary') },
+  {
+    role: 'assistant',
+    id: 'l5',
+    createdAt: now - 290_000,
+    model: { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
+    content: longAnswer('the summary'),
+  },
 ];
 
 /** `?scenario=bigdiff`: a proposal longer than the view, as real edits usually are. */
@@ -397,9 +533,13 @@ const bigDiff = [
   ' ',
   '-const TTL = 3600;',
   "+/** Session lifetime in seconds. Override with SESSION_TTL (for example 900 for 15 minutes, or '2h' in duration notation). */",
-  "+const TTL = readDuration(process.env.SESSION_TTL, { fallback: 3600, min: 60, max: 86_400 * 30 });",
+  '+const TTL = readDuration(process.env.SESSION_TTL, { fallback: 3600, min: 60, max: 86_400 * 30 });',
   ' ',
-  ...Array.from({ length: 24 }, (_, i) => ` export function helper${i}(session: Session): boolean { return session.expiresAt > Date.now() + ${i} * 1000; }`),
+  ...Array.from(
+    { length: 24 },
+    (_, i) =>
+      ` export function helper${i}(session: Session): boolean { return session.expiresAt > Date.now() + ${i} * 1000; }`,
+  ),
   '-export function isExpired(s: Session) {',
   '-  return s.expiresAt < Date.now();',
   '+export function isExpired(s: Session, now = Date.now()) {',
@@ -419,27 +559,91 @@ function baseState(): AppState {
       : scenario === 'mcp'
         ? mcpConversation
         : scenario === 'auto'
-        ? autoConversation
-        : scenario === 'done'
-          ? doneConversation
-          : scenario === 'long'
-            ? longConversation
-            : [];
+          ? autoConversation
+          : scenario === 'done'
+            ? doneConversation
+            : scenario === 'long'
+              ? longConversation
+              : [];
   const awaitingEdit = scenario === 'conversation' || scenario === 'bigdiff';
-  const approvalParam = (['ask', 'edits', 'auto'] as const).find((m) => m === params.get('approval')) ?? 'ask';
+  const approvalParam =
+    (['ask', 'edits', 'auto'] as const).find((m) => m === params.get('approval')) ?? 'ask';
   return {
     surface,
-    view: scenario === 'providers' ? 'providers' : scenario === 'history' ? 'history' : scenario === 'settings' ? 'settings' : 'chat',
+    toolGroups: [
+      {
+        id: 'files',
+        label: 'Read files and search',
+        selected: true,
+        availableTools: 4,
+        definitionTokens: 680,
+      },
+      { id: 'git', label: 'Git', selected: true, availableTools: 8, definitionTokens: 1500 },
+      { id: 'web', label: 'Web fetch', selected: false, availableTools: 1, definitionTokens: 240 },
+      { id: 'mcp:github', label: 'GitHub', selected: true, availableTools: 2, definitionTokens: 2140 },
+    ],
+    nativeTools: [
+      {
+        name: 'read_file',
+        description: 'Read text or document content from the workspace, with optional paging.',
+        group: 'files',
+        risk: 'read',
+      },
+      {
+        name: 'git_status',
+        description: 'Read repository branch, staged and unstaged file status.',
+        group: 'git',
+        risk: 'read',
+      },
+      {
+        name: 'web_fetch',
+        description: 'Read one approved public HTTP(S) page with source links.',
+        group: 'web',
+        risk: 'read',
+      },
+    ],
+    view:
+      scenario === 'providers'
+        ? 'providers'
+        : scenario === 'history'
+          ? 'history'
+          : scenario === 'settings'
+            ? 'settings'
+            : 'chat',
     workspace: { name: 'acme-api', trusted: mcpParam !== 'restricted', hasFolder: true },
     providers: scenario === 'onboarding' ? [] : providers,
     selected: scenario === 'onboarding' ? null : { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
     mode: params.get('mode') === 'plan' ? 'plan' : 'act',
     approvalMode: scenario === 'auto' ? 'auto' : approvalParam,
     sessions: [
-      { id: 's1', title: 'Make the session TTL configurable', createdAt: now - 60_000, updatedAt: now - 50_000, messageCount: 3 },
-      { id: 's2', title: 'Explain the retry logic in http/client.ts', createdAt: now - 3_600_000 * 5, updatedAt: now - 3_600_000 * 5, messageCount: 6 },
-      { id: 's3', title: 'Plan the migration to Postgres 17', createdAt: now - 86_400_000 * 1.2, updatedAt: now - 86_400_000 * 1.2, messageCount: 11 },
-      { id: 's4', title: 'Add tests for the billing webhooks', createdAt: now - 86_400_000 * 4, updatedAt: now - 86_400_000 * 4, messageCount: 9 },
+      {
+        id: 's1',
+        title: 'Make the session TTL configurable',
+        createdAt: now - 60_000,
+        updatedAt: now - 50_000,
+        messageCount: 3,
+      },
+      {
+        id: 's2',
+        title: 'Explain the retry logic in http/client.ts',
+        createdAt: now - 3_600_000 * 5,
+        updatedAt: now - 3_600_000 * 5,
+        messageCount: 6,
+      },
+      {
+        id: 's3',
+        title: 'Plan the migration to Postgres 17',
+        createdAt: now - 86_400_000 * 1.2,
+        updatedAt: now - 86_400_000 * 1.2,
+        messageCount: 11,
+      },
+      {
+        id: 's4',
+        title: 'Add tests for the billing webhooks',
+        createdAt: now - 86_400_000 * 4,
+        updatedAt: now - 86_400_000 * 4,
+        messageCount: 9,
+      },
     ],
     liveSessions:
       scenario === 'history'
@@ -451,41 +655,91 @@ function baseState(): AppState {
         : awaitingEdit
           ? [{ id: 's1', inEditor: surface === 'panel', running: true, needsApproval: true }]
           : [],
-    session: { id: messages.length ? 's1' : 'draft', title: messages.length ? 'Make the session TTL configurable' : 'New chat', messages },
-    run:
-      awaitingEdit
-        ? { sessionId: 's1', iteration: 3, maxIterations: 25, startedAt: now - 58_000, activity: { phase: 'awaiting_approval', label: 'src/auth/session.ts', toolName: 'edit_file', callId: 't3' } }
-        : scenario === 'auto'
-          ? { sessionId: 's1', iteration: 4, maxIterations: 25, startedAt: now - 41_000, activity: { phase: 'awaiting_approval', label: 'git push origin main', toolName: 'execute_terminal', callId: 'x3' } }
-          : scenario === 'mcp'
-            ? { sessionId: 's1', iteration: 2, maxIterations: 25, startedAt: now - 40_000, activity: { phase: 'awaiting_approval', label: 'Create issue · GitHub', toolName: 'mcp__github__create_issue', callId: 'g2' } }
-            : null,
-    approvals:
-      awaitingEdit
+    session: {
+      id: messages.length ? 's1' : 'draft',
+      title: messages.length ? 'Make the session TTL configurable' : 'New chat',
+      messages,
+    },
+    run: awaitingEdit
+      ? {
+          sessionId: 's1',
+          iteration: 3,
+          maxIterations: 25,
+          startedAt: now - 58_000,
+          activity: {
+            phase: 'awaiting_approval',
+            label: 'src/auth/session.ts',
+            toolName: 'edit_file',
+            callId: 't3',
+          },
+        }
+      : scenario === 'auto'
+        ? {
+            sessionId: 's1',
+            iteration: 4,
+            maxIterations: 25,
+            startedAt: now - 41_000,
+            activity: {
+              phase: 'awaiting_approval',
+              label: 'git push origin main',
+              toolName: 'execute_terminal',
+              callId: 'x3',
+            },
+          }
+        : scenario === 'mcp'
+          ? {
+              sessionId: 's1',
+              iteration: 2,
+              maxIterations: 25,
+              startedAt: now - 40_000,
+              activity: {
+                phase: 'awaiting_approval',
+                label: 'Create issue · GitHub',
+                toolName: 'mcp__github__create_issue',
+                callId: 'g2',
+              },
+            }
+          : null,
+    approvals: awaitingEdit
+      ? [
+          {
+            id: 'ap1',
+            callId: 't3',
+            toolName: 'edit_file',
+            title: 'src/auth/session.ts',
+            detail:
+              scenario === 'bigdiff'
+                ? {
+                    kind: 'edit',
+                    path: 'src/auth/session.ts',
+                    isNew: false,
+                    diff: bigDiff,
+                    added: 36,
+                    removed: 4,
+                  }
+                : { kind: 'edit', path: 'src/auth/session.ts', isNew: false, diff, added: 1, removed: 1 },
+          },
+        ]
+      : scenario === 'mcp'
         ? [
             {
-              id: 'ap1',
-              callId: 't3',
-              toolName: 'edit_file',
-              title: 'src/auth/session.ts',
-              detail:
-                scenario === 'bigdiff'
-                  ? { kind: 'edit', path: 'src/auth/session.ts', isNew: false, diff: bigDiff, added: 36, removed: 4 }
-                  : { kind: 'edit', path: 'src/auth/session.ts', isNew: false, diff, added: 1, removed: 1 },
+              id: 'ap3',
+              callId: 'g2',
+              toolName: 'mcp__github__create_issue',
+              title: 'Create issue · GitHub',
+              reason:
+                'Tools of MCP servers ask before they run, in every approval mode, until you allow them.',
+              detail: {
+                kind: 'mcp',
+                server: 'GitHub',
+                tool: 'create_issue',
+                title: 'Create issue',
+                arguments: JSON.stringify(issueArgs, null, 2),
+                hints: ['open-world'],
+              },
             },
           ]
-        : scenario === 'mcp'
-          ? [
-              {
-                id: 'ap3',
-                callId: 'g2',
-                toolName: 'mcp__github__create_issue',
-                title: 'Create issue · GitHub',
-                reason: 'Tools of MCP servers ask before they run, in every approval mode, until you allow them.',
-                detail: { kind: 'mcp', server: 'GitHub', tool: 'create_issue', title: 'Create issue', arguments: JSON.stringify(issueArgs, null, 2), hints: ['open-world'] },
-              },
-            ]
-          : scenario === 'auto'
+        : scenario === 'auto'
           ? [
               {
                 id: 'ap2',
@@ -493,7 +747,13 @@ function baseState(): AppState {
                 toolName: 'execute_terminal',
                 title: 'git push origin main',
                 reason: 'Pushes commits to a remote repository.',
-                detail: { kind: 'command', command: 'git push origin main', cwd: '.', warnings: ['Pushes commits to a remote repository.'], allowPrefix: null },
+                detail: {
+                  kind: 'command',
+                  command: 'git push origin main',
+                  cwd: '.',
+                  warnings: ['Pushes commits to a remote repository.'],
+                  allowPrefix: null,
+                },
               },
             ]
           : [],
@@ -528,7 +788,18 @@ function baseState(): AppState {
       protectedPaths: ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/.git/**'],
       disabledTools: [],
       forceAskTools: [],
-      defaultProtectedPaths: ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/id_ed25519*', '**/.git/**', '**/.npmrc', '**/.pypirc', '**/.netrc'],
+      defaultProtectedPaths: [
+        '**/.env',
+        '**/.env.*',
+        '**/*.pem',
+        '**/*.key',
+        '**/id_rsa*',
+        '**/id_ed25519*',
+        '**/.git/**',
+        '**/.npmrc',
+        '**/.pypirc',
+        '**/.netrc',
+      ],
       maxIterations: 25,
       terminalTimeoutSeconds: 120,
       mirrorToTerminal: true,
@@ -541,15 +812,30 @@ function baseState(): AppState {
       generateTitles: params.get('titles') !== 'off',
       overriddenByWorkspace: [],
     },
-    configFile: scenario === 'onboarding' ? { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] } : configFile,
+    configFile:
+      scenario === 'onboarding'
+        ? { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] }
+        : configFile,
     mcp: {
       active: mcpParam !== 'restricted',
+      catalog: {
+        host: 'This computer (macOS)',
+        remote: false,
+        entries: INTEGRATIONS.map((item) => ({ id: item.id, status: item.package ? 'missing' : 'remote' })),
+      },
       // In Restricted Mode no server runs, as in the real host.
       servers:
         mcpParam === 'empty'
           ? []
           : mcpParam === 'restricted'
-            ? mcpServers.map((s) => ({ ...s, status: s.enabled ? 'stopped' : 'disabled', error: undefined, server: undefined, tools: [], toolTokens: 0 }))
+            ? mcpServers.map((s) => ({
+                ...s,
+                status: s.enabled ? 'stopped' : 'disabled',
+                error: undefined,
+                server: undefined,
+                tools: [],
+                toolTokens: 0,
+              }))
             : mcpServers,
     },
   };
@@ -561,7 +847,8 @@ const patchMcp = (servers: McpServerView[]) => {
   state = { ...state, mcp: { ...state.mcp, servers } };
   send({ type: 'patch', patch: { mcp: state.mcp } });
 };
-const updateServer = (id: string, change: (s: McpServerView) => McpServerView) => patchMcp(state.mcp.servers.map((s) => (s.id === id ? change(s) : s)));
+const updateServer = (id: string, change: (s: McpServerView) => McpServerView) =>
+  patchMcp(state.mcp.servers.map((s) => (s.id === id ? change(s) : s)));
 /** Pretends to start a server: a moment of "Starting…", then connected with a couple of tools. */
 const connect = (id: string) => {
   updateServer(id, (s) => ({ ...s, status: 'starting', error: undefined }));
@@ -577,8 +864,20 @@ const connect = (id: string) => {
           tools: s.tools.length
             ? s.tools
             : [
-                { name: 'list_items', modelName: `mcp__${s.id}__list_items`, policy: 'ask', hints: ['read-only'], description: 'Lists the items the server knows about.' },
-                { name: 'update_item', modelName: `mcp__${s.id}__update_item`, policy: 'ask', hints: ['destructive'], description: 'Changes one item.' },
+                {
+                  name: 'list_items',
+                  modelName: `mcp__${s.id}__list_items`,
+                  policy: 'ask',
+                  hints: ['read-only'],
+                  description: 'Lists the items the server knows about.',
+                },
+                {
+                  name: 'update_item',
+                  modelName: `mcp__${s.id}__update_item`,
+                  policy: 'ask',
+                  hints: ['destructive'],
+                  description: 'Changes one item.',
+                },
               ],
           toolTokens: s.toolTokens || 410,
         };
@@ -587,8 +886,13 @@ const connect = (id: string) => {
   );
 };
 // The filesystem server finishes starting shortly after the page opens.
-setTimeout(() => state.mcp.active && state.mcp.servers.some((s) => s.id === 'filesystem' && s.status === 'starting') && connect('filesystem'), 1500);
-
+setTimeout(
+  () =>
+    state.mcp.active &&
+    state.mcp.servers.some((s) => s.id === 'filesystem' && s.status === 'starting') &&
+    connect('filesystem'),
+  1500,
+);
 
 /** A small fake repository for the attach menu. */
 const TREE: Record<string, Array<{ name: string; type: 'file' | 'directory' }>> = {
@@ -621,7 +925,9 @@ const TREE: Record<string, Array<{ name: string; type: 'file' | 'directory' }>> 
   test: [{ name: 'auth', type: 'directory' }],
   'test/auth': [{ name: 'session.spec.ts', type: 'file' }],
 };
-const ALL_FILES = Object.entries(TREE).flatMap(([dir, entries]) => entries.filter((e) => e.type === 'file').map((e) => (dir ? `${dir}/${e.name}` : e.name)));
+const ALL_FILES = Object.entries(TREE).flatMap(([dir, entries]) =>
+  entries.filter((e) => e.type === 'file').map((e) => (dir ? `${dir}/${e.name}` : e.name)),
+);
 const OPEN = ['src/auth/session.ts', 'src/http/server.ts', 'src/auth/refresh.ts'];
 let attachmentSeq = 0;
 const setAttachments = (attachments: AppState['context']['attachments']) => {
@@ -636,63 +942,120 @@ onPost((m) => {
     case 'setMode':
       state = { ...state, mode: m.mode };
       return send({ type: 'patch', patch: { mode: m.mode } });
+    case 'setToolGroup':
+      state = {
+        ...state,
+        toolGroups: state.toolGroups?.map((group) =>
+          group.id === m.group ? { ...group, selected: m.selected } : group,
+        ),
+      };
+      return send({ type: 'patch', patch: { toolGroups: state.toolGroups } });
     case 'setApprovalMode':
       state = { ...state, approvalMode: m.mode };
       return send({ type: 'patch', patch: { approvalMode: m.mode } });
     case 'updateSetting': {
       const key = m.setting.key;
-      const field = ({
-        'tools.disabled': 'disabledTools',
-        'tools.forceAsk': 'forceAskTools',
-        'approvals.mode': 'defaultApprovalMode',
-        'approvals.allowedCommands': 'allowedCommands',
-        'security.protectedPaths': 'protectedPaths',
-        'agent.maxIterations': 'maxIterations',
-        'terminal.timeoutSeconds': 'terminalTimeoutSeconds',
-        'terminal.mirrorToTerminal': 'mirrorToTerminal',
-        'diff.openOnProposal': 'openDiffOnProposal',
-        'context.includeActiveEditor': 'includeActiveEditor',
-        'context.autoCompact': 'autoCompact',
-        'context.projectInstructions': 'projectInstructions',
-        'context.maxToolResultChars': 'maxToolResultChars',
-        'sessions.persist': 'persistSessions',
-        'sessions.generateTitles': 'generateTitles',
-      } as const)[key];
+      const field = (
+        {
+          'tools.disabled': 'disabledTools',
+          'tools.forceAsk': 'forceAskTools',
+          'approvals.mode': 'defaultApprovalMode',
+          'approvals.allowedCommands': 'allowedCommands',
+          'security.protectedPaths': 'protectedPaths',
+          'agent.maxIterations': 'maxIterations',
+          'terminal.timeoutSeconds': 'terminalTimeoutSeconds',
+          'terminal.mirrorToTerminal': 'mirrorToTerminal',
+          'diff.openOnProposal': 'openDiffOnProposal',
+          'context.includeActiveEditor': 'includeActiveEditor',
+          'context.autoCompact': 'autoCompact',
+          'context.projectInstructions': 'projectInstructions',
+          'context.maxToolResultChars': 'maxToolResultChars',
+          'sessions.persist': 'persistSessions',
+          'sessions.generateTitles': 'generateTitles',
+        } as const
+      )[key];
       state = { ...state, settings: { ...state.settings, [field]: m.setting.value } };
       return send({ type: 'patch', patch: { settings: state.settings } });
     }
     case 'setModel': {
       const sel = m.providerId && m.modelId ? { providerId: m.providerId, modelId: m.modelId } : null;
       state =
-        m.role === 'plan' ? { ...state, planModel: sel } : m.role === 'title' ? { ...state, titleModel: sel } : { ...state, selected: sel ?? state.selected };
-      return send({ type: 'patch', patch: { selected: state.selected, planModel: state.planModel, titleModel: state.titleModel } });
+        m.role === 'plan'
+          ? { ...state, planModel: sel }
+          : m.role === 'title'
+            ? { ...state, titleModel: sel }
+            : { ...state, selected: sel ?? state.selected };
+      return send({
+        type: 'patch',
+        patch: { selected: state.selected, planModel: state.planModel, titleModel: state.titleModel },
+      });
     }
     case 'openConfigFile':
     case 'reloadConfigFile':
-      return send({ type: 'notice', id: `n-${Date.now()}`, level: 'info', message: `${m.type === 'openConfigFile' ? 'Opens' : 'Reloads'} ~/.sovran/config.yaml in VS Code.` });
+      return send({
+        type: 'notice',
+        id: `n-${Date.now()}`,
+        level: 'info',
+        message: `${m.type === 'openConfigFile' ? 'Opens' : 'Reloads'} ~/.sovran/config.yaml in VS Code.`,
+      });
     case 'stopConfigFile':
     case 'useConfigFile': {
       const stop = m.type === 'stopConfigFile';
-      state = { ...state, configFile: { ...state.configFile, state: stop ? 'ignored' : 'ok', providers: stop ? 0 : state.providers.length } };
+      state = {
+        ...state,
+        configFile: {
+          ...state.configFile,
+          state: stop ? 'ignored' : 'ok',
+          providers: stop ? 0 : state.providers.length,
+        },
+      };
       return send({ type: 'patch', patch: { configFile: state.configFile } });
     }
     case 'saveProvider': {
       if (!m.requestId) return;
       const id = m.provider.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'provider';
-      const view = { id, name: m.provider.name, baseUrl: m.provider.baseUrl, authType: m.provider.authType, hasKey: m.provider.authType !== 'none', models: [] };
+      const view = {
+        id,
+        name: m.provider.name,
+        baseUrl: m.provider.baseUrl,
+        authType: m.provider.authType,
+        hasKey: m.provider.authType !== 'none',
+        models: [],
+      };
       state = { ...state, providers: [...state.providers.filter((p) => p.id !== id), view] };
       send({ type: 'patch', patch: { providers: state.providers } });
       send({ type: 'providerSaved', requestId: m.requestId, providerId: id });
-      const models = ['qwen2.5-coder:14b', 'qwen2.5-coder:32b', 'devstral:24b', 'llama3.1:8b', 'deepseek-r1:14b'];
+      const models = [
+        'qwen2.5-coder:14b',
+        'qwen2.5-coder:32b',
+        'devstral:24b',
+        'llama3.1:8b',
+        'deepseek-r1:14b',
+      ];
       return setTimeout(
-        () => send({ type: 'providerTest', requestId: m.requestId!, providerId: id, result: { ok: true, latencyMs: 38, models, message: `Connected · ${models.length} models available` } }),
+        () =>
+          send({
+            type: 'providerTest',
+            requestId: m.requestId!,
+            providerId: id,
+            result: {
+              ok: true,
+              latencyMs: 38,
+              models,
+              message: `Connected · ${models.length} models available`,
+            },
+          }),
         600,
       );
     }
     case 'addModels': {
       state = {
         ...state,
-        providers: state.providers.map((p) => (p.id === m.providerId ? { ...p, models: m.modelIds.map((x) => ({ id: x, toolMode: 'auto' as const })) } : p)),
+        providers: state.providers.map((p) =>
+          p.id === m.providerId
+            ? { ...p, models: m.modelIds.map((x) => ({ id: x, toolMode: 'auto' as const })) }
+            : p,
+        ),
         selected: m.select ? { providerId: m.providerId, modelId: m.select } : state.selected,
       };
       return send({ type: 'patch', patch: { providers: state.providers, selected: state.selected } });
@@ -705,15 +1068,38 @@ onPost((m) => {
       return send({ type: 'patch', patch: { context: state.context } });
     case 'testProvider':
       return setTimeout(
-        () => send({ type: 'providerTest', requestId: m.requestId, providerId: m.providerId, result: { ok: true, latencyMs: 42, models: ['qwen2.5-coder:14b', 'llama3.1:8b'], message: 'Connected · 2 models available' } }),
+        () =>
+          send({
+            type: 'providerTest',
+            requestId: m.requestId,
+            providerId: m.providerId,
+            result: {
+              ok: true,
+              latencyMs: 42,
+              models: ['qwen2.5-coder:14b', 'llama3.1:8b'],
+              message: 'Connected · 2 models available',
+            },
+          }),
         400,
       );
     case 'approval':
-      if (m.allowTool) send({ type: 'notice', id: `n-${Date.now()}`, level: 'info', message: 'create_issue of GitHub now runs without asking. Change it in Settings → MCP.' });
+      if (m.allowTool)
+        send({
+          type: 'notice',
+          id: `n-${Date.now()}`,
+          level: 'info',
+          message: 'create_issue of GitHub now runs without asking. Change it in Settings → Tools.',
+        });
       return send({ type: 'patch', patch: { approvals: [], run: null } });
     case 'saveMcpServer': {
       const v = m.server;
-      const id = v.id ?? (v.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'server');
+      const id =
+        v.id ??
+        (v.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '') ||
+          'server');
       const old = state.mcp.servers.find((s) => s.id === id);
       const view: McpServerView = {
         id,
@@ -740,22 +1126,41 @@ onPost((m) => {
     case 'deleteMcpServer':
       return patchMcp(state.mcp.servers.filter((s) => s.id !== m.id));
     case 'setMcpServerEnabled':
-      updateServer(m.id, (s) => ({ ...s, enabled: m.enabled, status: m.enabled ? 'stopped' : 'disabled', tools: m.enabled ? s.tools : [], toolTokens: m.enabled ? s.toolTokens : 0 }));
+      updateServer(m.id, (s) => ({
+        ...s,
+        enabled: m.enabled,
+        status: m.enabled ? 'stopped' : 'disabled',
+        tools: m.enabled ? s.tools : [],
+        toolTokens: m.enabled ? s.toolTokens : 0,
+      }));
       return m.enabled ? connect(m.id) : undefined;
     case 'restartMcpServer':
       return connect(m.id);
     case 'setMcpToolPolicy':
-      return updateServer(m.id, (s) => ({ ...s, tools: s.tools.map((t) => (t.name === m.tool ? { ...t, policy: m.policy } : t)) }));
+      return updateServer(m.id, (s) => ({
+        ...s,
+        tools: s.tools.map((t) => (t.name === m.tool ? { ...t, policy: m.policy } : t)),
+      }));
     case 'setMcpToken':
       updateServer(m.id, (s) => ({ ...s, hasToken: true }));
       return connect(m.id);
     case 'suggestFiles': {
       const q = m.query.toLowerCase();
       const items = q
-        ? ALL_FILES.filter((f) => f.toLowerCase().includes(q)).map((f) => ({ path: f, label: f.split('/').pop()! }))
+        ? ALL_FILES.filter((f) => f.toLowerCase().includes(q)).map((f) => ({
+            path: f,
+            label: f.split('/').pop()!,
+          }))
         : [
-            ...OPEN.map((f, i) => ({ path: f, label: f.split('/').pop()!, hint: i === 0 ? ('active' as const) : ('open' as const) })),
-            ...ALL_FILES.filter((f) => !OPEN.includes(f)).map((f) => ({ path: f, label: f.split('/').pop()! })),
+            ...OPEN.map((f, i) => ({
+              path: f,
+              label: f.split('/').pop()!,
+              hint: i === 0 ? ('active' as const) : ('open' as const),
+            })),
+            ...ALL_FILES.filter((f) => !OPEN.includes(f)).map((f) => ({
+              path: f,
+              label: f.split('/').pop()!,
+            })),
           ];
       return send({ type: 'fileSuggestions', requestId: m.requestId, items });
     }
@@ -766,16 +1171,31 @@ onPost((m) => {
         path: dir ? `${dir}/${e.name}` : e.name,
         ...(e.name === '.env' ? { protected: true } : {}),
       }));
-      return setTimeout(() => send({ type: 'directoryListing', requestId: m.requestId, listing: { path: dir, entries } }), 60);
+      return setTimeout(
+        () => send({ type: 'directoryListing', requestId: m.requestId, listing: { path: dir, entries } }),
+        60,
+      );
     }
     case 'attachPath':
       if (state.context.attachments.some((a) => a.path === m.path)) return;
-      return setAttachments([...state.context.attachments, { id: `att${++attachmentSeq}`, path: m.path, label: m.path.split('/').pop()! }]);
+      return setAttachments([
+        ...state.context.attachments,
+        { id: `att${++attachmentSeq}`, path: m.path, label: m.path.split('/').pop()! },
+      ]);
     case 'removeAttachment':
       return setAttachments(state.context.attachments.filter((a) => a.id !== m.id));
     case 'uploadFiles':
       return setTimeout(
-        () => setAttachments([...state.context.attachments, { id: `att${++attachmentSeq}`, path: '~/Downloads/api-spec.md', label: 'api-spec.md', external: true }]),
+        () =>
+          setAttachments([
+            ...state.context.attachments,
+            {
+              id: `att${++attachmentSeq}`,
+              path: '~/Downloads/api-spec.md',
+              label: 'api-spec.md',
+              external: true,
+            },
+          ]),
         300,
       );
     default:

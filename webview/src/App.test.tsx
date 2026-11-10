@@ -1265,7 +1265,7 @@ describe('settings view', () => {
       'Models',
       'Approvals',
       'Agent',
-      'MCP',
+      'Tools',
       'Context',
       'Data',
     ]);
@@ -1432,7 +1432,8 @@ describe('settings view', () => {
 
   it('edits native tool controls and rejects invalid tool names', async () => {
     mount(settingsState());
-    await openArea('Agent');
+    await openArea('Tools');
+    await userEvent.click(screen.getByText('Advanced native overrides'));
     const disabled = screen.getByLabelText('Disabled native tools');
     await userEvent.type(disabled, 'execute_terminal{Enter}');
     expect(sent).toContainEqual({
@@ -1477,6 +1478,35 @@ describe('settings view', () => {
       type: 'updateSetting',
       setting: { key: 'security.protectedPaths', value: ['**/.env', '**/*.pem'] },
     });
+  });
+
+  it('consolidates built-in controls and current-chat groups in Tools with costs before selection', async () => {
+    mount(
+      settingsState({
+        toolGroups: [{ id: 'git', label: 'Git', selected: false, availableTools: 8, definitionTokens: 1200 }],
+        nativeTools: [{ name: 'git_status', description: 'Read Git status', risk: 'read', group: 'git' }],
+      }),
+    );
+    await openArea('Tools');
+    expect(screen.getByText('8 available · ~1,200 tokens when selected')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('checkbox', { name: /^Git/ }));
+    expect(sent).toContainEqual({ type: 'setToolGroup', sessionId: 's', group: 'git', selected: true });
+    await userEvent.click(within(screen.getByRole('region', { name: 'Built-in tools' })).getByText('Git'));
+    await userEvent.click(screen.getByLabelText('Enable git_status'));
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'tools.disabled', value: ['git_status'] },
+    });
+    await userEvent.click(screen.getByLabelText('Always review git_status'));
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'tools.forceAsk', value: ['git_status'] },
+    });
+    expect(
+      sent.some(
+        (message) => message.type === 'installMcpIntegration' || message.type === 'setMcpServerEnabled',
+      ),
+    ).toBe(false);
   });
 
   it('notes settings overridden by the workspace', async () => {
