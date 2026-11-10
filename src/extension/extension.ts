@@ -17,7 +17,13 @@ import { McpHost } from './mcpHost';
 import { SovranController } from './SovranController';
 import { SovranPanels } from './SovranPanels';
 import { SovranViewProvider } from './SovranViewProvider';
-import { McpSecrets, MementoCapabilityStore, ProviderSecrets, SovranStatusBar, createLogger } from './services';
+import {
+  McpSecrets,
+  MementoCapabilityStore,
+  ProviderSecrets,
+  SovranStatusBar,
+  createLogger,
+} from './services';
 
 /** Stopped on deactivation, which VS Code awaits, so local MCP servers never outlive the window. */
 let mcp: McpHost | undefined;
@@ -30,7 +36,9 @@ export async function activate(context: vscode.ExtensionContext) {
   const statusBar = new SovranStatusBar();
   const settings = readSettings();
   const storage = (context.storageUri ?? context.globalStorageUri).fsPath;
-  const repo = settings.persistSessions ? new FsSessionRepository(path.join(storage, 'sessions')) : new MemorySessionRepository();
+  const repo = settings.persistSessions
+    ? new FsSessionRepository(path.join(storage, 'sessions'))
+    : new MemorySessionRepository();
 
   const ripgrep = RipgrepSearch.locate(vscode.env.appRoot);
   logger.info(ripgrep ? 'Using VS Code ripgrep for search.' : 'ripgrep not found; using built-in search.');
@@ -38,14 +46,22 @@ export async function activate(context: vscode.ExtensionContext) {
   const commandLoader = new CommandLoader();
   // Smoke tests point the config file at a temporary folder. Only in test mode: normal runs always use
   // ~/.sovran/config.yaml, so nothing in the environment can move it (for example into a repository).
-  const testConfigFile = context.extensionMode === vscode.ExtensionMode.Test ? process.env.SOVRAN_TEST_CONFIG_FILE : undefined;
+  const testConfigFile =
+    context.extensionMode === vscode.ExtensionMode.Test ? process.env.SOVRAN_TEST_CONFIG_FILE : undefined;
   const configFile = new ConfigFileHost(context.globalState, testConfigFile || undefined);
 
   // The view provider and the editor tabs need the controller, and the controller needs to reveal and open them.
   const ref: { view?: SovranViewProvider; panels?: SovranPanels; controller?: SovranController } = {};
   // MCP servers start in the background: activation never waits for them.
   mcp = new McpHost({
-    managed: { resources: context.asAbsolutePath('resources/mcp'), storage: path.join(context.globalStorageUri.fsPath, 'mcp'), host: vscode.env.remoteName ? `Remote extension host (${vscode.env.remoteName})` : `This computer (${process.platform})` },
+    managed: {
+      resources: context.asAbsolutePath('resources/mcp'),
+      storage: path.join(context.globalStorageUri.fsPath, 'mcp'),
+      remote: !!vscode.env.remoteName,
+      host: vscode.env.remoteName
+        ? `Remote extension host (${vscode.env.remoteName})`
+        : `This computer (${process.platform})`,
+    },
     secrets: new McpSecrets(context.secrets),
     logger,
     version: String((context.extension.packageJSON as { version?: unknown }).version ?? '0.0.0'),
@@ -71,7 +87,9 @@ export async function activate(context: vscode.ExtensionContext) {
     // Bundled next to extension.js by scripts/build-host.mjs; parsers never load in the extension host itself.
     documents: new WorkerDocumentConverter(path.join(context.extensionPath, 'dist', 'documentWorker.js')),
     // Images follow the chats: on disk next to them, or only in memory when chats are not persisted.
-    images: settings.persistSessions ? new FsImageStore(path.join(storage, 'images')) : new MemoryImageStore(),
+    images: settings.persistSessions
+      ? new FsImageStore(path.join(storage, 'images'))
+      : new MemoryImageStore(),
     mcp,
     reveal,
     openPanel: async (sessionId, title) => ref.panels?.open(sessionId, title),
@@ -84,7 +102,8 @@ export async function activate(context: vscode.ExtensionContext) {
   const panels = new SovranPanels(context.extensionUri, controller, logger);
   ref.panels = panels;
 
-  const command = (id: string, fn: (...args: unknown[]) => unknown) => vscode.commands.registerCommand(id, fn);
+  const command = (id: string, fn: (...args: unknown[]) => unknown) =>
+    vscode.commands.registerCommand(id, fn);
   context.subscriptions.push(
     logger,
     diff,

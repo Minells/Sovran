@@ -207,6 +207,18 @@ beforeEach(async () => {
 });
 
 describe('integration catalog host lifecycle', () => {
+  it('cancels existing-profile setup without saving and stores only an explicitly named profile', async () => {
+    const before = structuredClone(servers());
+    h.inputAnswer = undefined;
+    await mcp.addIntegration('playwright', 'extension');
+    expect(servers()).toEqual(before);
+    h.inputAnswer = 'Profile 2';
+    await mcp.addIntegration('playwright', 'extension');
+    expect(servers().at(-1)).toMatchObject({
+      enabled: false,
+      managed: { id: 'playwright', profile: 'extension', browserProfile: 'Profile 2' },
+    });
+  });
   it('adds a catalog integration disconnected and preserves existing servers and policies', async () => {
     const before = structuredClone(servers());
     await controller.handle({ type: 'addMcpIntegration', integration: 'github', profile: 'readonly' });

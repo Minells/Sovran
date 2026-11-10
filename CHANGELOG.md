@@ -6,6 +6,9 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- Reviewed browser MCP profiles: explicit isolated Chrome, advanced named-profile Playwright access, DevTools privacy
+  flags, narrow GitHub read-only/optional-write profiles and host-enforced tool allowlists. Missing browser and Remote
+  profile limitations are actionable; browser result paths are never opened automatically.
 - Optional integration catalog for Playwright MCP, Chrome DevTools MCP and GitHub MCP. Selecting a card has no
   installation/launch effect; managed entries start disconnected, install reviewed locked packages on demand, then
   connect separately. Custom commands, remote servers, JSON import, saved tokens and tool policies are preserved.

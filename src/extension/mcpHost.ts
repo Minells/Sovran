@@ -6,7 +6,15 @@
 import * as vscode from 'vscode';
 import * as os from 'node:os';
 import { ManagedMcpPackages } from './adapters/ManagedMcpPackages';
-import { integration, integrationArguments, integrationHeaders, type IntegrationId, type IntegrationProfile } from '../core/mcp/catalog';
+import {
+  integration,
+  integrationArguments,
+  integrationHeaders,
+  PROFILE_LABELS,
+  type ManagedIntegration,
+  type IntegrationId,
+  type IntegrationProfile,
+} from '../core/mcp/catalog';
 import {
   fromEntry,
   mcpServerEntrySchema,
@@ -28,7 +36,7 @@ import type { HostLogger, McpSecrets } from './services';
 const MAX_DESCRIPTION_SHOWN = 2000;
 
 export interface McpHostDeps {
-  managed?: { resources: string; storage: string; host: string };
+  managed?: { resources: string; storage: string; host: string; remote?: boolean };
   secrets: McpSecrets;
   logger: HostLogger;
   /** Sovran's version, sent to servers when connecting. */
@@ -53,10 +61,13 @@ export class McpHost implements vscode.Disposable {
   private reloading: Promise<void> = Promise.resolve();
 
   constructor(private readonly deps: McpHostDeps) {
-    if (deps.managed) this.packages = new ManagedMcpPackages({
-      ...deps.managed, roots: () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
-      authorize: () => this.requireTrust(), changed: () => this.changed(),
-    });
+    if (deps.managed)
+      this.packages = new ManagedMcpPackages({
+        ...deps.managed,
+        roots: () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+        authorize: () => this.requireTrust(),
+        changed: () => this.changed(),
+      });
     this.hub = new McpHub({
       transports:
         deps.transports ??
@@ -139,8 +150,18 @@ export class McpHost implements vscode.Disposable {
   // ------------------------------------------------------------------------------------------ view
 
   view(): McpView {
-    return { active: vscode.workspace.isTrusted, servers: this.hub.states().map((s) => this.serverView(s)),
-      ...(this.packages && this.deps.managed ? { catalog: { host: this.deps.managed.host, entries: this.packages.states() } } : {}),
+    return {
+      active: vscode.workspace.isTrusted,
+      servers: this.hub.states().map((s) => this.serverView(s)),
+      ...(this.packages && this.deps.managed
+        ? {
+            catalog: {
+              host: this.deps.managed.host,
+              remote: this.deps.managed.remote,
+              entries: this.packages.states(),
+            },
+          }
+        : {}),
     };
   }
 
@@ -203,7 +224,19 @@ export class McpHost implements vscode.Disposable {
   /** Adds a server or replaces one. A new token goes to Secret Storage; tool policies and the on/off state are kept. */
   async save(input: McpServerInput): Promise<void> {
     const managed = input.id && this.servers.find((s) => s.id === input.id)?.managed;
-    if (managed && await vscode.window.showWarningMessage('Save this integration as a custom server?', { modal: true, detail: 'Your command and connection fields will be used directly. Sovran will no longer manage its package or profile. Tool permissions are preserved.' }, 'Save custom server') !== 'Save custom server') return;
+    if (
+      managed &&
+      (await vscode.window.showWarningMessage(
+        'Save this integration as a custom server?',
+        {
+          modal: true,
+          detail:
+            'Your command and connection fields will be used directly. Sovran will no longer manage its package or profile. Tool permissions are preserved.',
+        },
+        'Save custom server',
+      )) !== 'Save custom server'
+    )
+      return;
     const config = await this.mutate((servers) => {
       const existing = input.id ? servers.find((s) => s.id === input.id) : undefined;
       if (input.id && !existing) throw new Error(`The MCP server "${input.name}" was removed meanwhile.`);
@@ -272,15 +305,22 @@ export class McpHost implements vscode.Disposable {
     if (enabled && selected?.managed) {
       this.requireTrust();
       if (!this.packages) throw new Error('Managed integrations are unavailable in this host.');
-      if (selected.auth.type !== 'none' && !this.tokens.has(id)) throw new Error('Set the integration token before connecting.');
+      if (selected.auth.type !== 'none' && !this.tokens.has(id))
+        throw new Error('Set the integration token before connecting.');
       await this.packages.launch(selected);
       const snapshot = JSON.stringify(toEntry(selected));
-      const choice = await vscode.window.showWarningMessage(`Connect ${selected.name}?`, { modal: true,
-        detail: `${integration(selected.managed.id).description}\nRuns on ${this.deps.managed?.host ?? 'the extension host'}. Profile: ${selected.managed.profile}. Browser tools act outside native Web safeguards and ask unless you allow them. While enabled, it starts again in trusted windows.`,
-      }, 'Connect');
+      const choice = await vscode.window.showWarningMessage(
+        `Connect ${selected.name}?`,
+        {
+          modal: true,
+          detail: `${integration(selected.managed.id).description}\nRuns on ${this.deps.managed?.host ?? 'the extension host'}. ${PROFILE_LABELS[selected.managed.profile]}.${selected.managed.profile === 'extension' ? ` Chrome profile: ${selected.managed.browserProfile}. Requires the Playwright companion extension and its tab confirmation. Approved tabs can expose signed-in accounts and session data.` : ''}${selected.managed.profile === 'collaboration' ? ' Issue and pull request writes are available and start on Ask.' : ''} Browser tools act outside native Web safeguards and ask unless you allow them. While enabled, it starts again in trusted windows.`,
+        },
+        'Connect',
+      );
       if (choice !== 'Connect') return;
       this.requireTrust();
-      if (JSON.stringify(toEntry(readMcpServers().find((s) => s.id === id) ?? selected)) !== snapshot) throw new Error('The integration changed while awaiting confirmation. Connect again.');
+      if (JSON.stringify(toEntry(readMcpServers().find((s) => s.id === id) ?? selected)) !== snapshot)
+        throw new Error('The integration changed while awaiting confirmation. Connect again.');
     }
     await this.mutate((servers) =>
       servers.some((s) => s.id === id)
@@ -364,17 +404,45 @@ export class McpHost implements vscode.Disposable {
   }
 
   private requireTrust(): void {
-    if (!vscode.workspace.isTrusted) throw new Error('Trust the workspace before installing or connecting integrations.');
+    if (!vscode.workspace.isTrusted)
+      throw new Error('Trust the workspace before installing or connecting integrations.');
   }
 
   async addIntegration(id: IntegrationId, profile: IntegrationProfile): Promise<void> {
     const item = integration(id);
-    const managed = { id, profile, version: item.version };
+    const managed: ManagedIntegration = { id, profile, version: item.version };
+    if (profile === 'extension') {
+      if (this.deps.managed?.remote)
+        throw new Error(
+          'Existing desktop Chrome profiles are unavailable on Remote hosts. Use a separate browser on the extension host or configure an explicit custom bridge.',
+        );
+      const browserProfile = await vscode.window.showInputBox({
+        title: 'Choose the Chrome profile for Playwright',
+        prompt:
+          'Enter the profile directory name shown in chrome://version (for example Profile 2). Install the Playwright companion extension there. Approved tabs can expose signed-in accounts. No automatic profile selection.',
+        ignoreFocusOut: true,
+        validateInput: (value) =>
+          /^[a-zA-Z0-9 _-]{1,80}$/.test(value)
+            ? undefined
+            : 'Enter a profile directory name without path separators.',
+      });
+      if (browserProfile === undefined) return;
+      managed.browserProfile = browserProfile;
+    }
     integrationArguments(managed);
     await this.mutate((servers) => {
-      const server = fromEntry({ id: newServerId(item.name, new Set(servers.map((s) => s.id))), name: item.name,
-        enabled: false, managed,
-        ...(id === 'github' ? { url: 'https://api.githubcopilot.com/mcp/', headers: integrationHeaders(), auth: { type: 'bearer' as const } } : { command: 'node', args: [], auth: { type: 'none' as const } }),
+      const server = fromEntry({
+        id: newServerId(item.name, new Set(servers.map((s) => s.id))),
+        name: item.name,
+        enabled: false,
+        managed,
+        ...(id === 'github'
+          ? {
+              url: 'https://api.githubcopilot.com/mcp/',
+              headers: integrationHeaders(profile),
+              auth: { type: 'bearer' as const },
+            }
+          : { command: 'node', args: [], auth: { type: 'none' as const } }),
       });
       return { servers: [...servers, server], result: true };
     });
@@ -383,19 +451,31 @@ export class McpHost implements vscode.Disposable {
   async installIntegration(id: IntegrationId): Promise<void> {
     this.requireTrust();
     if (!this.packages) throw new Error('Managed installations are unavailable in this host.');
-    if (this.servers.some((s) => s.enabled && s.managed?.id === id)) throw new Error('Disconnect this integration before installing its dependencies.');
+    if (this.servers.some((s) => s.enabled && s.managed?.id === id))
+      throw new Error('Disconnect this integration before installing its dependencies.');
     const item = integration(id);
     if (!item.package) return;
-    const choice = await vscode.window.showWarningMessage(`Install ${item.name} dependencies?`, { modal: true,
-      detail: `Downloads ${item.package}@${item.version} and its locked dependencies from npm to extension storage on ${this.deps.managed?.host}. npm install scripts are disabled. No browser is downloaded and nothing connects.`,
-    }, 'Install');
+    const choice = await vscode.window.showWarningMessage(
+      `Install ${item.name} dependencies?`,
+      {
+        modal: true,
+        detail: `Downloads ${item.package}@${item.version} and its locked dependencies from npm to extension storage on ${this.deps.managed?.host}. npm install scripts are disabled. No browser is downloaded and nothing connects.`,
+      },
+      'Install',
+    );
     if (choice !== 'Install') return;
     this.requireTrust();
-    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: `Installing ${item.name}`, cancellable: true }, async (_progress, cancellation) => {
-      const abort = new AbortController();
-      const listener = cancellation.onCancellationRequested(() => abort.abort());
-      try { await this.packages!.install(id, abort.signal); }
-      finally { listener.dispose(); }
-    });
+    await vscode.window.withProgress(
+      { location: vscode.ProgressLocation.Notification, title: `Installing ${item.name}`, cancellable: true },
+      async (_progress, cancellation) => {
+        const abort = new AbortController();
+        const listener = cancellation.onCancellationRequested(() => abort.abort());
+        try {
+          await this.packages!.install(id, abort.signal);
+        } finally {
+          listener.dispose();
+        }
+      },
+    );
   }
 }

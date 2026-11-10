@@ -15,6 +15,7 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client';
 import { z } from 'zod';
+import { integrationCallProblem, integrationToolAllowed } from './catalog';
 import { estimateTokens } from '../context/contextManager';
 import type { Logger, McpToolHint } from '../ports';
 import { redact } from '../security/redact';
@@ -236,7 +237,7 @@ export class McpHub implements ToolSource {
       if (this.stale(conn, generation)) return void client.close().catch(() => undefined);
       const info = client.getServerVersion();
       conn.server = info ? { name: info.name, version: info.version } : undefined;
-      conn.tools = tools;
+      conn.tools = tools.filter((tool) => integrationToolAllowed(config.managed, tool.name));
       conn.status = 'connected';
       this.deps.logger.info(
         `MCP ${config.id}: connected${info ? ` to ${info.name} ${info.version}` : ''} · ${tools.length} tool${tools.length === 1 ? '' : 's'}`,
@@ -290,7 +291,7 @@ export class McpHub implements ToolSource {
       return this.deps.logger.warn(
         `MCP ${conn.config.id}: could not refresh the tool list: ${this.clean(error.message)}`,
       );
-    conn.tools = tools ?? [];
+    conn.tools = (tools ?? []).filter((tool) => integrationToolAllowed(conn.config.managed, tool.name));
     this.deps.logger.info(`MCP ${conn.config.id}: tool list changed · ${conn.tools.length} tools`);
     this.changed();
   }
@@ -390,7 +391,12 @@ export class McpHub implements ToolSource {
       requiresTrust: true,
       unavailable: () => {
         const current = this.connections.get(serverId);
-        if (current !== connection || current.generation !== generation || current.status !== 'connected' || !current.tools.includes(tool)) {
+        if (
+          current !== connection ||
+          current.generation !== generation ||
+          current.status !== 'connected' ||
+          !current.tools.includes(tool)
+        ) {
           return `${tool.name} is no longer available from this MCP connection.`;
         }
         const config = server();
@@ -400,7 +406,10 @@ export class McpHub implements ToolSource {
       },
       mcpPolicy: () => {
         const config = server();
-        return { server: config?.name ?? serverId, allowed: !!config && toolPolicy(config, tool.name) === 'allow' };
+        return {
+          server: config?.name ?? serverId,
+          allowed: !!config && toolPolicy(config, tool.name) === 'allow',
+        };
       },
       label,
       prepare: async (args: Record<string, unknown>) => {
@@ -409,6 +418,8 @@ export class McpHub implements ToolSource {
         const policy = config ? toolPolicy(config, tool.name) : 'off';
         if (!config || policy === 'off')
           throw new ToolError(`${tool.name} is turned off in Sovran's MCP settings.`);
+        const problem = integrationCallProblem(config.managed, tool.name, args);
+        if (problem) throw new ToolError(problem);
         const shown = JSON.stringify(args, null, 2);
         return {
           paths: [],
@@ -455,6 +466,8 @@ export class McpHub implements ToolSource {
     }
     if (!conn.tools.some((t) => t.name === tool))
       throw new ToolError(`${tool} is no longer offered by ${name}.`);
+    const problem = integrationCallProblem(conn.config.managed, tool, args);
+    if (problem) throw new ToolError(problem);
     const timeout = conn.config.timeoutSeconds * 1000;
     try {
       const result = await conn.client.callTool(

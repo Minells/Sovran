@@ -18,6 +18,7 @@ import { parseMcpSnippet, type McpDraft } from '../../../src/shared/mcpImport';
 import {
   INTEGRATIONS,
   integration,
+  PROFILE_LABELS,
   type IntegrationId,
   type IntegrationProfile,
   type InstallationState,
@@ -255,8 +256,8 @@ function ServerCard({
       </div>
       {s.managed ? (
         <div className="sv-field__help">
-          {integration(s.managed.id).name} {s.managed.version} · {s.managed.profile} ·{' '}
-          {host ?? 'Extension host'}
+          {integration(s.managed.id).name} {s.managed.version} · {PROFILE_LABELS[s.managed.profile]}
+          {s.managed.browserProfile ? ` (${s.managed.browserProfile})` : ''} · {host ?? 'Extension host'}
         </div>
       ) : null}
       {s.managed && s.managed.id !== 'github' ? (
@@ -916,12 +917,29 @@ export function McpArea() {
                       onChange={(event) => setProfile(event.target.value as IntegrationProfile)}
                     >
                       {candidate.profiles.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
+                        <option
+                          key={value}
+                          value={value}
+                          disabled={value === 'extension' && app.mcp.catalog?.remote}
+                        >
+                          {PROFILE_LABELS[value]}
                         </option>
                       ))}
                     </select>
                   </label>
+                ) : null}
+                {profile === 'extension' ? (
+                  <p className="sv-field__help">
+                    Choose an explicit local Chrome profile in the next step. Requires the Playwright
+                    companion extension and tab confirmation. Approved tabs can expose signed-in accounts.
+                    Unavailable on Remote hosts.
+                  </p>
+                ) : null}
+                {profile === 'collaboration' ? (
+                  <p className="sv-field__help">
+                    Adds issue creation, editing, comments and pull request creation. Every write starts on
+                    Ask. Use a token restricted to the repositories and permissions you need.
+                  </p>
                 ) : null}
                 <div className="sv-approval__actions">
                   <Button

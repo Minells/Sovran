@@ -94,7 +94,18 @@ export const mcpServerEntrySchema = z
     timeoutSeconds: z.number().int().min(MCP_TIMEOUT_SECONDS.min).max(MCP_TIMEOUT_SECONDS.max).optional(),
     allowedTools: toolNames.optional(),
     disabledTools: toolNames.optional(),
-    managed: z.object({ id: z.enum(INTEGRATION_IDS), profile: z.enum(['isolated', 'extension', 'readonly', 'collaboration']), version: z.string().min(1).max(40) }).strict().optional(),
+    managed: z
+      .object({
+        id: z.enum(INTEGRATION_IDS),
+        profile: z.enum(['isolated', 'extension', 'readonly', 'collaboration']),
+        version: z.string().min(1).max(40),
+        browserProfile: z
+          .string()
+          .regex(/^[a-zA-Z0-9 _-]{1,80}$/)
+          .optional(),
+      })
+      .strict()
+      .optional(),
   })
   .superRefine((s, ctx) => {
     for (const problem of transportProblems(s)) ctx.addIssue({ code: 'custom', message: problem });

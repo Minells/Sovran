@@ -11,7 +11,16 @@ const baseState = (over: Partial<AppState> = {}): AppState => ({
   surface: 'sidebar',
   view: 'chat',
   workspace: { name: 'w', trusted: true, hasFolder: true },
-  providers: [{ id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }] }],
+  providers: [
+    {
+      id: 'local',
+      name: 'Local',
+      baseUrl: 'http://localhost:1234/v1',
+      authType: 'none',
+      hasKey: false,
+      models: [{ id: 'coder', toolMode: 'auto' }],
+    },
+  ],
   selected: { providerId: 'local', modelId: 'coder' },
   mode: 'act',
   sessions: [],
@@ -111,8 +120,16 @@ describe('App', () => {
   });
 
   it('streams assistant deltas into the transcript', () => {
-    mount(baseState({ session: { id: 's', title: 't', messages: [{ role: 'user', id: 'u', content: 'hi', createdAt: 0 }] } }));
-    host({ type: 'messageUpsert', sessionId: 's', message: { role: 'assistant', id: 'a', content: '', streaming: true, createdAt: 0 } });
+    mount(
+      baseState({
+        session: { id: 's', title: 't', messages: [{ role: 'user', id: 'u', content: 'hi', createdAt: 0 }] },
+      }),
+    );
+    host({
+      type: 'messageUpsert',
+      sessionId: 's',
+      message: { role: 'assistant', id: 'a', content: '', streaming: true, createdAt: 0 },
+    });
     host({ type: 'messageDelta', sessionId: 's', messageId: 'a', field: 'content', text: 'Hello **wor' });
     host({ type: 'messageDelta', sessionId: 's', messageId: 'a', field: 'content', text: 'ld**' });
     expect(screen.getByText('world').tagName).toBe('STRONG');
@@ -127,20 +144,51 @@ describe('App', () => {
       title: 't',
       messages: [
         { role: 'user', id: 'u', content: 'edit', createdAt: 0 },
-        { role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'edit_file', arguments: '{"path":"src/a.ts"}' }] },
+        {
+          role: 'assistant',
+          id: 'a',
+          content: '',
+          createdAt: 0,
+          toolCalls: [{ id: 'c1', name: 'edit_file', arguments: '{"path":"src/a.ts"}' }],
+        },
       ],
     };
     mount(
       baseState({
         session: messages,
-        run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'src/a.ts', callId: 'c1' } },
-        approvals: [{ id: 'ap', callId: 'c1', toolName: 'edit_file', title: 'src/a.ts', detail: { kind: 'edit', path: 'src/a.ts', isNew: false, diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1 } }],
+        run: {
+          sessionId: 's',
+          iteration: 1,
+          maxIterations: 25,
+          startedAt: Date.now(),
+          activity: { phase: 'awaiting_approval', label: 'src/a.ts', callId: 'c1' },
+        },
+        approvals: [
+          {
+            id: 'ap',
+            callId: 'c1',
+            toolName: 'edit_file',
+            title: 'src/a.ts',
+            detail: {
+              kind: 'edit',
+              path: 'src/a.ts',
+              isNew: false,
+              diff: '@@ -1 +1 @@\n-a\n+b',
+              added: 1,
+              removed: 1,
+            },
+          },
+        ],
       }),
     );
     const bar = screen.getByRole('region', { name: 'Apply these changes?' });
     // Outside the conversation (so it never scrolls away), right above the input; it replaces the run status line.
-    expect(bar.compareDocumentPosition(screen.getByLabelText('Conversation')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
-    expect(bar.compareDocumentPosition(screen.getByLabelText('Message Sovran')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      bar.compareDocumentPosition(screen.getByLabelText('Conversation')) & Node.DOCUMENT_POSITION_PRECEDING,
+    ).toBeTruthy();
+    expect(
+      bar.compareDocumentPosition(screen.getByLabelText('Message Sovran')) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(screen.queryByText('Waiting for your approval')).not.toBeInTheDocument();
     // The diff is read in the transcript, under the tool call; the decision is only in the bar.
     const diff = screen.getByRole('group', { name: 'Proposed changes' });
@@ -149,15 +197,53 @@ describe('App', () => {
     expect(diff).toHaveTextContent('−a');
     await userEvent.click(within(bar).getByLabelText(/without asking/));
     await userEvent.click(within(bar).getByRole('button', { name: 'Apply' }));
-    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: true, grant: 'session-edits', feedback: undefined });
+    expect(sent).toContainEqual({
+      type: 'approval',
+      id: 'ap',
+      approved: true,
+      grant: 'session-edits',
+      feedback: undefined,
+    });
   });
 
   it('rejects with feedback', async () => {
     mount(
       baseState({
-        session: { id: 's', title: 't', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'execute_terminal', arguments: '{"command":"rm -rf build"}' }] }] },
-        run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'rm', callId: 'c1' } },
-        approvals: [{ id: 'ap', callId: 'c1', toolName: 'execute_terminal', title: 'rm -rf build', detail: { kind: 'command', command: 'rm -rf build', cwd: '.', warnings: ['Deletes files and folders recursively.'], allowPrefix: null } }],
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            {
+              role: 'assistant',
+              id: 'a',
+              content: '',
+              createdAt: 0,
+              toolCalls: [{ id: 'c1', name: 'execute_terminal', arguments: '{"command":"rm -rf build"}' }],
+            },
+          ],
+        },
+        run: {
+          sessionId: 's',
+          iteration: 1,
+          maxIterations: 25,
+          startedAt: Date.now(),
+          activity: { phase: 'awaiting_approval', label: 'rm', callId: 'c1' },
+        },
+        approvals: [
+          {
+            id: 'ap',
+            callId: 'c1',
+            toolName: 'execute_terminal',
+            title: 'rm -rf build',
+            detail: {
+              kind: 'command',
+              command: 'rm -rf build',
+              cwd: '.',
+              warnings: ['Deletes files and folders recursively.'],
+              allowPrefix: null,
+            },
+          },
+        ],
       }),
     );
     expect(screen.getByText('Deletes files and folders recursively.')).toBeInTheDocument();
@@ -168,15 +254,47 @@ describe('App', () => {
     expect(screen.queryByRole('button', { name: 'Run' })).not.toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('Feedback for the agent'), 'use npm run clean');
     await userEvent.click(screen.getByRole('button', { name: 'Send rejection' }));
-    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: false, grant: undefined, feedback: 'use npm run clean' });
+    expect(sent).toContainEqual({
+      type: 'approval',
+      id: 'ap',
+      approved: false,
+      grant: undefined,
+      feedback: 'use npm run clean',
+    });
   });
 
   it('sends feedback with Enter and goes back with Escape without rejecting', async () => {
     mount(
       baseState({
-        session: { id: 's', title: 't', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'execute_terminal', arguments: '{"command":"make"}' }] }] },
-        run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'make', callId: 'c1' } },
-        approvals: [{ id: 'ap', callId: 'c1', toolName: 'execute_terminal', title: 'make', detail: { kind: 'command', command: 'make', cwd: '.', warnings: [], allowPrefix: 'make' } }],
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            {
+              role: 'assistant',
+              id: 'a',
+              content: '',
+              createdAt: 0,
+              toolCalls: [{ id: 'c1', name: 'execute_terminal', arguments: '{"command":"make"}' }],
+            },
+          ],
+        },
+        run: {
+          sessionId: 's',
+          iteration: 1,
+          maxIterations: 25,
+          startedAt: Date.now(),
+          activity: { phase: 'awaiting_approval', label: 'make', callId: 'c1' },
+        },
+        approvals: [
+          {
+            id: 'ap',
+            callId: 'c1',
+            toolName: 'execute_terminal',
+            title: 'make',
+            detail: { kind: 'command', command: 'make', cwd: '.', warnings: [], allowPrefix: 'make' },
+          },
+        ],
       }),
     );
     await userEvent.click(screen.getByRole('button', { name: 'Reject with feedback…' }));
@@ -184,8 +302,17 @@ describe('App', () => {
     expect(screen.queryByLabelText('Feedback for the agent')).not.toBeInTheDocument();
     expect(sent.some((m) => m.type === 'approval')).toBe(false);
     await userEvent.click(screen.getByRole('button', { name: 'Reject with feedback…' }));
-    await userEvent.type(screen.getByLabelText('Feedback for the agent'), 'use the Makefile target "build"{Enter}');
-    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: false, grant: undefined, feedback: 'use the Makefile target "build"' });
+    await userEvent.type(
+      screen.getByLabelText('Feedback for the agent'),
+      'use the Makefile target "build"{Enter}',
+    );
+    expect(sent).toContainEqual({
+      type: 'approval',
+      id: 'ap',
+      approved: false,
+      grant: undefined,
+      feedback: 'use the Makefile target "build"',
+    });
   });
 
   it('switches mode via the radio group and Alt+M, and disables Act when untrusted', async () => {
@@ -194,13 +321,26 @@ describe('App', () => {
     expect(sent).toContainEqual({ type: 'setMode', mode: 'plan' });
     fireEvent.keyDown(screen.getByLabelText('Message Sovran'), { key: 'm', altKey: true });
     expect(sent.filter((m) => m.type === 'setMode')).toHaveLength(2);
-    host({ type: 'patch', patch: { workspace: { name: 'w', trusted: false, hasFolder: true }, mode: 'plan' } });
+    host({
+      type: 'patch',
+      patch: { workspace: { name: 'w', trusted: false, hasFolder: true }, mode: 'plan' },
+    });
     expect(screen.getByRole('radio', { name: /Act/ })).toBeDisabled();
     expect(screen.getByRole('note')).toHaveTextContent('Restricted Mode');
   });
 
   it('shows a stop button while running and cancels with Escape', () => {
-    mount(baseState({ run: { sessionId: 's', iteration: 2, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'thinking', label: 'Thinking' } } }));
+    mount(
+      baseState({
+        run: {
+          sessionId: 's',
+          iteration: 2,
+          maxIterations: 25,
+          startedAt: Date.now(),
+          activity: { phase: 'thinking', label: 'Thinking' },
+        },
+      }),
+    );
     expect(screen.getByLabelText('Stop the agent')).toBeInTheDocument();
     fireEvent.keyDown(screen.getByLabelText('Message Sovran'), { key: 'Escape' });
     expect(sent).toContainEqual({ type: 'cancel' });
@@ -209,7 +349,19 @@ describe('App', () => {
   it('renders provider errors with a hint and a settings action', () => {
     mount(
       baseState({
-        session: { id: 's', title: 't', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, error: { kind: 'network', message: 'Connection refused', hint: 'Is the server running?' } }] },
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            {
+              role: 'assistant',
+              id: 'a',
+              content: '',
+              createdAt: 0,
+              error: { kind: 'network', message: 'Connection refused', hint: 'Is the server running?' },
+            },
+          ],
+        },
       }),
     );
     expect(screen.getByRole('alert')).toHaveTextContent('Connection refused');
@@ -224,7 +376,15 @@ describe('v0.2 recovery & productivity', () => {
         id: 's',
         title: 't',
         messages: [
-          { role: 'user', id: 'u1', content: 'expanded prompt', display: '/review a.ts', createdAt: 0, checkpoint: { id: 'cp', files: ['src/a.ts', 'src/b.ts'] }, ...over } as never,
+          {
+            role: 'user',
+            id: 'u1',
+            content: 'expanded prompt',
+            display: '/review a.ts',
+            createdAt: 0,
+            checkpoint: { id: 'cp', files: ['src/a.ts', 'src/b.ts'] },
+            ...over,
+          } as never,
           { role: 'assistant', id: 'a1', content: 'Done.', createdAt: 0 },
         ],
       },
@@ -267,7 +427,10 @@ describe('v0.2 recovery & productivity', () => {
   });
 
   it('renders the compaction divider with the summary', () => {
-    mount({ ...doneTurn(), compaction: { summary: '## Goal\nShip it', firstKeptId: 'u1', summarizedCount: 6 } });
+    mount({
+      ...doneTurn(),
+      compaction: { summary: '## Goal\nShip it', firstKeptId: 'u1', summarizedCount: 6 },
+    });
     expect(screen.getByText(/6 earlier messages summarized/)).toBeInTheDocument();
   });
 
@@ -276,7 +439,11 @@ describe('v0.2 recovery & productivity', () => {
     const box = screen.getByLabelText('Message Sovran');
     await userEvent.type(box, '/re');
     const list = screen.getByRole('listbox', { name: 'Commands' });
-    expect(within(list).getAllByRole('option').map((o) => o.textContent)).toEqual([expect.stringContaining('/review')]);
+    expect(
+      within(list)
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual([expect.stringContaining('/review')]);
     await userEvent.keyboard('{Enter}');
     expect(box).toHaveValue('/review ');
     expect(sent.some((m) => m.type === 'send')).toBe(false);
@@ -287,9 +454,19 @@ describe('v0.2 recovery & productivity', () => {
     const box = screen.getByLabelText('Message Sovran');
     await userEvent.type(box, 'look at @sess');
     await waitFor(() => expect(sent.some((m) => m.type === 'suggestFiles')).toBe(true));
-    const req = [...sent].reverse().find((m) => m.type === 'suggestFiles') as Extract<WebviewMessage, { type: 'suggestFiles' }>;
+    const req = [...sent].reverse().find((m) => m.type === 'suggestFiles') as Extract<
+      WebviewMessage,
+      { type: 'suggestFiles' }
+    >;
     expect(req.query).toBe('sess');
-    host({ type: 'fileSuggestions', requestId: req.requestId, items: [{ path: 'src/auth/session.ts', label: 'session.ts' }, { path: 'docs/sessions.md', label: 'sessions.md' }] });
+    host({
+      type: 'fileSuggestions',
+      requestId: req.requestId,
+      items: [
+        { path: 'src/auth/session.ts', label: 'session.ts' },
+        { path: 'docs/sessions.md', label: 'sessions.md' },
+      ],
+    });
     expect(screen.getAllByRole('option')).toHaveLength(2);
     await userEvent.keyboard('{ArrowDown}{Enter}');
     expect(sent).toContainEqual({ type: 'attachPath', path: 'docs/sessions.md' });
@@ -300,7 +477,19 @@ describe('v0.2 recovery & productivity', () => {
     mount(
       baseState({
         mode: 'plan',
-        providers: [{ id: 'local', name: 'Local', baseUrl: 'http://x/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] }],
+        providers: [
+          {
+            id: 'local',
+            name: 'Local',
+            baseUrl: 'http://x/v1',
+            authType: 'none',
+            hasKey: false,
+            models: [
+              { id: 'coder', toolMode: 'auto' },
+              { id: 'thinker', toolMode: 'auto' },
+            ],
+          },
+        ],
         planModel: { providerId: 'local', modelId: 'thinker' },
       }),
     );
@@ -311,8 +500,22 @@ describe('v0.2 recovery & productivity', () => {
 describe('brand refresh UX', () => {
   it('folds consecutive successful reads into one exploration row', async () => {
     const read = (id: string, name: string, args: string) => [
-      { role: 'assistant', id: `a${id}`, content: '', createdAt: 0, toolCalls: [{ id: `c${id}`, name, arguments: args }] },
-      { role: 'tool', id: `t${id}`, toolCallId: `c${id}`, toolName: name, content: 'ok', status: 'success', createdAt: 0 },
+      {
+        role: 'assistant',
+        id: `a${id}`,
+        content: '',
+        createdAt: 0,
+        toolCalls: [{ id: `c${id}`, name, arguments: args }],
+      },
+      {
+        role: 'tool',
+        id: `t${id}`,
+        toolCallId: `c${id}`,
+        toolName: name,
+        content: 'ok',
+        status: 'success',
+        createdAt: 0,
+      },
     ];
     mount(
       baseState({
@@ -363,7 +566,15 @@ describe('brand refresh UX', () => {
 
 describe('start page', () => {
   it('builds starters from the selection and fills the composer for Plan a change', async () => {
-    const { unmount } = mount(baseState({ context: { editor: { path: 'src/a.ts', label: 'a.ts:3-9', startLine: 3, endLine: 9 }, includeEditor: true, attachments: [] } }));
+    const { unmount } = mount(
+      baseState({
+        context: {
+          editor: { path: 'src/a.ts', label: 'a.ts:3-9', startLine: 3, endLine: 9 },
+          includeEditor: true,
+          attachments: [],
+        },
+      }),
+    );
     await userEvent.click(screen.getByRole('button', { name: /Explain the selection/ }));
     expect(sent).toContainEqual({ type: 'send', text: 'Explain the selected code' });
     unmount();
@@ -378,7 +589,15 @@ describe('start page', () => {
   });
 
   it('does not offer a file Sovran will not send as a subject', () => {
-    mount(baseState({ context: { editor: { path: '/home/u/.aws/credentials', label: 'credentials', blocked: 'outside' }, includeEditor: true, attachments: [] } }));
+    mount(
+      baseState({
+        context: {
+          editor: { path: '/home/u/.aws/credentials', label: 'credentials', blocked: 'outside' },
+          includeEditor: true,
+          attachments: [],
+        },
+      }),
+    );
     expect(screen.getByRole('button', { name: /Explain this workspace/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Explain credentials/ })).not.toBeInTheDocument();
   });
@@ -388,14 +607,24 @@ describe('start page', () => {
       baseState({
         sessions: [
           { id: 's', title: 'New chat', createdAt: 0, updatedAt: Date.now(), messageCount: 0 },
-          { id: 'old', title: 'Older work', createdAt: 0, updatedAt: Date.now() - 7_200_000, messageCount: 4 },
+          {
+            id: 'old',
+            title: 'Older work',
+            createdAt: 0,
+            updatedAt: Date.now() - 7_200_000,
+            messageCount: 4,
+          },
           { id: 'new', title: 'Latest work', createdAt: 0, updatedAt: Date.now() - 60_000, messageCount: 2 },
         ],
       }),
     );
     const nav = screen.getByRole('navigation', { name: 'Recent chats' });
     // Newest first, and never the chat that is already open.
-    expect(within(nav).getAllByRole('listitem').map((li) => li.textContent)).toEqual([expect.stringContaining('Latest work'), expect.stringContaining('Older work')]);
+    expect(
+      within(nav)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual([expect.stringContaining('Latest work'), expect.stringContaining('Older work')]);
     await userEvent.click(within(nav).getByRole('button', { name: /Latest work/ }));
     expect(sent).toContainEqual({ type: 'openSession', id: 'new' });
     await userEvent.click(within(nav).getByRole('button', { name: /All chats/ }));
@@ -419,7 +648,8 @@ describe('start page', () => {
 });
 
 describe('attach menu', () => {
-  const lastOf = <T extends WebviewMessage['type']>(type: T) => [...sent].reverse().find((m) => m.type === type) as Extract<WebviewMessage, { type: T }>;
+  const lastOf = <T extends WebviewMessage['type']>(type: T) =>
+    [...sent].reverse().find((m) => m.type === type) as Extract<WebviewMessage, { type: T }>;
   const open = async (state = baseState()) => {
     mount(state);
     await userEvent.click(screen.getByRole('button', { name: 'Attach files' }));
@@ -454,14 +684,28 @@ describe('attach menu', () => {
 
   it('suggests open files, browses folders and toggles attachments', async () => {
     const dialog = await open();
-    expect(within(dialog).getByRole('group', { name: 'Suggested' })).toHaveTextContent(/a\.ts.*active editor.*b\.ts.*open/);
+    expect(within(dialog).getByRole('group', { name: 'Suggested' })).toHaveTextContent(
+      /a\.ts.*active editor.*b\.ts.*open/,
+    );
     // Files without a hint are not "suggested".
     expect(within(dialog).queryByText('zzz.txt')).not.toBeInTheDocument();
-    expect(within(dialog).getByRole('option', { name: /\.env/ })).toHaveAttribute('title', expect.stringContaining('protected'));
+    expect(within(dialog).getByRole('option', { name: /\.env/ })).toHaveAttribute(
+      'title',
+      expect.stringContaining('protected'),
+    );
 
     await userEvent.click(within(dialog).getByRole('option', { name: /README\.md/ }));
     expect(sent).toContainEqual({ type: 'attachPath', path: 'README.md' });
-    host({ type: 'patch', patch: { context: { editor: null, includeEditor: true, attachments: [{ id: 'att1', path: 'README.md', label: 'README.md' }] } } });
+    host({
+      type: 'patch',
+      patch: {
+        context: {
+          editor: null,
+          includeEditor: true,
+          attachments: [{ id: 'att1', path: 'README.md', label: 'README.md' }],
+        },
+      },
+    });
     const readme = within(dialog).getByRole('option', { name: /README\.md/ });
     expect(readme).toHaveAttribute('aria-selected', 'true');
     await userEvent.click(readme);
@@ -481,7 +725,10 @@ describe('attach menu', () => {
     expect(search).toHaveFocus();
     // Suggested a.ts, b.ts, then src/, .env, README.md: three steps down reach the folder.
     await userEvent.keyboard('{ArrowDown}{ArrowDown}');
-    expect(search).toHaveAttribute('aria-activedescendant', within(dialog).getByRole('option', { name: 'src, folder' }).id);
+    expect(search).toHaveAttribute(
+      'aria-activedescendant',
+      within(dialog).getByRole('option', { name: 'src, folder' }).id,
+    );
     await userEvent.keyboard('{ArrowRight}');
     expect(lastOf('listDirectory').path).toBe('src');
     await userEvent.keyboard('{ArrowLeft}');
@@ -494,7 +741,11 @@ describe('attach menu', () => {
     const dialog = await open();
     await userEvent.type(within(dialog).getByRole('combobox', { name: 'Search files' }), 'conf');
     await waitFor(() => expect(lastOf('suggestFiles').query).toBe('conf'));
-    host({ type: 'fileSuggestions', requestId: lastOf('suggestFiles').requestId, items: [{ path: 'src/config.ts', label: 'config.ts' }] });
+    host({
+      type: 'fileSuggestions',
+      requestId: lastOf('suggestFiles').requestId,
+      items: [{ path: 'src/config.ts', label: 'config.ts' }],
+    });
     expect(within(dialog).getByRole('group', { name: 'Results' })).toHaveTextContent('config.ts');
     await userEvent.keyboard('{Enter}');
     expect(sent).toContainEqual({ type: 'attachPath', path: 'src/config.ts' });
@@ -513,8 +764,19 @@ describe('attach menu', () => {
   });
 
   it('marks files picked from the computer', () => {
-    mount(baseState({ context: { editor: null, includeEditor: true, attachments: [{ id: 'x', path: '~/Downloads/spec.md', label: 'spec.md', external: true }] } }));
-    expect(screen.getByRole('button', { name: 'Remove spec.md' })).toHaveAttribute('title', expect.stringContaining('from your computer'));
+    mount(
+      baseState({
+        context: {
+          editor: null,
+          includeEditor: true,
+          attachments: [{ id: 'x', path: '~/Downloads/spec.md', label: 'spec.md', external: true }],
+        },
+      }),
+    );
+    expect(screen.getByRole('button', { name: 'Remove spec.md' })).toHaveAttribute(
+      'title',
+      expect.stringContaining('from your computer'),
+    );
   });
 
   it('says which documents Sovran will send as converted text', () => {
@@ -525,7 +787,14 @@ describe('attach menu', () => {
           includeEditor: true,
           attachments: [
             { id: 'p', path: 'docs/spec.pdf', label: 'spec.pdf', format: 'pdf', detail: '12 pages' },
-            { id: 'x', path: '~/Downloads/budget.xlsx', label: 'budget.xlsx', external: true, format: 'xlsx', detail: '3 sheets' },
+            {
+              id: 'x',
+              path: '~/Downloads/budget.xlsx',
+              label: 'budget.xlsx',
+              external: true,
+              format: 'xlsx',
+              detail: '3 sheets',
+            },
             { id: 't', path: 'notes.md', label: 'notes.md' },
           ],
         },
@@ -535,9 +804,14 @@ describe('attach menu', () => {
     expect(pdf).toHaveAttribute('title', 'docs/spec.pdf · PDF document, 12 pages · click to remove');
     expect(pdf.querySelector('.codicon-file-pdf')).not.toBeNull();
     const sheet = screen.getByRole('button', { name: 'Remove budget.xlsx' });
-    expect(sheet).toHaveAttribute('title', '~/Downloads/budget.xlsx (from your computer) · Excel workbook, 3 sheets · click to remove');
+    expect(sheet).toHaveAttribute(
+      'title',
+      '~/Downloads/budget.xlsx (from your computer) · Excel workbook, 3 sheets · click to remove',
+    );
     expect(sheet.querySelector('.codicon-table')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Remove notes.md' }).querySelector('.codicon-file')).not.toBeNull();
+    expect(
+      screen.getByRole('button', { name: 'Remove notes.md' }).querySelector('.codicon-file'),
+    ).not.toBeNull();
   });
 
   it('turns a pasted screenshot into an image attachment, and leaves text pastes alone', async () => {
@@ -547,11 +821,15 @@ describe('attach menu', () => {
     const shot = new File([png], 'image.png', { type: 'image/png' });
     const pasted = fireEvent.paste(input, { clipboardData: { files: [shot], types: ['Files'] } });
     expect(pasted).toBe(false); // handled: nothing is pasted as text
-    await waitFor(() => expect(sent).toContainEqual({ type: 'attachImage', data: btoa(String.fromCharCode(...png)) }));
+    await waitFor(() =>
+      expect(sent).toContainEqual({ type: 'attachImage', data: btoa(String.fromCharCode(...png)) }),
+    );
 
     // Copied from a document: text and a picture of it. The text is pasted, as before.
     sent = [];
-    const mixed = fireEvent.paste(input, { clipboardData: { files: [shot], types: ['text/plain', 'Files'] } });
+    const mixed = fireEvent.paste(input, {
+      clipboardData: { files: [shot], types: ['text/plain', 'Files'] },
+    });
     expect(mixed).toBe(true);
     expect(sent.filter((m) => m.type === 'attachImage')).toEqual([]);
   });
@@ -560,8 +838,12 @@ describe('attach menu', () => {
     mount(baseState({ context: { editor: null, includeEditor: true, attachments: [] } }));
     const big = new File([new Uint8Array(1)], 'huge.png', { type: 'image/png' });
     Object.defineProperty(big, 'size', { value: 9 * 1024 * 1024 });
-    fireEvent.paste(screen.getByRole('combobox', { name: 'Message Sovran' }), { clipboardData: { files: [big], types: ['Files'] } });
-    expect(screen.getByText('The pasted image is larger than 8 MB. Paste a smaller one (a crop, or a JPEG).')).toBeInTheDocument();
+    fireEvent.paste(screen.getByRole('combobox', { name: 'Message Sovran' }), {
+      clipboardData: { files: [big], types: ['Files'] },
+    });
+    expect(
+      screen.getByText('The pasted image is larger than 8 MB. Paste a smaller one (a crop, or a JPEG).'),
+    ).toBeInTheDocument();
     expect(sent.filter((m) => m.type === 'attachImage')).toEqual([]);
   });
 
@@ -572,7 +854,12 @@ describe('attach menu', () => {
           editor: null,
           includeEditor: true,
           attachments: [
-            { id: 'p', path: 'Pasted image 1', label: 'Pasted image 1', image: { mime: 'image/png', width: 1280, height: 720, pasted: true } },
+            {
+              id: 'p',
+              path: 'Pasted image 1',
+              label: 'Pasted image 1',
+              image: { mime: 'image/png', width: 1280, height: 720, pasted: true },
+            },
             { id: 'w', path: 'docs/ui.jpg', label: 'ui.jpg', image: { mime: 'image/jpeg' } },
           ],
         },
@@ -586,8 +873,22 @@ describe('attach menu', () => {
               content: 'what is wrong?',
               createdAt: 0,
               images: [
-                { id: 'a'.repeat(64), name: 'docs/ui.png', source: 'workspace', mime: 'image/png', bytes: 10, width: 800, height: 600 },
-                { id: 'b'.repeat(64), name: 'Pasted image 1', source: 'pasted', mime: 'image/webp', bytes: 10 },
+                {
+                  id: 'a'.repeat(64),
+                  name: 'docs/ui.png',
+                  source: 'workspace',
+                  mime: 'image/png',
+                  bytes: 10,
+                  width: 800,
+                  height: 600,
+                },
+                {
+                  id: 'b'.repeat(64),
+                  name: 'Pasted image 1',
+                  source: 'pasted',
+                  mime: 'image/webp',
+                  bytes: 10,
+                },
               ],
             },
           ],
@@ -597,7 +898,10 @@ describe('attach menu', () => {
     const pasted = screen.getByRole('button', { name: 'Remove Pasted image 1' });
     expect(pasted).toHaveAttribute('title', 'PNG image, 1280×720 · click to remove');
     expect(pasted.querySelector('.codicon-file-media')).not.toBeNull();
-    expect(screen.getByRole('button', { name: 'Remove ui.jpg' })).toHaveAttribute('title', 'docs/ui.jpg · JPEG image · click to remove');
+    expect(screen.getByRole('button', { name: 'Remove ui.jpg' })).toHaveAttribute(
+      'title',
+      'docs/ui.jpg · JPEG image · click to remove',
+    );
     // A workspace image opens in VS Code; a pasted one has no file to open.
     const sentImage = screen.getByRole('button', { name: 'ui.png' });
     expect(sentImage).toHaveAttribute('title', 'PNG image, 800×600');
@@ -619,7 +923,13 @@ describe('attach menu', () => {
               content: 'summarize',
               createdAt: 0,
               attachments: [
-                { kind: 'file', path: 'docs/deck.pptx', content: '## Slide 1', format: 'pptx', detail: '8 slides' },
+                {
+                  kind: 'file',
+                  path: 'docs/deck.pptx',
+                  content: '## Slide 1',
+                  format: 'pptx',
+                  detail: '8 slides',
+                },
                 // A saved chat from a later version may name a format this one does not know: it shows as a file.
                 { kind: 'file', path: 'docs/new.xyz', content: 'x', format: 'xyz' as never },
               ],
@@ -637,7 +947,11 @@ describe('attach menu', () => {
   it('shows the folder error from the host', async () => {
     mount(baseState());
     await userEvent.click(screen.getByRole('button', { name: 'Attach files' }));
-    host({ type: 'directoryListing', requestId: lastOf('listDirectory').requestId, listing: { path: '', entries: [], error: 'Open a folder to browse its files.' } });
+    host({
+      type: 'directoryListing',
+      requestId: lastOf('listDirectory').requestId,
+      listing: { path: '', entries: [], error: 'Open a folder to browse its files.' },
+    });
     expect(screen.getByText('Open a folder to browse its files.')).toBeInTheDocument();
   });
 });
@@ -677,7 +991,16 @@ describe('response actions', () => {
   });
 
   it('hides the actions while the response is still being written', () => {
-    mount({ ...twoTurns(), run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'streaming', label: 'Writing' } } });
+    mount({
+      ...twoTurns(),
+      run: {
+        sessionId: 's',
+        iteration: 1,
+        maxIterations: 25,
+        startedAt: Date.now(),
+        activity: { phase: 'streaming', label: 'Writing' },
+      },
+    });
     expect(screen.getAllByRole('toolbar', { name: 'Response actions' })).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Retry' })).not.toBeInTheDocument();
   });
@@ -685,7 +1008,9 @@ describe('response actions', () => {
 
 describe('markdown safety', () => {
   it('never renders raw HTML or javascript: links from model output', () => {
-    const html = renderMarkdown('<img src=x onerror=alert(1)><script>alert(1)</script> [x](javascript:alert(1)) [ok](https://example.com)');
+    const html = renderMarkdown(
+      '<img src=x onerror=alert(1)><script>alert(1)</script> [x](javascript:alert(1)) [ok](https://example.com)',
+    );
     expect(html).not.toContain('<img');
     expect(html).not.toContain('<script');
     expect(html).not.toMatch(/href="javascript:/i);
@@ -708,7 +1033,8 @@ describe('reducer', () => {
   it('caps notices and ignores patches before the first state', () => {
     let s = reducer(initialUiState, { type: 'patch', patch: { mode: 'plan' } });
     expect(s.app).toBeNull();
-    for (let i = 0; i < 5; i++) s = reducer(s, { type: 'notice', id: String(i), level: 'info', message: `n${i}` });
+    for (let i = 0; i < 5; i++)
+      s = reducer(s, { type: 'notice', id: String(i), level: 'info', message: `n${i}` });
     expect(s.notices.map((n) => n.message)).toEqual(['n2', 'n3', 'n4']);
   });
 
@@ -722,8 +1048,28 @@ describe('reducer', () => {
 describe('approval modes', () => {
   const commandApproval = (over: Partial<AppState> = {}) =>
     baseState({
-      session: { id: 's', title: 't', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'execute_terminal', arguments: '{"command":"npm run build -- --prod"}' }] }] },
-      run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'npm', callId: 'c1' } },
+      session: {
+        id: 's',
+        title: 't',
+        messages: [
+          {
+            role: 'assistant',
+            id: 'a',
+            content: '',
+            createdAt: 0,
+            toolCalls: [
+              { id: 'c1', name: 'execute_terminal', arguments: '{"command":"npm run build -- --prod"}' },
+            ],
+          },
+        ],
+      },
+      run: {
+        sessionId: 's',
+        iteration: 1,
+        maxIterations: 25,
+        startedAt: Date.now(),
+        activity: { phase: 'awaiting_approval', label: 'npm', callId: 'c1' },
+      },
       approvals: [
         {
           id: 'ap',
@@ -731,7 +1077,13 @@ describe('approval modes', () => {
           toolName: 'execute_terminal',
           title: 'npm run build -- --prod',
           reason: 'Terminal commands require approval.',
-          detail: { kind: 'command', command: 'npm run build -- --prod', cwd: '.', warnings: [], allowPrefix: 'npm run build' },
+          detail: {
+            kind: 'command',
+            command: 'npm run build -- --prod',
+            cwd: '.',
+            warnings: [],
+            allowPrefix: 'npm run build',
+          },
         },
       ],
       ...over,
@@ -742,13 +1094,19 @@ describe('approval modes', () => {
     const picker = screen.getByRole('button', { name: /Approvals: Ask/ });
     await userEvent.click(picker);
     const menu = screen.getByRole('menu', { name: 'Approvals in Act mode' });
-    expect(within(menu).getAllByRole('menuitemradio').map((i) => i.textContent)).toEqual([
+    expect(
+      within(menu)
+        .getAllByRole('menuitemradio')
+        .map((i) => i.textContent),
+    ).toEqual([
       expect.stringContaining('Ask'),
       expect.stringContaining('Auto-edit'),
       expect.stringContaining('Auto'),
     ]);
     expect(within(menu).getByRole('menuitemradio', { name: 'Ask' })).toHaveAttribute('aria-checked', 'true');
-    expect(within(menu).getByRole('menuitemradio', { name: 'Auto' })).toHaveAccessibleDescription(/risky actions still ask/);
+    expect(within(menu).getByRole('menuitemradio', { name: 'Auto' })).toHaveAccessibleDescription(
+      /risky actions still ask/,
+    );
     await userEvent.click(within(menu).getByRole('menuitemradio', { name: 'Auto' }));
     expect(sent).toContainEqual({ type: 'setApprovalMode', mode: 'auto' });
     expect(screen.queryByRole('menu')).not.toBeInTheDocument();
@@ -775,12 +1133,22 @@ describe('approval modes', () => {
     mount(baseState({ approvalMode: 'auto' }));
     expect(screen.getByRole('button', { name: /Approvals: Auto\./ })).toHaveAttribute('data-tone', 'warn');
     expect(screen.getByText('Act mode · Sovran acts without asking')).toBeInTheDocument();
-    expect(screen.getByLabelText('Message Sovran')).toHaveAttribute('placeholder', expect.stringContaining('Auto mode'));
+    expect(screen.getByLabelText('Message Sovran')).toHaveAttribute(
+      'placeholder',
+      expect.stringContaining('Auto mode'),
+    );
   });
 
   it('explains why Auto mode still asks', () => {
-    mount(commandApproval({ approvalMode: 'auto', approvals: [{ ...commandApproval().approvals[0]!, reason: 'Pushes commits to a remote repository.' }] }));
-    expect(screen.getByRole('note')).toHaveTextContent('Auto mode still asks here: Pushes commits to a remote repository.');
+    mount(
+      commandApproval({
+        approvalMode: 'auto',
+        approvals: [{ ...commandApproval().approvals[0]!, reason: 'Pushes commits to a remote repository.' }],
+      }),
+    );
+    expect(screen.getByRole('note')).toHaveTextContent(
+      'Auto mode still asks here: Pushes commits to a remote repository.',
+    );
   });
 
   it('does not repeat a reason that is already listed as a warning', () => {
@@ -804,7 +1172,14 @@ describe('approval modes', () => {
     await userEvent.clear(input);
     await userEvent.type(input, 'npm run build');
     await userEvent.click(screen.getByRole('button', { name: 'Run and always allow' }));
-    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: true, grant: undefined, feedback: undefined, allowCommand: 'npm run build' });
+    expect(sent).toContainEqual({
+      type: 'approval',
+      id: 'ap',
+      approved: true,
+      grant: undefined,
+      feedback: undefined,
+      allowCommand: 'npm run build',
+    });
   });
 
   it('labels actions that ran without asking', () => {
@@ -814,8 +1189,23 @@ describe('approval modes', () => {
           id: 's',
           title: 't',
           messages: [
-            { role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'execute_terminal', arguments: '{"command":"npm test"}' }] },
-            { role: 'tool', id: 't', toolCallId: 'c1', toolName: 'execute_terminal', content: 'ok', status: 'success', createdAt: 0, autoApproved: 'Ran without asking (Auto mode).' },
+            {
+              role: 'assistant',
+              id: 'a',
+              content: '',
+              createdAt: 0,
+              toolCalls: [{ id: 'c1', name: 'execute_terminal', arguments: '{"command":"npm test"}' }],
+            },
+            {
+              role: 'tool',
+              id: 't',
+              toolCallId: 'c1',
+              toolName: 'execute_terminal',
+              content: 'ok',
+              status: 'success',
+              createdAt: 0,
+              autoApproved: 'Ran without asking (Auto mode).',
+            },
           ],
         },
       }),
@@ -824,7 +1214,15 @@ describe('approval modes', () => {
   });
 
   it('never presents a file outside the workspace as included', () => {
-    mount(baseState({ context: { editor: { path: '/home/u/.aws/credentials', label: 'credentials', blocked: 'outside' }, includeEditor: true, attachments: [] } }));
+    mount(
+      baseState({
+        context: {
+          editor: { path: '/home/u/.aws/credentials', label: 'credentials', blocked: 'outside' },
+          includeEditor: true,
+          attachments: [],
+        },
+      }),
+    );
     const chip = screen.getByLabelText(/outside the workspace, so it is not shared/);
     expect(chip.tagName).toBe('SPAN');
     expect(screen.queryByRole('button', { name: /credentials/ })).not.toBeInTheDocument();
@@ -836,8 +1234,25 @@ describe('settings view', () => {
     baseState({
       view: 'settings',
       providers: [
-        { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }, { id: 'thinker', toolMode: 'auto' }] },
-        { id: 'corp', name: 'Corp', baseUrl: 'http://gw.corp.example/v1', authType: 'bearer', hasKey: true, models: [{ id: 'big', toolMode: 'auto' }] },
+        {
+          id: 'local',
+          name: 'Local',
+          baseUrl: 'http://localhost:1234/v1',
+          authType: 'none',
+          hasKey: false,
+          models: [
+            { id: 'coder', toolMode: 'auto' },
+            { id: 'thinker', toolMode: 'auto' },
+          ],
+        },
+        {
+          id: 'corp',
+          name: 'Corp',
+          baseUrl: 'http://gw.corp.example/v1',
+          authType: 'bearer',
+          hasKey: true,
+          models: [{ id: 'big', toolMode: 'auto' }],
+        },
       ],
       ...over,
     });
@@ -846,9 +1261,18 @@ describe('settings view', () => {
 
   it('keeps the six areas on screen and shows only the selected one', async () => {
     mount(settingsState());
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Models', 'Approvals', 'Agent', 'MCP', 'Context', 'Data']);
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
+      'Models',
+      'Approvals',
+      'Agent',
+      'MCP',
+      'Context',
+      'Data',
+    ]);
     expect(tab('Models')).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tabpanel', { name: 'Models' })).toContainElement(screen.getByLabelText('Act model'));
+    expect(screen.getByRole('tabpanel', { name: 'Models' })).toContainElement(
+      screen.getByLabelText('Act model'),
+    );
     expect(screen.queryByLabelText('Allowed commands')).not.toBeInTheDocument();
 
     await openArea('Approvals');
@@ -905,7 +1329,10 @@ describe('settings view', () => {
     const view = mount(settingsState({ settings: { ...baseState().settings, generateTitles: false } }));
     expect(screen.queryByLabelText('Title model')).not.toBeInTheDocument();
     await userEvent.click(screen.getByLabelText(/Name chats with the model/));
-    expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'sessions.generateTitles', value: true } });
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'sessions.generateTitles', value: true },
+    });
 
     host({ type: 'patch', patch: { settings: { ...settingsState().settings, generateTitles: true } } });
     const title = screen.getByLabelText('Title model');
@@ -913,7 +1340,10 @@ describe('settings view', () => {
     expect(within(title).getByRole('option', { name: "Same as the chat's model" })).toBeInTheDocument();
     await userEvent.selectOptions(title, within(title).getByRole('option', { name: 'coder' }));
     expect(sent).toContainEqual({ type: 'setModel', role: 'title', providerId: 'local', modelId: 'coder' });
-    await userEvent.selectOptions(title, within(title).getByRole('option', { name: "Same as the chat's model" }));
+    await userEvent.selectOptions(
+      title,
+      within(title).getByRole('option', { name: "Same as the chat's model" }),
+    );
     expect(sent).toContainEqual({ type: 'setModel', role: 'title' });
     view.unmount();
   });
@@ -928,7 +1358,11 @@ describe('settings view', () => {
   });
 
   it('shows the sync with Settings and lets the user stop using the file', async () => {
-    mount(settingsState({ configFile: { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] } }));
+    mount(
+      settingsState({
+        configFile: { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] },
+      }),
+    );
     expect(screen.getByText('In sync with Settings · 2 providers')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(sent).toContainEqual({ type: 'reloadConfigFile' });
@@ -939,16 +1373,29 @@ describe('settings view', () => {
   it('lists the problems of a broken file and keeps the way back to Settings', async () => {
     mount(
       settingsState({
-        configFile: { path: '~/.sovran/config.yaml', state: 'error', providers: 1, problems: [{ line: 7, message: 'Unknown field "base_url". Did you mean "baseUrl"?' }] },
+        configFile: {
+          path: '~/.sovran/config.yaml',
+          state: 'error',
+          providers: 1,
+          problems: [{ line: 7, message: 'Unknown field "base_url". Did you mean "baseUrl"?' }],
+        },
       }),
     );
     expect(screen.getByText(/Settings keep the last valid version \(1 provider\)/)).toBeInTheDocument();
-    expect(within(screen.getByRole('list', { name: 'Problems in the configuration file' })).getByText(/Did you mean "baseUrl"/)).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('list', { name: 'Problems in the configuration file' })).getByText(
+        /Did you mean "baseUrl"/,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stop using config.yaml…' })).toBeInTheDocument();
   });
 
   it('uses an ignored file again on request', async () => {
-    mount(settingsState({ configFile: { path: '~/.sovran/config.yaml', state: 'ignored', providers: 0, problems: [] } }));
+    mount(
+      settingsState({
+        configFile: { path: '~/.sovran/config.yaml', state: 'ignored', providers: 0, problems: [] },
+      }),
+    );
     expect(screen.getByText('Ignored · Settings are used alone')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Stop using/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Use config.yaml again' }));
@@ -972,9 +1419,15 @@ describe('settings view', () => {
     expect(screen.getByText(/Shell operators such as/)).toBeInTheDocument();
     await userEvent.clear(input);
     await userEvent.type(input, 'cargo test{Enter}');
-    expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'approvals.allowedCommands', value: ['npm test', 'cargo test'] } });
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'approvals.allowedCommands', value: ['npm test', 'cargo test'] },
+    });
     await userEvent.click(screen.getByRole('button', { name: 'Remove npm test' }));
-    expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'approvals.allowedCommands', value: [] } });
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'approvals.allowedCommands', value: [] },
+    });
   });
 
   it('edits native tool controls and rejects invalid tool names', async () => {
@@ -1003,7 +1456,10 @@ describe('settings view', () => {
     mount(settingsState());
     await openArea('Context');
     await userEvent.click(screen.getByLabelText(/Attach the active file/));
-    expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'context.includeActiveEditor', value: false } });
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'context.includeActiveEditor', value: false },
+    });
     await openArea('Agent');
     const steps = screen.getByLabelText('Maximum steps per request');
     await userEvent.clear(steps);
@@ -1011,14 +1467,24 @@ describe('settings view', () => {
     expect(screen.getByText('Enter a number from 1 to 200.')).toBeInTheDocument();
     await userEvent.clear(steps);
     await userEvent.type(steps, '40{Enter}');
-    expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'agent.maxIterations', value: 40 } });
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'agent.maxIterations', value: 40 },
+    });
     await openArea('Approvals');
     await userEvent.click(screen.getByRole('button', { name: 'Restore defaults' }));
-    expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'security.protectedPaths', value: ['**/.env', '**/*.pem'] } });
+    expect(sent).toContainEqual({
+      type: 'updateSetting',
+      setting: { key: 'security.protectedPaths', value: ['**/.env', '**/*.pem'] },
+    });
   });
 
   it('notes settings overridden by the workspace', async () => {
-    mount(settingsState({ settings: { ...baseState().settings, overriddenByWorkspace: ['agent.maxIterations'] } }));
+    mount(
+      settingsState({
+        settings: { ...baseState().settings, overriddenByWorkspace: ['agent.maxIterations'] },
+      }),
+    );
     await openArea('Agent');
     expect(screen.getAllByText(/This workspace overrides this setting/)).toHaveLength(1);
   });
@@ -1028,14 +1494,27 @@ describe('model limits', () => {
   const withLimits = (models: AppState['providers'][number]['models']) =>
     baseState({
       view: 'providers',
-      providers: [{ id: 'gw', name: 'Gateway', baseUrl: 'https://gw.example/v1', authType: 'bearer', hasKey: true, models }],
+      providers: [
+        {
+          id: 'gw',
+          name: 'Gateway',
+          baseUrl: 'https://gw.example/v1',
+          authType: 'bearer',
+          hasKey: true,
+          models,
+        },
+      ],
       selected: { providerId: 'gw', modelId: models[0]!.id },
     });
 
   it('shows what an empty limit means, and saves typed and cleared limits', async () => {
     mount(
       withLimits([
-        { id: 'glm-5.3-flash', toolMode: 'auto', serverLimits: { contextWindow: 131072, maxOutputTokens: 32768 } },
+        {
+          id: 'glm-5.3-flash',
+          toolMode: 'auto',
+          serverLimits: { contextWindow: 131072, maxOutputTokens: 32768 },
+        },
         { id: 'local', toolMode: 'auto', contextWindow: 16384 },
       ]),
     );
@@ -1043,17 +1522,27 @@ describe('model limits', () => {
     const glmCtx = screen.getByLabelText('Context window for glm-5.3-flash');
     expect(glmCtx).toHaveAttribute('placeholder', '131072');
     expect(glmCtx.closest('label')).toHaveTextContent('Context · server');
-    expect(screen.getByLabelText('Max output tokens for glm-5.3-flash')).toHaveAttribute('placeholder', '4096');
-    expect(screen.getByLabelText('Max output tokens for glm-5.3-flash').closest('label')).toHaveTextContent('Max output · default');
+    expect(screen.getByLabelText('Max output tokens for glm-5.3-flash')).toHaveAttribute(
+      'placeholder',
+      '4096',
+    );
+    expect(screen.getByLabelText('Max output tokens for glm-5.3-flash').closest('label')).toHaveTextContent(
+      'Max output · default',
+    );
     expect(screen.getByLabelText('Max output tokens for local')).toHaveAttribute('placeholder', '4096');
     // A value typed by the user needs no source.
-    expect(screen.getByLabelText('Context window for local').closest('label')!.querySelector('span')).toHaveTextContent(/^Context$/);
+    expect(
+      screen.getByLabelText('Context window for local').closest('label')!.querySelector('span'),
+    ).toHaveTextContent(/^Context$/);
     expect(screen.getByLabelText('Context window for local')).toHaveValue('16384');
 
     await userEvent.type(screen.getByLabelText('Max output tokens for glm-5.3-flash'), '8192');
     await userEvent.clear(screen.getByLabelText('Context window for local'));
     await userEvent.click(screen.getByRole('button', { name: 'Save provider' }));
-    const save = sent.find((m) => m.type === 'saveProvider') as Extract<WebviewMessage, { type: 'saveProvider' }>;
+    const save = sent.find((m) => m.type === 'saveProvider') as Extract<
+      WebviewMessage,
+      { type: 'saveProvider' }
+    >;
     expect(save.provider.models).toEqual([
       { id: 'glm-5.3-flash', contextWindow: undefined, maxOutputTokens: 8192, toolMode: 'auto' },
       { id: 'local', contextWindow: undefined, maxOutputTokens: undefined, toolMode: 'auto' },
@@ -1067,19 +1556,45 @@ describe('model limits', () => {
   });
 
   it('tells in Settings which limits the selected model uses and where they come from', () => {
-    mount({ ...withLimits([{ id: 'glm-5.3-flash', toolMode: 'auto', serverLimits: { contextWindow: 131072 } }]), view: 'settings' });
-    expect(screen.getAllByTestId('model-limits')[0]).toHaveTextContent('Context 131,072 tokens (reported by the server) · 4,096 kept for the reply (default)');
+    mount({
+      ...withLimits([{ id: 'glm-5.3-flash', toolMode: 'auto', serverLimits: { contextWindow: 131072 } }]),
+      view: 'settings',
+    });
+    expect(screen.getAllByTestId('model-limits')[0]).toHaveTextContent(
+      'Context 131,072 tokens (reported by the server) · 4,096 kept for the reply (default)',
+    );
   });
 });
 
 describe('providers and the configuration file', () => {
   const twoProviders: AppState['providers'] = [
-    { id: 'local', name: 'Local', baseUrl: 'http://localhost:1234/v1', authType: 'none', hasKey: false, models: [{ id: 'coder', toolMode: 'auto' }] },
-    { id: 'gw', name: 'Gateway', baseUrl: 'https://gw.example/v1', authType: 'header', headerName: 'api-key', hasKey: true, models: [{ id: 'm', toolMode: 'auto' }] },
+    {
+      id: 'local',
+      name: 'Local',
+      baseUrl: 'http://localhost:1234/v1',
+      authType: 'none',
+      hasKey: false,
+      models: [{ id: 'coder', toolMode: 'auto' }],
+    },
+    {
+      id: 'gw',
+      name: 'Gateway',
+      baseUrl: 'https://gw.example/v1',
+      authType: 'header',
+      headerName: 'api-key',
+      hasKey: true,
+      models: [{ id: 'm', toolMode: 'auto' }],
+    },
   ];
 
   it('edits every provider in the panel and says when the file follows', async () => {
-    mount(baseState({ view: 'providers', providers: twoProviders, configFile: { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] } }));
+    mount(
+      baseState({
+        view: 'providers',
+        providers: twoProviders,
+        configFile: { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] },
+      }),
+    );
     expect(screen.getByRole('note')).toHaveTextContent('In sync with ~/.sovran/config.yaml');
     for (const name of ['Local', 'Gateway']) {
       const card = screen.getByRole('region', { name });
@@ -1087,7 +1602,9 @@ describe('providers and the configuration file', () => {
       expect(within(card).getByRole('button', { name: `Remove ${name}` })).toBeInTheDocument();
     }
     // A non-standard key header is visible at a glance.
-    expect(within(screen.getByRole('region', { name: 'Gateway' })).getByText('Header api-key')).toBeInTheDocument();
+    expect(
+      within(screen.getByRole('region', { name: 'Gateway' })).getByText('Header api-key'),
+    ).toBeInTheDocument();
   });
 
   it('has no sync note without the file', () => {
@@ -1099,11 +1616,19 @@ describe('providers and the configuration file', () => {
     mount(baseState({ view: 'providers', providers: twoProviders }));
     await userEvent.click(screen.getByRole('button', { name: 'Add' }));
     const auth = screen.getByRole('radiogroup', { name: 'Authentication' });
-    expect(within(auth).getAllByRole('radio').map((r) => r.textContent)).toEqual(['API key', 'Custom header', 'None']);
+    expect(
+      within(auth)
+        .getAllByRole('radio')
+        .map((r) => r.textContent),
+    ).toEqual(['API key', 'Custom header', 'None']);
     expect(within(auth).getByRole('radio', { name: 'API key' })).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByText(/Sent as "Authorization: Bearer <key>", the OpenAI standard/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Sent as "Authorization: Bearer <key>", the OpenAI standard/),
+    ).toBeInTheDocument();
     await userEvent.click(within(auth).getByRole('radio', { name: 'Custom header' }));
-    expect(screen.getByText(/Sent as "api-key: <key>"\. Use it only if your gateway documents this header/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Sent as "api-key: <key>"\. Use it only if your gateway documents this header/),
+    ).toBeInTheDocument();
   });
 });
 
@@ -1114,20 +1639,52 @@ describe('guided setup', () => {
     await userEvent.click(screen.getByRole('button', { name: /Ollama/ }));
     expect(screen.getByLabelText('Base URL')).toHaveValue('http://localhost:11434/v1');
     await userEvent.click(screen.getByRole('button', { name: 'Connect' }));
-    const save = sent.find((m) => m.type === 'saveProvider') as Extract<WebviewMessage, { type: 'saveProvider' }>;
-    expect(save.provider).toMatchObject({ name: 'Ollama', baseUrl: 'http://localhost:11434/v1', authType: 'none', models: [] });
+    const save = sent.find((m) => m.type === 'saveProvider') as Extract<
+      WebviewMessage,
+      { type: 'saveProvider' }
+    >;
+    expect(save.provider).toMatchObject({
+      name: 'Ollama',
+      baseUrl: 'http://localhost:11434/v1',
+      authType: 'none',
+      models: [],
+    });
     expect(screen.getByText('Connecting…')).toBeInTheDocument();
 
     // The host saves the provider (the app now has one), then reports the connection test.
-    host({ type: 'patch', patch: { providers: [{ id: 'ollama', name: 'Ollama', baseUrl: 'http://localhost:11434/v1', authType: 'none', hasKey: false, models: [] }] } });
+    host({
+      type: 'patch',
+      patch: {
+        providers: [
+          {
+            id: 'ollama',
+            name: 'Ollama',
+            baseUrl: 'http://localhost:11434/v1',
+            authType: 'none',
+            hasKey: false,
+            models: [],
+          },
+        ],
+      },
+    });
     host({ type: 'providerSaved', requestId: save.requestId!, providerId: 'ollama' });
     expect(screen.getByText('Connecting…')).toBeInTheDocument();
-    host({ type: 'providerTest', requestId: save.requestId!, providerId: 'ollama', result: { ok: true, models: ['qwen2.5-coder:14b', 'llama3.1:8b'], message: 'Connected' } });
+    host({
+      type: 'providerTest',
+      requestId: save.requestId!,
+      providerId: 'ollama',
+      result: { ok: true, models: ['qwen2.5-coder:14b', 'llama3.1:8b'], message: 'Connected' },
+    });
 
     expect(screen.getByRole('heading', { name: 'Choose a model' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('radio', { name: 'llama3.1:8b' }));
     await userEvent.click(screen.getByRole('button', { name: 'Start chatting' }));
-    expect(sent).toContainEqual({ type: 'addModels', providerId: 'ollama', modelIds: ['llama3.1:8b'], select: 'llama3.1:8b' });
+    expect(sent).toContainEqual({
+      type: 'addModels',
+      providerId: 'ollama',
+      modelIds: ['llama3.1:8b'],
+      select: 'llama3.1:8b',
+    });
     expect(screen.getByLabelText('Message Sovran')).toBeInTheDocument();
   });
 
@@ -1140,14 +1697,27 @@ describe('guided setup', () => {
     await userEvent.type(screen.getByLabelText('Base URL'), 'http://gw.corp.example/v1');
     expect(screen.getByRole('note')).toHaveTextContent('unencrypted');
     await userEvent.click(screen.getByRole('button', { name: 'Connect' }));
-    const save = [...sent].reverse().find((m) => m.type === 'saveProvider') as Extract<WebviewMessage, { type: 'saveProvider' }>;
+    const save = [...sent].reverse().find((m) => m.type === 'saveProvider') as Extract<
+      WebviewMessage,
+      { type: 'saveProvider' }
+    >;
     host({ type: 'providerSaved', requestId: save.requestId!, providerId: 'corp' });
-    host({ type: 'providerTest', requestId: save.requestId!, providerId: 'corp', result: { ok: false, message: 'HTTP 404: Not Found', hint: 'Add model IDs manually.' } });
+    host({
+      type: 'providerTest',
+      requestId: save.requestId!,
+      providerId: 'corp',
+      result: { ok: false, message: 'HTTP 404: Not Found', hint: 'Add model IDs manually.' },
+    });
     expect(screen.getByRole('alert')).toHaveTextContent('HTTP 404');
     await userEvent.click(screen.getByRole('button', { name: 'Enter a model ID instead' }));
     await userEvent.type(screen.getByLabelText('Model ID'), 'coder-large');
     await userEvent.click(screen.getByRole('button', { name: 'Start chatting' }));
-    expect(sent).toContainEqual({ type: 'addModels', providerId: 'corp', modelIds: ['coder-large'], select: 'coder-large' });
+    expect(sent).toContainEqual({
+      type: 'addModels',
+      providerId: 'corp',
+      modelIds: ['coder-large'],
+      select: 'coder-large',
+    });
   });
 });
 
@@ -1159,11 +1729,38 @@ describe('approval shortcuts', () => {
         title: 't',
         messages: [
           { role: 'user', id: 'u', content: 'edit', createdAt: 0 },
-          { role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'edit_file', arguments: '{"path":"src/a.ts"}' }] },
+          {
+            role: 'assistant',
+            id: 'a',
+            content: '',
+            createdAt: 0,
+            toolCalls: [{ id: 'c1', name: 'edit_file', arguments: '{"path":"src/a.ts"}' }],
+          },
         ],
       },
-      run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'src/a.ts', callId: 'c1' } },
-      approvals: [{ id: 'ap', callId: 'c1', toolName: 'edit_file', title: 'src/a.ts', detail: { kind: 'edit', path: 'src/a.ts', isNew: false, diff: '@@ -1 +1 @@\n-a\n+b', added: 1, removed: 1 } }],
+      run: {
+        sessionId: 's',
+        iteration: 1,
+        maxIterations: 25,
+        startedAt: Date.now(),
+        activity: { phase: 'awaiting_approval', label: 'src/a.ts', callId: 'c1' },
+      },
+      approvals: [
+        {
+          id: 'ap',
+          callId: 'c1',
+          toolName: 'edit_file',
+          title: 'src/a.ts',
+          detail: {
+            kind: 'edit',
+            path: 'src/a.ts',
+            isNew: false,
+            diff: '@@ -1 +1 @@\n-a\n+b',
+            added: 1,
+            removed: 1,
+          },
+        },
+      ],
       ...over,
     });
   const decisions = () => sent.filter((m) => m.type === 'approval');
@@ -1187,13 +1784,17 @@ describe('approval shortcuts', () => {
     fireEvent.keyDown(composer(), { key: 'Enter', repeat: true });
     expect(decisions()).toEqual([]);
     fireEvent.keyDown(composer(), { key: 'Enter' });
-    expect(decisions()).toEqual([{ type: 'approval', id: 'ap', approved: true, grant: undefined, feedback: undefined }]);
+    expect(decisions()).toEqual([
+      { type: 'approval', id: 'ap', approved: true, grant: undefined, feedback: undefined },
+    ]);
   });
 
   it('rejects with Escape at once, and Escape no longer stops the whole run while a decision waits', async () => {
     mount(editApproval());
     fireEvent.keyDown(composer(), { key: 'Escape' });
-    expect(decisions()).toEqual([{ type: 'approval', id: 'ap', approved: false, grant: undefined, feedback: undefined }]);
+    expect(decisions()).toEqual([
+      { type: 'approval', id: 'ap', approved: false, grant: undefined, feedback: undefined },
+    ]);
     expect(sent).not.toContainEqual({ type: 'cancel' });
   });
 
@@ -1219,14 +1820,20 @@ describe('approval shortcuts', () => {
     const box = screen.getByRole('checkbox', { name: /without asking/ });
     fireEvent.click(box);
     fireEvent.keyDown(box, { key: 'Enter' });
-    expect(decisions()).toEqual([{ type: 'approval', id: 'ap', approved: true, grant: 'session-edits', feedback: undefined }]);
+    expect(decisions()).toEqual([
+      { type: 'approval', id: 'ap', approved: true, grant: 'session-edits', feedback: undefined },
+    ]);
   });
 
   it('shows what the keys do in the input hint and announces them', () => {
     mount(editApproval());
     expect(screen.getByText('approve').closest('.sv-composer__keys')).toHaveTextContent('↵ approve');
     expect(screen.getByText('reject').closest('.sv-composer__keys')).toHaveTextContent('Esc reject');
-    expect(screen.getByText(/waiting for your approval: Apply these changes\? Press Enter to apply or Escape to reject/)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /waiting for your approval: Apply these changes\? Press Enter to apply or Escape to reject/,
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Apply' })).toHaveAttribute('aria-keyshortcuts', 'Enter');
   });
 
@@ -1265,12 +1872,42 @@ describe('approvalKey', () => {
 describe('native Web approval', () => {
   it('shows the complete URL and scope in Auto with only a one-time approval', async () => {
     const url = 'https://example.com/docs?topic=auth';
-    mount(baseState({
-      approvalMode: 'auto', mode: 'plan',
-      session: { id: 's', title: 'Web', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'web_fetch', arguments: JSON.stringify({ url }) }] }] },
-      run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: url, callId: 'c1' } },
-      approvals: [{ id: 'ap', callId: 'c1', toolName: 'web_fetch', title: url, reason: 'Public Web access requires approval for each URL.', detail: { kind: 'web', url } }],
-    }));
+    mount(
+      baseState({
+        approvalMode: 'auto',
+        mode: 'plan',
+        session: {
+          id: 's',
+          title: 'Web',
+          messages: [
+            {
+              role: 'assistant',
+              id: 'a',
+              content: '',
+              createdAt: 0,
+              toolCalls: [{ id: 'c1', name: 'web_fetch', arguments: JSON.stringify({ url }) }],
+            },
+          ],
+        },
+        run: {
+          sessionId: 's',
+          iteration: 1,
+          maxIterations: 25,
+          startedAt: Date.now(),
+          activity: { phase: 'awaiting_approval', label: url, callId: 'c1' },
+        },
+        approvals: [
+          {
+            id: 'ap',
+            callId: 'c1',
+            toolName: 'web_fetch',
+            title: url,
+            reason: 'Public Web access requires approval for each URL.',
+            detail: { kind: 'web', url },
+          },
+        ],
+      }),
+    );
     const bar = screen.getByRole('region', { name: 'Read this public web page?' });
     expect(within(bar).getByText(url)).toBeInTheDocument();
     expect(within(bar).getByText(/Reads this public URL and its robots.txt/)).toBeInTheDocument();
@@ -1282,30 +1919,88 @@ describe('native Web approval', () => {
 });
 
 describe('native Git approvals', () => {
-  it.each(['stage', 'unstage', 'commit'] as const)('shows repository/files and requires one-time approval for %s', async (operation) => {
-    const verb = { stage: 'Stage', unstage: 'Unstage', commit: 'Commit' }[operation];
-    mount(baseState({
-      approvalMode: 'auto',
-      session: { id: 's', title: 'Git', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: `git_${operation}`, arguments: '{}' }] }] },
-      run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'Git', callId: 'c1' } },
-      approvals: [{ id: 'ap', callId: 'c1', toolName: `git_${operation}`, title: 'Git', reason: 'Git writes always ask.', detail: { kind: 'git', operation, repository: 'app', branch: 'refs/heads/main', files: ['src/a.ts'], ...(operation === 'commit' ? { message: 'feat: reviewed\n\nLiteral $(touch forbidden)' } : {}), preview: '@@ -1 +1 @@\n-old\n+new', warnings: ['Hooks and signing may run programs.', 'Git changes have no checkpoint undo.'] } }],
-    }));
-    const bar = screen.getByRole('region', { name: operation === 'commit' ? 'Commit these staged changes?' : `${verb} these files?` });
-    expect(within(bar).getByText(/refs\/heads\/main/)).toBeInTheDocument();
-    expect(within(bar).getByText('Hooks and signing may run programs.')).toBeInTheDocument();
-    expect(screen.getByRole('list', { name: 'Files included in the Git action' })).toHaveTextContent('src/a.ts');
-    if (operation === 'commit') expect(screen.getByLabelText('Commit message')).toHaveTextContent('Literal $(touch forbidden)');
-    expect(within(bar).queryByRole('button', { name: /Always allow/ })).not.toBeInTheDocument();
-    expect(within(bar).queryByRole('checkbox')).not.toBeInTheDocument();
-    await userEvent.click(within(bar).getByRole('button', { name: verb }));
-    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: true, feedback: undefined });
-  });
+  it.each(['stage', 'unstage', 'commit'] as const)(
+    'shows repository/files and requires one-time approval for %s',
+    async (operation) => {
+      const verb = { stage: 'Stage', unstage: 'Unstage', commit: 'Commit' }[operation];
+      mount(
+        baseState({
+          approvalMode: 'auto',
+          session: {
+            id: 's',
+            title: 'Git',
+            messages: [
+              {
+                role: 'assistant',
+                id: 'a',
+                content: '',
+                createdAt: 0,
+                toolCalls: [{ id: 'c1', name: `git_${operation}`, arguments: '{}' }],
+              },
+            ],
+          },
+          run: {
+            sessionId: 's',
+            iteration: 1,
+            maxIterations: 25,
+            startedAt: Date.now(),
+            activity: { phase: 'awaiting_approval', label: 'Git', callId: 'c1' },
+          },
+          approvals: [
+            {
+              id: 'ap',
+              callId: 'c1',
+              toolName: `git_${operation}`,
+              title: 'Git',
+              reason: 'Git writes always ask.',
+              detail: {
+                kind: 'git',
+                operation,
+                repository: 'app',
+                branch: 'refs/heads/main',
+                files: ['src/a.ts'],
+                ...(operation === 'commit'
+                  ? { message: 'feat: reviewed\n\nLiteral $(touch forbidden)' }
+                  : {}),
+                preview: '@@ -1 +1 @@\n-old\n+new',
+                warnings: ['Hooks and signing may run programs.', 'Git changes have no checkpoint undo.'],
+              },
+            },
+          ],
+        }),
+      );
+      const bar = screen.getByRole('region', {
+        name: operation === 'commit' ? 'Commit these staged changes?' : `${verb} these files?`,
+      });
+      expect(within(bar).getByText(/refs\/heads\/main/)).toBeInTheDocument();
+      expect(within(bar).getByText('Hooks and signing may run programs.')).toBeInTheDocument();
+      expect(screen.getByRole('list', { name: 'Files included in the Git action' })).toHaveTextContent(
+        'src/a.ts',
+      );
+      if (operation === 'commit')
+        expect(screen.getByLabelText('Commit message')).toHaveTextContent('Literal $(touch forbidden)');
+      expect(within(bar).queryByRole('button', { name: /Always allow/ })).not.toBeInTheDocument();
+      expect(within(bar).queryByRole('checkbox')).not.toBeInTheDocument();
+      await userEvent.click(within(bar).getByRole('button', { name: verb }));
+      expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: true, feedback: undefined });
+    },
+  );
 });
 
 describe('diff view', () => {
   it('numbers lines, keeps removed lines that look like headers and expands long diffs', async () => {
     const { parseDiff } = await import('./components/Diff');
-    const diff = ['===', '--- a/q.sql\t', '+++ b/q.sql\t', '@@ -10,3 +10,3 @@', ' select 1;', '--- a comment', '+-- the comment', ' end;', '\\ No newline at end of file'].join('\n');
+    const diff = [
+      '===',
+      '--- a/q.sql\t',
+      '+++ b/q.sql\t',
+      '@@ -10,3 +10,3 @@',
+      ' select 1;',
+      '--- a comment',
+      '+-- the comment',
+      ' end;',
+      '\\ No newline at end of file',
+    ].join('\n');
     expect(parseDiff(diff)).toEqual([
       { kind: 'hunk', text: '@@ -10,3 +10,3 @@' },
       { kind: 'ctx', text: 'select 1;', line: 10 },
@@ -1318,9 +2013,35 @@ describe('diff view', () => {
     const long = ['@@ -1,0 +1,100 @@', ...Array.from({ length: 100 }, (_, i) => `+line ${i}`)].join('\n');
     mount(
       baseState({
-        session: { id: 's', title: 't', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'write_file', arguments: '{"path":"big.ts"}' }] }] },
-        run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'big.ts', callId: 'c1' } },
-        approvals: [{ id: 'ap', callId: 'c1', toolName: 'write_file', title: 'big.ts', detail: { kind: 'edit', path: 'big.ts', isNew: true, diff: long, added: 100, removed: 0 } }],
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            {
+              role: 'assistant',
+              id: 'a',
+              content: '',
+              createdAt: 0,
+              toolCalls: [{ id: 'c1', name: 'write_file', arguments: '{"path":"big.ts"}' }],
+            },
+          ],
+        },
+        run: {
+          sessionId: 's',
+          iteration: 1,
+          maxIterations: 25,
+          startedAt: Date.now(),
+          activity: { phase: 'awaiting_approval', label: 'big.ts', callId: 'c1' },
+        },
+        approvals: [
+          {
+            id: 'ap',
+            callId: 'c1',
+            toolName: 'write_file',
+            title: 'big.ts',
+            detail: { kind: 'edit', path: 'big.ts', isNew: true, diff: long, added: 100, removed: 0 },
+          },
+        ],
       }),
     );
     expect(screen.getByRole('region', { name: 'Create this file?' })).toBeInTheDocument();
@@ -1363,7 +2084,18 @@ describe('chats in editor tabs', () => {
 });
 
 describe('pinned message', () => {
-  const rect = (top: number, height = 40) => ({ top, bottom: top + height, left: 0, right: 300, width: 300, height, x: 0, y: top, toJSON: () => ({}) }) as DOMRect;
+  const rect = (top: number, height = 40) =>
+    ({
+      top,
+      bottom: top + height,
+      left: 0,
+      right: 300,
+      width: 300,
+      height,
+      x: 0,
+      y: top,
+      toJSON: () => ({}),
+    }) as DOMRect;
   /** A scroll area whose top edge is at y = 100, holding your messages at the given tops. */
   const layout = (tops: number[]) => {
     const scroller = document.createElement('div');
@@ -1393,7 +2125,8 @@ describe('pinned message', () => {
   });
 
   it('shows your message above its answer while scrolling, and goes back to it when selected', async () => {
-    const long = 'Explain the retry logic and every place it is used, with the configuration that controls it';
+    const long =
+      'Explain the retry logic and every place it is used, with the configuration that controls it';
     mount(
       baseState({
         session: {
@@ -1456,8 +2189,21 @@ describe('MCP servers', () => {
     server: { name: 'github-mcp-server', version: '1.4.2' },
     toolTokens: 2140,
     tools: [
-      { name: 'search_issues', title: 'Search issues', modelName: 'mcp__github__search_issues', policy: 'allow', hints: ['read-only'], description: 'Search issues.' },
-      { name: 'merge_pull_request', modelName: 'mcp__github__merge_pull_request', policy: 'off', hints: ['destructive'], description: 'Merges a pull request.' },
+      {
+        name: 'search_issues',
+        title: 'Search issues',
+        modelName: 'mcp__github__search_issues',
+        policy: 'allow',
+        hints: ['read-only'],
+        description: 'Search issues.',
+      },
+      {
+        name: 'merge_pull_request',
+        modelName: 'mcp__github__merge_pull_request',
+        policy: 'off',
+        hints: ['destructive'],
+        description: 'Merges a pull request.',
+      },
     ],
   };
   const jira: McpServerView = {
@@ -1502,7 +2248,10 @@ describe('MCP servers', () => {
 
   it('lists the tools with what the server says about them and lets the user choose what each may do', async () => {
     open([github]);
-    expect(screen.getByText('~2.1k tokens')).toHaveAttribute('title', 'Estimated tokens the offered tools add to every request');
+    expect(screen.getByText('~2.1k tokens')).toHaveAttribute(
+      'title',
+      'Estimated tokens the offered tools add to every request',
+    );
     await userEvent.click(screen.getByRole('button', { name: /2 tools · 1 offered · 1 allowed/ }));
     const tools = screen.getByRole('list', { name: 'Tools of GitHub' });
     expect(within(tools).getByText('read-only')).toBeInTheDocument();
@@ -1510,11 +2259,21 @@ describe('MCP servers', () => {
     const merge = screen.getByRole('radiogroup', { name: 'merge_pull_request: when the agent uses it' });
     expect(within(merge).getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true');
     await userEvent.click(within(merge).getByRole('radio', { name: 'Ask' }));
-    expect(sent).toContainEqual({ type: 'setMcpToolPolicy', id: 'github', tool: 'merge_pull_request', policy: 'ask' });
+    expect(sent).toContainEqual({
+      type: 'setMcpToolPolicy',
+      id: 'github',
+      tool: 'merge_pull_request',
+      policy: 'ask',
+    });
     const search = screen.getByRole('radiogroup', { name: 'Search issues: when the agent uses it' });
     within(search).getByRole('radio', { name: 'Allow' }).focus();
     await userEvent.keyboard('{ArrowLeft}');
-    expect(sent).toContainEqual({ type: 'setMcpToolPolicy', id: 'github', tool: 'search_issues', policy: 'ask' });
+    expect(sent).toContainEqual({
+      type: 'setMcpToolPolicy',
+      id: 'github',
+      tool: 'search_issues',
+      policy: 'ask',
+    });
   });
 
   it('uses native Git instead of the basic preset and preserves saved Git MCP servers', async () => {
@@ -1522,12 +2281,26 @@ describe('MCP servers', () => {
     const presets = screen.getByRole('list', { name: 'Integration catalog' });
     expect(within(presets).queryByRole('button', { name: /^Git\b/ })).not.toBeInTheDocument();
     unmount();
-    open([{ ...jira, id: 'legacygit', name: 'Git', command: 'uvx', args: ['mcp-server-git', '--repository', '${workspaceFolder}'], status: 'connected', error: undefined }]);
+    open([
+      {
+        ...jira,
+        id: 'legacygit',
+        name: 'Git',
+        command: 'uvx',
+        args: ['mcp-server-git', '--repository', '${workspaceFolder}'],
+        status: 'connected',
+        error: undefined,
+      },
+    ]);
     const saved = screen.getByRole('region', { name: 'Git' });
     expect(within(saved).getByText(/mcp-server-git/)).toBeInTheDocument();
-    expect(sent.some((message) => message.type === 'deleteMcpServer' || message.type === 'saveMcpServer')).toBe(false);
+    expect(
+      sent.some((message) => message.type === 'deleteMcpServer' || message.type === 'saveMcpServer'),
+    ).toBe(false);
     await userEvent.click(within(saved).getByRole('button', { name: 'Edit Git' }));
-    expect(screen.getByLabelText('Arguments')).toHaveValue('mcp-server-git\n--repository\n${workspaceFolder}');
+    expect(screen.getByLabelText('Arguments')).toHaveValue(
+      'mcp-server-git\n--repository\n${workspaceFolder}',
+    );
   });
 
   it('selects catalog metadata without installing, launching or saving anything', async () => {
@@ -1535,10 +2308,24 @@ describe('MCP servers', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Playwright MCP' }));
     expect(screen.getByRole('region', { name: 'Playwright MCP setup' })).toBeInTheDocument();
     expect(screen.getByText(/Node.js 20/)).toBeInTheDocument();
-    expect(sent.some((message) => ['installMcpIntegration', 'addMcpIntegration', 'setMcpServerEnabled', 'saveMcpServer'].includes(message.type))).toBe(false);
+    expect(
+      sent.some((message) =>
+        ['installMcpIntegration', 'addMcpIntegration', 'setMcpServerEnabled', 'saveMcpServer'].includes(
+          message.type,
+        ),
+      ),
+    ).toBe(false);
     await userEvent.click(screen.getByRole('button', { name: 'Add integration' }));
-    expect(sent).toContainEqual({ type: 'addMcpIntegration', integration: 'playwright', profile: 'isolated' });
-    expect(sent.some((message) => message.type === 'installMcpIntegration' || message.type === 'setMcpServerEnabled')).toBe(false);
+    expect(sent).toContainEqual({
+      type: 'addMcpIntegration',
+      integration: 'playwright',
+      profile: 'isolated',
+    });
+    expect(
+      sent.some(
+        (message) => message.type === 'installMcpIntegration' || message.type === 'setMcpServerEnabled',
+      ),
+    ).toBe(false);
   });
 
   it('keeps custom local commands and field validation available', async () => {
@@ -1547,25 +2334,56 @@ describe('MCP servers', () => {
     await userEvent.type(screen.getByLabelText('Name'), 'My files');
     await userEvent.type(screen.getByLabelText('Environment'), 'bad name=1');
     await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
-    expect(screen.getByText('Enter the command that starts the server, for example npx.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Enter the command that starts the server, for example npx.'),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Line 1: Use letters, digits and _/)).toBeInTheDocument();
     expect(sent.some((m) => m.type === 'saveMcpServer')).toBe(false);
     await userEvent.type(screen.getByLabelText('Command'), 'node');
     await userEvent.clear(screen.getByLabelText('Environment'));
     await userEvent.type(screen.getByLabelText('Environment'), 'LOG_LEVEL=debug');
     await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
-    expect(sent).toContainEqual({ type: 'saveMcpServer', server: { name: 'My files', transport: 'stdio', command: 'node', env: { LOG_LEVEL: 'debug' }, auth: { type: 'none' } } });
+    expect(sent).toContainEqual({
+      type: 'saveMcpServer',
+      server: {
+        name: 'My files',
+        transport: 'stdio',
+        command: 'node',
+        env: { LOG_LEVEL: 'debug' },
+        auth: { type: 'none' },
+      },
+    });
+  });
+
+  it('makes existing-profile browser access and GitHub writes explicit choices', async () => {
+    open([]);
+    await userEvent.click(screen.getByRole('button', { name: 'Playwright MCP' }));
+    await userEvent.selectOptions(screen.getByLabelText('Browser or access mode'), 'extension');
+    expect(screen.getByText(/Approved tabs can expose signed-in accounts/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Add integration' }));
+    expect(sent).toContainEqual({
+      type: 'addMcpIntegration',
+      integration: 'playwright',
+      profile: 'extension',
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'GitHub MCP' }));
+    expect(screen.getByLabelText('Browser or access mode')).toHaveValue('readonly');
+    await userEvent.selectOptions(screen.getByLabelText('Browser or access mode'), 'collaboration');
+    expect(screen.getByText(/Every write starts on Ask/)).toBeInTheDocument();
   });
 
   it('fills the form from a README snippet and moves its token to Secret Storage', async () => {
     open([github]);
     await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
     await userEvent.click(screen.getByText("Paste the JSON from the server's README"));
-    const snippet = '{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_123456789" } } } }';
+    const snippet =
+      '{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_123456789" } } } }';
     fireEvent.change(screen.getByLabelText('JSON snippet'), { target: { value: snippet } });
     await userEvent.click(screen.getByRole('button', { name: 'Fill in the form' }));
     expect(screen.getByLabelText('Name')).toHaveValue('github');
-    expect(screen.getByRole('list', { name: 'What the import changed' })).toHaveTextContent('GITHUB_PERSONAL_ACCESS_TOKEN moves to Secret Storage.');
+    expect(screen.getByRole('list', { name: 'What the import changed' })).toHaveTextContent(
+      'GITHUB_PERSONAL_ACCESS_TOKEN moves to Secret Storage.',
+    );
     expect(screen.getByLabelText('Environment')).toHaveValue('');
     expect(screen.getByLabelText('Environment variable name')).toHaveValue('GITHUB_PERSONAL_ACCESS_TOKEN');
     expect(screen.getByLabelText('Token')).toHaveAttribute('type', 'password');
@@ -1598,12 +2416,26 @@ describe('MCP servers', () => {
     await userEvent.click(screen.getByRole('radio', { name: 'Remote URL' }));
     await userEvent.click(screen.getByRole('radio', { name: 'Bearer token' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save server' }));
-    expect(sent).toContainEqual({ type: 'saveMcpServer', server: { id: 'github', name: 'GitHub', transport: 'http', url: 'http://mcp.corp.example/mcp', auth: { type: 'bearer' } } });
+    expect(sent).toContainEqual({
+      type: 'saveMcpServer',
+      server: {
+        id: 'github',
+        name: 'GitHub',
+        transport: 'http',
+        url: 'http://mcp.corp.example/mcp',
+        auth: { type: 'bearer' },
+      },
+    });
   });
 
   it('explains Restricted Mode', () => {
-    open([jira], { workspace: { name: 'w', trusted: false, hasFolder: true }, mcp: { active: false, servers: [jira] } });
-    expect(screen.getByText(/This workspace is in Restricted Mode, so MCP servers do not start/)).toBeInTheDocument();
+    open([jira], {
+      workspace: { name: 'w', trusted: false, hasFolder: true },
+      mcp: { active: false, servers: [jira] },
+    });
+    expect(
+      screen.getByText(/This workspace is in Restricted Mode, so MCP servers do not start/),
+    ).toBeInTheDocument();
   });
 
   it('asks before an MCP tool runs, showing the arguments, and can stop asking for that tool', async () => {
@@ -1612,8 +2444,26 @@ describe('MCP servers', () => {
       baseState({
         approvalMode: 'auto',
         mcp: { active: true, servers: [github] },
-        session: { id: 's', title: 't', messages: [{ role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'mcp__github__create_issue', arguments: '{"title":"Bug"}' }] }] },
-        run: { sessionId: 's', iteration: 1, maxIterations: 25, startedAt: Date.now(), activity: { phase: 'awaiting_approval', label: 'Create issue · GitHub', callId: 'c1' } },
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            {
+              role: 'assistant',
+              id: 'a',
+              content: '',
+              createdAt: 0,
+              toolCalls: [{ id: 'c1', name: 'mcp__github__create_issue', arguments: '{"title":"Bug"}' }],
+            },
+          ],
+        },
+        run: {
+          sessionId: 's',
+          iteration: 1,
+          maxIterations: 25,
+          startedAt: Date.now(),
+          activity: { phase: 'awaiting_approval', label: 'Create issue · GitHub', callId: 'c1' },
+        },
         approvals: [
           {
             id: 'ap',
@@ -1621,20 +2471,38 @@ describe('MCP servers', () => {
             toolName: 'mcp__github__create_issue',
             title: 'Create issue · GitHub',
             reason: 'Tools of MCP servers ask before they run, in every approval mode, until you allow them.',
-            detail: { kind: 'mcp', server: 'GitHub', tool: 'create_issue', title: 'Create issue', arguments: args, hints: ['open-world'] },
+            detail: {
+              kind: 'mcp',
+              server: 'GitHub',
+              tool: 'create_issue',
+              title: 'Create issue',
+              arguments: args,
+              hints: ['open-world'],
+            },
           },
         ],
       }),
     );
     const bar = screen.getByRole('region', { name: 'Run this MCP tool?' });
     expect(bar).toHaveTextContent('create_issue on GitHub');
-    expect(within(bar).getByText('The server says this tool reaches services outside your machine.')).toBeInTheDocument();
+    expect(
+      within(bar).getByText('The server says this tool reaches services outside your machine.'),
+    ).toBeInTheDocument();
     expect(within(bar).getByLabelText('Arguments')).toHaveTextContent('"title": "Bug"');
-    expect(within(bar).getByRole('note')).toHaveTextContent('Auto mode still asks here: Tools of MCP servers ask before they run');
+    expect(within(bar).getByRole('note')).toHaveTextContent(
+      'Auto mode still asks here: Tools of MCP servers ask before they run',
+    );
     // The transcript row names the tool and its server.
     expect(screen.getByText('Create issue · GitHub', { selector: '.sv-tool__target' })).toBeInTheDocument();
     await userEvent.click(within(bar).getByRole('button', { name: 'Always allow create_issue' }));
-    expect(sent).toContainEqual({ type: 'approval', id: 'ap', approved: true, grant: undefined, feedback: undefined, allowTool: true });
+    expect(sent).toContainEqual({
+      type: 'approval',
+      id: 'ap',
+      approved: true,
+      grant: undefined,
+      feedback: undefined,
+      allowTool: true,
+    });
   });
 
   it('names MCP tools in the transcript, also after their server is gone', () => {
@@ -1645,8 +2513,26 @@ describe('MCP servers', () => {
           title: 't',
           messages: [
             { role: 'user', id: 'u', content: 'find it', createdAt: 0 },
-            { role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c1', name: 'mcp__github__search_issues', arguments: '{}' }, { id: 'c2', name: 'mcp__gone__lookup', arguments: '{}' }] },
-            { role: 'tool', id: 't1', toolCallId: 'c1', toolName: 'mcp__github__search_issues', content: 'none', status: 'success', summary: 'Search issues · GitHub', createdAt: 0 },
+            {
+              role: 'assistant',
+              id: 'a',
+              content: '',
+              createdAt: 0,
+              toolCalls: [
+                { id: 'c1', name: 'mcp__github__search_issues', arguments: '{}' },
+                { id: 'c2', name: 'mcp__gone__lookup', arguments: '{}' },
+              ],
+            },
+            {
+              role: 'tool',
+              id: 't1',
+              toolCallId: 'c1',
+              toolName: 'mcp__github__search_issues',
+              content: 'none',
+              status: 'success',
+              summary: 'Search issues · GitHub',
+              createdAt: 0,
+            },
           ],
         },
         mcp: { active: true, servers: [github] },

@@ -1,9 +1,11 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import * as os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   integration,
   integrationArguments,
+  integrationHeaders,
   supportedNode,
   INTEGRATIONS,
   type IntegrationId,
@@ -25,6 +27,8 @@ export interface ManagedPackageOptions {
   roots(): readonly string[];
   authorize(): void;
   changed(): void;
+  remote?: boolean;
+  browser?: () => Promise<string | undefined>;
   run?: typeof runFileProcess;
 }
 
@@ -218,8 +222,26 @@ export class ManagedMcpPackages {
     const managed = server.managed;
     if (!managed) return server;
     const args = integrationArguments(managed);
-    if (managed.id === 'github') return server;
     this.options.authorize();
+    if (managed.id === 'github') {
+      const headers = integrationHeaders(managed.profile);
+      if (
+        server.command ||
+        server.url !== 'https://api.githubcopilot.com/mcp/' ||
+        server.auth.type !== 'bearer' ||
+        Object.keys(server.headers ?? {}).length !== Object.keys(headers).length ||
+        Object.entries(headers).some(([key, value]) => server.headers?.[key] !== value)
+      ) {
+        throw new Error(
+          'The managed GitHub endpoint or filters changed. Add the catalog entry again, or explicitly edit it as a custom server.',
+        );
+      }
+      return server;
+    }
+    if (managed.profile === 'extension' && this.options.remote)
+      throw new Error(
+        'Existing desktop Chrome profiles are unavailable on Remote hosts. Use a separate browser on the extension host.',
+      );
     let installed: Awaited<ReturnType<ManagedMcpPackages['installed']>>;
     try {
       installed = await this.installed(managed.id);
@@ -234,6 +256,17 @@ export class ManagedMcpPackages {
       new AbortController().signal,
       managed.id,
     );
+    const browser = await (this.options.browser ?? (() => findChrome(this.options.roots())))();
+    if (!browser)
+      throw new Error(
+        'Google Chrome was not found on the extension host. Install Chrome there, or configure an explicit browser executable as a custom MCP server. Sovran does not download a browser.',
+      );
+    if (managed.id === 'playwright') {
+      const output = path.join(this.options.storage, 'artifacts', server.id);
+      await fs.mkdir(output, { recursive: true });
+      args.push('--output-dir', output, '--output-max-size', String(20 * 1024 * 1024));
+      if (managed.profile === 'isolated') args.push('--executable-path', browser);
+    } else args.push('--executable-path', browser);
     this.options.authorize();
     return {
       ...server,
@@ -249,4 +282,31 @@ export class ManagedMcpPackages {
   dispose(): void {
     this.installing?.abort();
   }
+}
+
+/** Known system installations only: never resolve a browser from the workspace or an arbitrary PATH entry. */
+async function findChrome(roots: readonly string[]): Promise<string | undefined> {
+  const candidates =
+    process.platform === 'darwin'
+      ? [
+          '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+          path.join(os.homedir(), 'Applications/Google Chrome.app/Contents/MacOS/Google Chrome'),
+        ]
+      : process.platform === 'win32'
+        ? [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA]
+            .filter((root): root is string => !!root && path.isAbsolute(root))
+            .map((root) => path.join(root, 'Google/Chrome/Application/chrome.exe'))
+        : ['/opt/google/chrome/chrome', '/usr/bin/google-chrome-stable', '/usr/bin/google-chrome'];
+  const canonicalRoots = await Promise.all(roots.map((root) => fs.realpath(root).catch(() => root)));
+  for (const candidate of candidates) {
+    const actual = await fs.realpath(candidate).catch(() => undefined);
+    if (!actual || canonicalRoots.some((root) => isInside(root, actual))) continue;
+    try {
+      await fs.access(actual, process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
+      if ((await fs.stat(actual)).isFile()) return actual;
+    } catch {
+      /* Try another system installation. */
+    }
+  }
+  return undefined;
 }

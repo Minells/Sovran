@@ -552,7 +552,9 @@ describe('McpHub', () => {
     abort.abort();
     await expect(hub.callTool('notes', 'read_note', {}, abort.signal)).rejects.toThrow('Cancelled');
     await hub.restart('notes');
-    await expect(tool.execute({ name: 'welcome' }, { signal } as ToolContext, prepared)).rejects.toThrow('no longer available');
+    await expect(tool.execute({ name: 'welcome' }, { signal } as ToolContext, prepared)).rejects.toThrow(
+      'no longer available',
+    );
   });
 
   it('starts nothing while inactive or disabled, and stops servers that are removed', async () => {
@@ -578,6 +580,27 @@ describe('McpHub', () => {
         content: [],
       }));
     await until(() => hub.tools().some((t) => t.name === 'mcp__notes__new_tool'));
+  });
+
+  it('enforces managed profile bounds on discovery, refresh and guessed direct calls even with Allow', async () => {
+    const config = server({
+      id: 'notes',
+      managed: { id: 'github', version: 'hosted-v1', profile: 'readonly' },
+      allowedTools: ['delete_note', 'issue_write'],
+    });
+    const { hub, transports } = await connect([config]);
+    expect(hub.tools()).toEqual([]);
+    const instance = transports.servers.get('notes')!;
+    instance.registerTool('issue_read', { inputSchema: z.object({}) }, async () => ({ content: [] }));
+    instance.registerTool('issue_write', { inputSchema: z.object({}) }, async () => ({ content: [] }));
+    await until(() => hub.tools().length === 1);
+    expect(hub.tools()[0]!.name).toBe('mcp__notes__issue_read');
+    await expect(hub.callTool('notes', 'issue_write', {}, new AbortController().signal)).rejects.toThrow(
+      /no longer offered/,
+    );
+    await expect(hub.callTool('notes', 'delete_note', {}, new AbortController().signal)).rejects.toThrow(
+      /no longer offered/,
+    );
   });
 
   it('reports a server that cannot start, and one that stops, without throwing', async () => {

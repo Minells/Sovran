@@ -2,7 +2,15 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { INTEGRATIONS, integration, integrationArguments, supportedNode } from '../../src/core/mcp/catalog';
+import {
+  INTEGRATIONS,
+  integration,
+  integrationArguments,
+  integrationCallProblem,
+  integrationHeaders,
+  integrationToolAllowed,
+  supportedNode,
+} from '../../src/core/mcp/catalog';
 import { fromEntry, parseMcpServers, toEntry, mergeMcpEntries } from '../../src/core/mcp/config';
 import { webviewMessageSchema } from '../../src/shared/protocol';
 import { ManagedMcpPackages } from '../../src/extension/adapters/ManagedMcpPackages';
@@ -71,7 +79,10 @@ describe('optional integration catalog contracts', () => {
   });
 });
 
-async function fixture() {
+async function fixture(
+  browser: () => Promise<string | undefined> = async () => '/system/chrome',
+  remote = false,
+) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sovran-catalog-'));
   temporary.push(dir);
   const storage = path.join(dir, 'storage');
@@ -97,6 +108,8 @@ async function fixture() {
     },
     changed: () => {},
     run,
+    browser,
+    remote,
   });
   return {
     dir,
@@ -113,6 +126,102 @@ async function fixture() {
 }
 
 describe('managed package installation lifecycle', () => {
+  it('rejects output paths and executable URL schemes only for managed browser profiles', () => {
+    const managed = { id: 'playwright', version: '0.0.84', profile: 'isolated' } as const;
+    expect(integrationCallProblem(managed, 'browser_snapshot', { filename: '/tmp/output' })).toMatch(
+      /inline/,
+    );
+    expect(integrationCallProblem(managed, 'browser_navigate', { url: 'javascript:alert(1)' })).toMatch(
+      /HTTP/,
+    );
+    expect(
+      integrationCallProblem(managed, 'browser_navigate', { url: 'https://example.com' }),
+    ).toBeUndefined();
+    expect(
+      integrationCallProblem(undefined, 'browser_snapshot', { filename: '/tmp/output' }),
+    ).toBeUndefined();
+  });
+  it('keeps browser code, uploads, installation, screenshots and page-defined tools outside managed profiles', () => {
+    for (const tool of [
+      'browser_evaluate',
+      'browser_run_code',
+      'browser_file_upload',
+      'browser_install',
+      'browser_take_screenshot',
+      'page_defined_tool',
+    ]) {
+      expect(integrationToolAllowed({ id: 'playwright', version: '0.0.84', profile: 'isolated' }, tool)).toBe(
+        false,
+      );
+    }
+    expect(
+      integrationToolAllowed({ id: 'devtools', version: '1.12.0', profile: 'isolated' }, 'evaluate_script'),
+    ).toBe(false);
+    expect(
+      integrationToolAllowed({ id: 'github', version: 'hosted-v1', profile: 'readonly' }, 'issue_write'),
+    ).toBe(false);
+    expect(
+      integrationToolAllowed({ id: 'github', version: 'hosted-v1', profile: 'collaboration' }, 'issue_write'),
+    ).toBe(true);
+    expect(integrationHeaders()['X-MCP-Readonly']).toBe('true');
+    expect(integrationHeaders('collaboration')).not.toHaveProperty('X-MCP-Readonly');
+  });
+  it('requires explicit browser profiles and rejects Remote desktop attachment', async () => {
+    const managed = { id: 'playwright', version: '0.0.84', profile: 'extension' } as const;
+    expect(() => integrationArguments(managed)).toThrow(/explicit/);
+    expect(() => integrationArguments({ ...managed, browserProfile: '../Default' })).toThrow(/explicit/);
+    expect(integrationArguments({ ...managed, browserProfile: 'Profile 2' })).toEqual(
+      expect.arrayContaining(['--extension', '--profile-dir-name', 'Profile 2']),
+    );
+    const f = await fixture(undefined, true);
+    await expect(
+      f.manager.launch(
+        fromEntry({ id: 'browser', command: 'node', managed: { ...managed, browserProfile: 'Profile 2' } }),
+      ),
+    ).rejects.toThrow(/Remote/);
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it('fails with instructions when Chrome is missing and disables DevTools external reporting', async () => {
+    const f = await fixture(async () => undefined);
+    await f.manager.install('devtools', new AbortController().signal);
+    const config = fromEntry({
+      id: 'debug',
+      command: 'node',
+      managed: { id: 'devtools', version: '1.12.0', profile: 'isolated' },
+    });
+    await expect(f.manager.launch(config)).rejects.toThrow(/Chrome was not found/);
+    const g = await fixture();
+    await g.manager.install('devtools', new AbortController().signal);
+    const launch = await g.manager.launch(config);
+    expect(launch.args).toEqual(
+      expect.arrayContaining([
+        '--isolated',
+        '--no-usage-statistics',
+        '--no-performance-crux',
+        '--no-javascript-evaluation',
+      ]),
+    );
+    expect(launch.env).toEqual({
+      CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1',
+      CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: '1',
+    });
+  });
+  it('rejects edited managed GitHub filters and endpoint without contacting it', async () => {
+    const f = await fixture();
+    const config = fromEntry({
+      id: 'github',
+      url: 'https://api.githubcopilot.com/mcp/',
+      auth: { type: 'bearer' },
+      headers: integrationHeaders(),
+      managed: { id: 'github', profile: 'readonly', version: 'hosted-v1' },
+    });
+    expect(await f.manager.launch(config)).toBe(config);
+    await expect(f.manager.launch({ ...config, headers: {} })).rejects.toThrow(/filters changed/);
+    await expect(f.manager.launch({ ...config, url: 'https://other.example/mcp' })).rejects.toThrow(
+      /filters changed/,
+    );
+    expect(f.run).not.toHaveBeenCalled();
+  });
   it('inspects without spawning or creating storage', async () => {
     const f = await fixture();
     await f.manager.inspect();
