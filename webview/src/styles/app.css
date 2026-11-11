@@ -953,7 +953,6 @@ a {
   color: var(--sv-muted);
 }
 
-
 .sv-approval__command {
   margin: 0;
   padding: var(--sv-s2);
@@ -1216,7 +1215,9 @@ a {
   background: var(--sv-accent);
   color: var(--sv-on-accent);
   cursor: pointer;
-  transition: background-color 120ms var(--sv-ease), color 120ms var(--sv-ease);
+  transition:
+    background-color 120ms var(--sv-ease),
+    color 120ms var(--sv-ease);
 }
 
 .sv-send:hover {
@@ -1914,8 +1915,14 @@ body.vscode-high-contrast .sv-code {
 }
 
 .sv-suggest__item[aria-selected='true'] {
-  background: var(--vscode-editorSuggestWidget-selectedBackground, var(--vscode-list-activeSelectionBackground));
-  color: var(--vscode-editorSuggestWidget-selectedForeground, var(--vscode-list-activeSelectionForeground, var(--sv-fg)));
+  background: var(
+    --vscode-editorSuggestWidget-selectedBackground,
+    var(--vscode-list-activeSelectionBackground)
+  );
+  color: var(
+    --vscode-editorSuggestWidget-selectedForeground,
+    var(--vscode-list-activeSelectionForeground, var(--sv-fg))
+  );
 }
 
 .sv-suggest__label {
@@ -2907,7 +2914,11 @@ body.vscode-high-contrast-light .sv-settings__tab[aria-selected='true'] {
   width: min(100%, 360px);
   height: 132px;
   transform: translateX(-50%);
-  background-image: radial-gradient(circle, color-mix(in srgb, var(--sv-fg) 26%, transparent) 0.8px, transparent 1.2px);
+  background-image: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--sv-fg) 26%, transparent) 0.8px,
+    transparent 1.2px
+  );
   background-size: 11px 11px;
   background-position: center;
   mask-image: radial-gradient(closest-side, #000 15%, transparent 100%);
@@ -3019,7 +3030,9 @@ body.vscode-high-contrast-light .sv-settings__tab[aria-selected='true'] {
   color: var(--sv-muted);
   font-size: var(--sv-text-xs);
   cursor: pointer;
-  transition: color 140ms var(--sv-ease), border-color 140ms var(--sv-ease);
+  transition:
+    color 140ms var(--sv-ease),
+    border-color 140ms var(--sv-ease);
 }
 
 .sv-hero__mode span {
@@ -3481,8 +3494,14 @@ body.vscode-high-contrast-light .sv-starter-card {
 }
 
 .sv-attach__item[data-active='true'] {
-  background: var(--vscode-quickInputList-focusBackground, var(--vscode-list-activeSelectionBackground, var(--sv-surface-strong)));
-  color: var(--vscode-quickInputList-focusForeground, var(--vscode-list-activeSelectionForeground, var(--sv-fg)));
+  background: var(
+    --vscode-quickInputList-focusBackground,
+    var(--vscode-list-activeSelectionBackground, var(--sv-surface-strong))
+  );
+  color: var(
+    --vscode-quickInputList-focusForeground,
+    var(--vscode-list-activeSelectionForeground, var(--sv-fg))
+  );
 }
 
 .sv-attach__icon {
@@ -4009,4 +4028,58 @@ body.vscode-high-contrast-light .sv-starter-card {
 body.vscode-high-contrast .sv-switch[aria-checked='true'],
 body.vscode-high-contrast-light .sv-switch[aria-checked='true'] {
   border-color: var(--vscode-contrastActiveBorder, var(--sv-focus));
+}
+
+/* Tool groups stay within the sidebar; settings reuse VS Code typography and theme tokens. */
+.sv-tool-groups {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.sv-tool-groups legend {
+  font-weight: 600;
+  padding: 0;
+  margin-bottom: 8px;
+}
+.sv-native-tools {
+  border-top: 1px solid var(--vscode-widget-border);
+  padding: 10px 0;
+}
+.sv-native-tools summary,
+.sv-chat-tools summary {
+  cursor: pointer;
+}
+.sv-native-tool {
+  padding: 10px 0;
+  overflow-wrap: anywhere;
+}
+.sv-native-tool code {
+  margin-right: 8px;
+}
+.sv-chat-tools {
+  position: relative;
+  flex-shrink: 0;
+}
+.sv-chat-tools summary {
+  font-size: 11px;
+  padding: 4px;
+}
+.sv-chat-tools__menu {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  width: min(300px, 80vw);
+  max-height: 65vh;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--vscode-editorWidget-background, var(--sv-bg));
+  color: var(--vscode-editorWidget-foreground, var(--sv-fg));
+  border: 1px solid var(--vscode-widget-border);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px var(--vscode-widget-shadow);
+  z-index: 20;
+}
+.sv-chat-tools__menu .sv-checkrow {
+  margin: 8px 0;
 }

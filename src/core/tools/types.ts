@@ -3,6 +3,7 @@ import type { DocumentReader } from '../documents/reader';
 import type { ApprovalDetail, ProcessPort, WorkspacePort } from '../ports';
 import type { ToolRisk } from '../permissions/policy';
 import type { ToolDisplay } from '../sessions/model';
+import type { WebFetchPort } from '../web/types';
 
 export interface ToolSettings {
   terminalTimeoutMs: number;
@@ -17,8 +18,11 @@ export interface ToolContext {
   signal: AbortSignal;
   settings: ToolSettings;
   onOutput?: (chunk: string) => void;
+  /** Runtime-owned live permission check for a tool about to perform a delayed effect. */
+  revalidate?: () => void;
   /** Converts documents for `read_file`. Without it (or without `workspace.readBytes`), documents read as binary. */
   documents?: DocumentReader;
+  web?: WebFetchPort;
 }
 
 export interface PreparedAction {
@@ -29,6 +33,7 @@ export interface PreparedAction {
   risks?: string[];
   /** Set for a tool of an MCP server: it asks unless the user allowed it (see `PolicyInput.mcp`). */
   mcp?: { server: string; allowed: boolean };
+  network?: { url: string };
   approval?: ApprovalDetail;
   /** Tool-private state carried from prepare() to execute(). */
   state?: unknown;
@@ -51,6 +56,15 @@ export interface ToolDefinition<A = unknown> {
    */
   parameters?: Record<string, unknown>;
   risk: ToolRisk;
+  /** Provenance and deterministic context grouping; absent metadata means a native tool. */
+  source?: { kind: 'native' } | { kind: 'mcp'; serverId: string };
+  group?: string;
+  /** Some read tools also require a trusted extension host (e.g. Git or network access). */
+  requiresTrust?: boolean;
+  /** Synchronous, side-effect-free live availability check. Returns a reason when unavailable. */
+  unavailable?(): string | undefined;
+  /** Current MCP permission, read again after approval rather than trusting prepared state. */
+  mcpPolicy?(): { server: string; allowed: boolean };
   /** Short human label for the UI, e.g. "src/app.ts" or "npm test". */
   label(args: A): string;
   prepare?(args: A, ctx: ToolContext): Promise<PreparedAction>;

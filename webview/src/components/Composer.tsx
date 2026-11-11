@@ -1,3 +1,4 @@
+import { ChatToolMenu } from './ToolSettings';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { EditorContextView, RunView } from '../../../src/shared/protocol';
 import { APPROVAL_OPTIONS, approvalOption, nextApprovalMode } from '../lib/approvals';
@@ -13,8 +14,18 @@ import { Icon, MenuButton } from './primitives';
 export function ModeToggle() {
   const { app } = useStore();
   const options = [
-    { value: 'plan' as const, label: 'Plan', icon: 'eye', title: 'Plan · read-only: investigates and proposes a plan (Alt+M)' },
-    { value: 'act' as const, label: 'Act', icon: 'edit', title: 'Act · can edit files and run commands, with your approval (Alt+M)' },
+    {
+      value: 'plan' as const,
+      label: 'Plan',
+      icon: 'eye',
+      title: 'Plan · read-only: investigates and proposes a plan (Alt+M)',
+    },
+    {
+      value: 'act' as const,
+      label: 'Act',
+      icon: 'edit',
+      title: 'Act · can edit files and run commands, with your approval (Alt+M)',
+    },
   ];
   return (
     <div className="sv-segment" role="radiogroup" aria-label="Agent mode">
@@ -55,7 +66,11 @@ export function ApprovalPicker() {
       icon={current.icon}
       tone={current.tone}
       heading="Approvals in Act mode"
-      footer={{ label: 'Approval settings…', icon: 'settings-gear', onSelect: () => post({ type: 'setView', view: 'settings' }) }}
+      footer={{
+        label: 'Approval settings…',
+        icon: 'settings-gear',
+        onSelect: () => post({ type: 'setView', view: 'settings' }),
+      }}
       className="sv-approval-picker"
       // The default (Ask) stays quiet; the modes that let Sovran act unattended are always spelled out.
       iconOnly={app.approvalMode === 'ask'}
@@ -183,7 +198,8 @@ export function RunStatus({ run }: { run: RunView }) {
   );
 }
 
-const fmtTokens = (n: number) => (n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+const fmtTokens = (n: number) =>
+  n >= 10_000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
 
 export function ContextMeter() {
   const { app } = useStore();
@@ -196,7 +212,14 @@ export function ContextMeter() {
     'en-US',
   )} tokens (${percent}%) in the last request. Click to summarize older messages and free context.`;
   return (
-    <button type="button" className="sv-meter" data-level={level} title={title} aria-label={`Context ${percent}% used. Summarize older messages.`} onClick={() => post({ type: 'compact' })}>
+    <button
+      type="button"
+      className="sv-meter"
+      data-level={level}
+      title={title}
+      aria-label={`Context ${percent}% used. Summarize older messages.`}
+      onClick={() => post({ type: 'compact' })}
+    >
       <span className="sv-meter__bar" aria-hidden="true">
         <span style={{ width: `${Math.max(4, percent)}%` }} />
       </span>
@@ -207,7 +230,8 @@ export function ContextMeter() {
   );
 }
 
-type Trigger = { kind: 'mention'; start: number; end: number; query: string } | { kind: 'command'; query: string } | null;
+type Trigger =
+  { kind: 'mention'; start: number; end: number; query: string } | { kind: 'command'; query: string } | null;
 
 function detectTrigger(text: string, caret: number): Trigger {
   const before = text.slice(0, caret);
@@ -263,7 +287,9 @@ export function Composer() {
   }, [text]);
 
   const trigger = detectTrigger(text, caret);
-  const triggerKey = trigger ? `${trigger.kind}:${trigger.kind === 'mention' ? trigger.start : 0}:${trigger.query}` : null;
+  const triggerKey = trigger
+    ? `${trigger.kind}:${trigger.kind === 'mention' ? trigger.start : 0}:${trigger.query}`
+    : null;
   const open = trigger !== null && triggerKey !== dismissed;
 
   // Ask the host for file matches when the @-query changes (debounced).
@@ -282,8 +308,17 @@ export function Composer() {
     ? []
     : trigger?.kind === 'command'
       ? app.commands
-          .filter((c) => c.name.startsWith(trigger.query) || (trigger.query.length > 1 && c.name.includes(trigger.query)))
-          .map((c) => ({ id: c.name, label: `/${c.name}`, detail: c.description, icon: c.source === 'workspace' ? 'file-code' : 'symbol-event' }))
+          .filter(
+            (c) =>
+              c.name.startsWith(trigger.query) ||
+              (trigger.query.length > 1 && c.name.includes(trigger.query)),
+          )
+          .map((c) => ({
+            id: c.name,
+            label: `/${c.name}`,
+            detail: c.description,
+            icon: c.source === 'workspace' ? 'file-code' : 'symbol-event',
+          }))
       : state.fileSuggestions && state.fileSuggestions.requestId === requestId
         ? state.fileSuggestions.items.map((f) => ({
             id: f.path,
@@ -347,7 +382,12 @@ export function Composer() {
     } else if (e.altKey && (e.key === 'm' || e.key === 'M' || e.code === 'KeyM')) {
       e.preventDefault();
       post({ type: 'setMode', mode: app.mode === 'plan' ? 'act' : 'plan' });
-    } else if (e.altKey && (e.key === 'a' || e.key === 'A' || e.code === 'KeyA') && app.mode === 'act' && app.workspace.trusted) {
+    } else if (
+      e.altKey &&
+      (e.key === 'a' || e.key === 'A' || e.code === 'KeyA') &&
+      app.mode === 'act' &&
+      app.workspace.trusted
+    ) {
       e.preventDefault();
       post({ type: 'setApprovalMode', mode: nextApprovalMode(app.approvalMode) });
     }
@@ -370,37 +410,45 @@ export function Composer() {
   const listId = 'sv-suggest';
   const suggesting = open && (items.length > 0 || trigger?.kind === 'mention');
   // One line, always there (no jump on focus), and it says what the keys do right now.
-  const hints: Array<[string, string]> = awaiting && !text.trim()
-    ? [
-        ['↵', 'approve'],
-        ['Esc', 'reject'],
-      ]
-    : running
-    ? [['Esc', 'stop']]
-    : suggesting
+  const hints: Array<[string, string]> =
+    awaiting && !text.trim()
       ? [
-          ['↑↓', 'choose'],
-          ['↵', 'select'],
-          ['Esc', 'close'],
+          ['↵', 'approve'],
+          ['Esc', 'reject'],
         ]
-      : text.trim()
-        ? [
-            ['↵', 'send'],
-            ['⇧↵', 'new line'],
-          ]
-        : [
-            ['@', 'files'],
-            ['/', 'commands'],
-            [`${altKey}M`, 'mode'],
-          ];
+      : running
+        ? [['Esc', 'stop']]
+        : suggesting
+          ? [
+              ['↑↓', 'choose'],
+              ['↵', 'select'],
+              ['Esc', 'close'],
+            ]
+          : text.trim()
+            ? [
+                ['↵', 'send'],
+                ['⇧↵', 'new line'],
+              ]
+            : [
+                ['@', 'files'],
+                ['/', 'commands'],
+                [`${altKey}M`, 'mode'],
+              ];
 
   return (
     <div className="sv-composer">
       {attachOpen ? <AttachMenu trigger={attachRef} onClose={closeAttach} /> : null}
       {suggesting ? (
-        <ul className="sv-suggest" id={listId} role="listbox" aria-label={trigger?.kind === 'command' ? 'Commands' : 'Files'}>
+        <ul
+          className="sv-suggest"
+          id={listId}
+          role="listbox"
+          aria-label={trigger?.kind === 'command' ? 'Commands' : 'Files'}
+        >
           {items.length === 0 ? (
-            <li className="sv-suggest__empty">{trigger?.kind === 'mention' ? 'Type to search files' : 'No matching command'}</li>
+            <li className="sv-suggest__empty">
+              {trigger?.kind === 'mention' ? 'Type to search files' : 'No matching command'}
+            </li>
           ) : (
             items.map((item, i) => (
               <li
@@ -468,7 +516,12 @@ export function Composer() {
             for (const file of images) {
               if (file.size > IMAGE_LIMITS.maxBytes) {
                 const mb = IMAGE_LIMITS.maxBytes / 1024 / 1024;
-                dispatch({ type: 'notice', id: `paste-${Date.now()}`, level: 'warning', message: `The pasted image is larger than ${mb} MB. Paste a smaller one (a crop, or a JPEG).` });
+                dispatch({
+                  type: 'notice',
+                  id: `paste-${Date.now()}`,
+                  level: 'warning',
+                  message: `The pasted image is larger than ${mb} MB. Paste a smaller one (a crop, or a JPEG).`,
+                });
                 continue;
               }
               void toBase64(file).then((data) => post({ type: 'attachImage', data }));
@@ -500,21 +553,39 @@ export function Composer() {
           <button
             type="button"
             className="sv-model"
-            title={provider ? `${app.mode === 'plan' ? 'Plan' : 'Act'} model · ${provider.name} · ${effective?.modelId}` : 'Select a model'}
+            title={
+              provider
+                ? `${app.mode === 'plan' ? 'Plan' : 'Act'} model · ${provider.name} · ${effective?.modelId}`
+                : 'Select a model'
+            }
             onClick={() => post({ type: 'pickModel' })}
           >
             <Icon name="server-process" />
             <span>{model?.name ?? effective?.modelId ?? 'Select model'}</span>
             <Icon name="chevron-down" />
           </button>
+          <ChatToolMenu />
           <span className="sv-composer__spacer" />
           <ContextMeter />
           {running ? (
-            <button type="button" className="sv-send sv-send--stop" title="Stop (Esc)" aria-label="Stop the agent" onClick={() => post({ type: 'cancel' })}>
+            <button
+              type="button"
+              className="sv-send sv-send--stop"
+              title="Stop (Esc)"
+              aria-label="Stop the agent"
+              onClick={() => post({ type: 'cancel' })}
+            >
               <Icon name="debug-stop" />
             </button>
           ) : (
-            <button type="button" className="sv-send" title="Send (Enter)" aria-label="Send message" disabled={!canSend} onClick={submit}>
+            <button
+              type="button"
+              className="sv-send"
+              title="Send (Enter)"
+              aria-label="Send message"
+              disabled={!canSend}
+              onClick={submit}
+            >
               <Icon name="arrow-up" />
             </button>
           )}

@@ -111,3 +111,23 @@ Record the results in `docs/IMPLEMENTATION_STATUS.md`:
 | vLLM | | | | | |
 | LiteLLM | | | | | |
 | Enterprise gateway | | | | | |
+
+## Native tools and optional integration verification
+
+`npm run check` includes chat group/policy enforcement in native and prompted modes, per-surface isolation, persistence,
+managed install failures, profile filtering and the real HTTP/process fixtures. Browser integration smoke is opt-in:
+install reviewed packages through Sovran's explicit installer, then point `SOVRAN_MCP_SMOKE_STORAGE` at that test
+installation directory and run `npx vitest run tests/integration/managedBrowsers.test.ts`. This uses existing system
+Chrome headless with isolated state and localhost fixture pages; it never installs a browser or attaches to accounts.
+The two tests are deliberately skipped in ordinary CI where those optional dependencies are absent.
+
+`npm run test:extension` always uses fresh temporary user-data/extension directories and config.yaml, then removes them.
+Use `SOVRAN_TEST_VSCODE_VERSION=1.95.0` for the declared minimum; the default is stable. Explicit versions must actually
+be available: never count a failed download or another cached version as a minimum-host pass. TLS/checksum checks stay
+on. `npm run verify:vsix -- /path/to/sovran.vsix` checks the actual ZIP assets, workers, notices and exact managed locks.
+
+For an installed-artifact smoke, set `SOVRAN_TEST_VSIX=/absolute/path/to/current.vsix`. For a replacement/upgrade test,
+also set `SOVRAN_TEST_UPGRADE_VSIX=/absolute/path/to/previous.vsix`: the previous artifact activates and saves disconnected
+custom/managed entries and native overrides, then the replacement activates and checks their preservation before
+running the full smoke suite. Installed artifacts run in VS Code Test mode to confine config.yaml to the test profile.
+No developer profile is modified. PAT/browser authentication and real Secret Storage migration remain manual gates.

@@ -536,6 +536,27 @@ describe('McpHub', () => {
     await until(() => transports.created.get('notes') === 2 && hub.states()[0]!.status === 'connected');
   });
 
+  it('rechecks Off and abort inside the final MCP dispatch', async () => {
+    const config = server({ id: 'notes', name: 'Notes' });
+    const { hub } = await connect([config]);
+    const tool = hub.tools()[0]!;
+    const signal = new AbortController().signal;
+    const prepared = await tool.prepare!({ name: 'welcome' }, { signal } as ToolContext);
+    hub.update([{ ...config, disabledTools: ['read_note'] }], true);
+    await expect(tool.execute({ name: 'welcome' }, { signal } as ToolContext, prepared)).rejects.toThrow(
+      'turned off',
+    );
+    await expect(hub.callTool('notes', 'read_note', {}, signal)).rejects.toThrow('turned off');
+    hub.update([config], true);
+    const abort = new AbortController();
+    abort.abort();
+    await expect(hub.callTool('notes', 'read_note', {}, abort.signal)).rejects.toThrow('Cancelled');
+    await hub.restart('notes');
+    await expect(tool.execute({ name: 'welcome' }, { signal } as ToolContext, prepared)).rejects.toThrow(
+      'no longer available',
+    );
+  });
+
   it('starts nothing while inactive or disabled, and stops servers that are removed', async () => {
     const transports = new MemoryTransports({ notes: notesServer, other: notesServer });
     hub = new McpHub({ transports, logger: nullLogger, client: { name: 'sovran', version: '0' } });
@@ -559,6 +580,27 @@ describe('McpHub', () => {
         content: [],
       }));
     await until(() => hub.tools().some((t) => t.name === 'mcp__notes__new_tool'));
+  });
+
+  it('enforces managed profile bounds on discovery, refresh and guessed direct calls even with Allow', async () => {
+    const config = server({
+      id: 'notes',
+      managed: { id: 'github', version: 'hosted-v1', profile: 'readonly' },
+      allowedTools: ['delete_note', 'issue_write'],
+    });
+    const { hub, transports } = await connect([config]);
+    expect(hub.tools()).toEqual([]);
+    const instance = transports.servers.get('notes')!;
+    instance.registerTool('issue_read', { inputSchema: z.object({}) }, async () => ({ content: [] }));
+    instance.registerTool('issue_write', { inputSchema: z.object({}) }, async () => ({ content: [] }));
+    await until(() => hub.tools().length === 1);
+    expect(hub.tools()[0]!.name).toBe('mcp__notes__issue_read');
+    await expect(hub.callTool('notes', 'issue_write', {}, new AbortController().signal)).rejects.toThrow(
+      /no longer offered/,
+    );
+    await expect(hub.callTool('notes', 'delete_note', {}, new AbortController().signal)).rejects.toThrow(
+      /no longer offered/,
+    );
   });
 
   it('reports a server that cannot start, and one that stops, without throwing', async () => {
@@ -604,7 +646,16 @@ describe('MCP tools in the agent loop', () => {
   let hub: McpHub | undefined;
   afterEach(async () => hub?.dispose());
 
-  async function run(opts: { allowed?: string[]; mode?: 'plan' | 'act'; approve?: boolean } = {}) {
+  async function run(
+    opts: {
+      allowed?: string[];
+      mode?: 'plan' | 'act';
+      approve?: boolean;
+      duringApproval?: (hub: McpHub) => void;
+      duringRequest?: (hub: McpHub) => void;
+      duringDispatch?: (hub: McpHub) => void;
+    } = {},
+  ) {
     hub = new McpHub({
       transports: new MemoryTransports({ notes: notesServer }),
       logger: nullLogger,
@@ -613,10 +664,16 @@ describe('MCP tools in the agent loop', () => {
     hub.update([server({ id: 'notes', name: 'Notes', allowedTools: opts.allowed ?? [] })], true);
     await until(() => hub!.states()[0]!.status === 'connected');
     const provider = new ScriptedProvider([
-      [call(0, 'mcp__notes__read_note', { name: 'welcome' })],
+      () => {
+        opts.duringRequest?.(hub!);
+        return [call(0, 'mcp__notes__read_note', { name: 'welcome' })];
+      },
       [text('done')],
     ]);
-    const approvals = new ScriptedApprovals(() => ({ approved: opts.approve ?? true }));
+    const approvals = new ScriptedApprovals(() => {
+      opts.duringApproval?.(hub!);
+      return { approved: opts.approve ?? true };
+    });
     const session: Session = {
       id: 's',
       title: 't',
@@ -643,7 +700,10 @@ describe('MCP tools in the agent loop', () => {
       settings,
       grants: { edits: false },
       signal: new AbortController().signal,
-      emit: (e) => events.push(e),
+      emit: (e) => {
+        events.push(e);
+        if (e.type === 'tool_phase' && e.phase === 'running') opts.duringDispatch?.(hub!);
+      },
     });
     const result = session.messages.find((m): m is ToolMessage => m.role === 'tool');
     return { provider, approvals, result, events };
@@ -688,6 +748,42 @@ describe('MCP tools in the agent loop', () => {
     expect(provider.requests[0]!.tools?.map((t) => t.function.name) ?? []).not.toContain(
       'mcp__notes__read_note',
     );
+  });
+
+  it('blocks MCP Off applied while its approval is open', async () => {
+    const { result } = await run({
+      duringApproval: (hub) => hub.update([server({ id: 'notes', disabledTools: ['read_note'] })], true),
+    });
+    expect(result?.status).toBe('denied');
+  });
+
+  it('re-evaluates Allow changed to Ask while the model responds', async () => {
+    const { result, approvals } = await run({
+      allowed: ['read_note'],
+      duringRequest: (hub) => hub.update([server({ id: 'notes', name: 'Notes' })], true),
+    });
+    expect(approvals.requests).toHaveLength(1);
+    expect(result?.status).toBe('success');
+  });
+
+  it('preserves an explicit approval when Ask changes to Allow', async () => {
+    const { result, approvals } = await run({
+      duringApproval: (hub) =>
+        hub.update([server({ id: 'notes', name: 'Notes', allowedTools: ['read_note'] })], true),
+    });
+    expect(approvals.requests).toHaveLength(1);
+    expect(result?.status).toBe('success');
+    expect(result?.autoApproved).toBeUndefined();
+  });
+
+  it('blocks Allow changed to Ask immediately before dispatch', async () => {
+    const { result, approvals } = await run({
+      allowed: ['read_note'],
+      duringDispatch: (hub) => hub.update([server({ id: 'notes', name: 'Notes' })], true),
+    });
+    expect(approvals.requests).toHaveLength(0);
+    expect(result?.status).toBe('denied');
+    expect(result?.content).toContain('Permissions changed');
   });
 
   it('mentions MCP tools in the system prompt only when there are some', () => {

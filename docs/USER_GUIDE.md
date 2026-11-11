@@ -52,8 +52,52 @@ It works through ten built-in tools:
 | `apply_diff` | Applies several exact edits to one file at once |
 | `execute_terminal` | Runs a shell command after you approve it |
 
+**Native Git inspection.** In trusted workspaces, Plan and Act can use `git_status`, `git_diff`, `git_log`,
+`git_show` and `git_branches` without an MCP server. They are read-only and never fetch. Select the repository root
+explicitly with `repository` (`"."` for a single root, `"rootName/nested"` in multi-root workspaces). Nested repositories
+and linked worktrees are supported; native Git does not discover a parent outside your selected root.
+
+Paths are separate, literal repository-relative arguments. `git_diff` supports `scope: "unstaged"`, `"staged"`, or
+`"revision"` with `from` and optional `to` (default `HEAD`). Use `names_only`, `offset` and `limit` for concise results.
+`git_show` accepts a separate `path` and `start_line`/`end_line` to inspect historical text; `REV:path`, flags and
+revision ranges are not accepted as a revision. Commit IDs, branch/tag names and `HEAD~2`/`HEAD^` ancestry are supported.
+Bulk patches omit protected paths and detected renames from protected sources. An exact protected-file request uses
+the ordinary approval card, including in Auto. Status/history metadata may still name protected files.
+
+Git is resolved from the extension host's PATH outside workspace roots. The host Git must support `--no-lazy-fetch`
+(documented in Git 2.48); if it does not, update Git rather than falling back to an unsafe read. Native inspection
+disables pagers, fsmonitor, textconv, external diff and configured clean/process filters. Results are bounded, with a
+15-second maximum command budget per inspection and 2 MiB maximum historical blob. Very large metadata sets fail
+explicitly; large patches are marked truncated. Structured Git output is filtered before it reaches chat and is not
+mirrored raw to a terminal. Git runs on the extension host in Remote environments too.
+
+**Controlled Git changes.** In Act mode, `git_stage` and `git_unstage` accept an explicit `repository` and a `paths`
+array of individual files. `git_commit` accepts `repository` and a non-empty `message`, including multiple lines.
+It commits staged changes without automatically staging files. The native surface does not offer stage-all, amend,
+force, checkout, history rewrite or remote Git operations. Paths use forward slashes; edge whitespace and backslash
+filenames are refused rather than silently normalized.
+
+Every operation shows a repository/branch/file preview and asks for one-time approval, even in Auto or with a chat
+edit grant. For commits, the full message appears with the change preview in the transcript. Use **Review files and
+commit message** above the input before approving. There is no Always allow option for native Git changes.
+
+A changed raw index, HEAD, branch, administrative directory, configuration or selected saved content invalidates the
+pending action. Stage refuses known unsaved buffers, directory-wide selections and files over 5 MiB. A raw index over
+16 MiB or a commit involving more than 100 files requires another workflow. Native Git writes on the same repository
+are serialized within Sovran; other Git programs still have their own concurrency and locks.
+
+Git filters may run while staging; hooks/signing may run while committing. Approved commits retain the host
+signing-agent/key-store location variables without disabling configured signing. These programs have your privileges and
+can change files/index or contact services, so inspect the warnings and verify the resulting status/log. Previews use
+read-only settings with filters disabled and can be shortened. Git changes are not covered by checkpoint undo. After
+failure, timeout or cancellation, inspect status/log before retrying: a commit may already exist. No rollback is implied.
+
+The old basic Git MCP shortcut is removed; saved Git MCP servers, custom/import routes and their policies remain.
+Existing MCP servers and the terminal retain their own policies. Native Git settings use the same disabled/always-review
+controls as other native tools.
+
 **MCP servers for more tools.** Connect [Model Context Protocol](https://modelcontextprotocol.io) servers, local
-commands or remote URLs, from **Settings → MCP**, and the agent can use their tools in Act mode: issues, databases,
+commands or remote URLs, from **Settings → Tools**, and the agent can use their tools in Act mode: issues, databases,
 documentation, browsers, anything a server offers. Each tool asks before it runs until you allow it, in every approval
 mode. See [MCP servers](#mcp-servers).
 
@@ -335,7 +379,7 @@ moment, the file wins and Sovran says so.
 ## MCP servers
 
 [MCP](https://modelcontextprotocol.io) servers give the agent tools from other programs and services. Add them in
-**Sovran Settings → MCP**: pick a common server, fill in the form, or paste the JSON snippet from the server's README
+**Sovran Settings → Tools**: choose an optional integration, fill in the form, or paste the JSON snippet from the server's README
 (the Claude Desktop, Cursor, Cline and VS Code formats all work, and a token in it moves to Secret Storage).
 
 - **Local servers** are commands Sovran starts, such as
@@ -361,7 +405,7 @@ The same list is the `sovran.mcp.servers` user setting:
     "id": "github",
     "name": "GitHub",
     "url": "https://api.githubcopilot.com/mcp/",
-    "auth": { "type": "bearer" },            // the token itself: Set token, in Settings → MCP
+    "auth": { "type": "bearer" },            // the token itself: Set token, in Settings → Tools
     "allowedTools": ["search_issues"]
   },
   {
@@ -376,7 +420,54 @@ The same list is the `sovran.mcp.servers` user setting:
 Servers start in the background when a window opens, only in trusted workspaces, and stop with the window. Their
 output, including errors, is in **Show logs**.
 
+### Optional managed integrations
+
+In **Settings → Tools**, selecting a catalog card only shows its setup. **Add integration** saves it disconnected,
+**Install dependencies** downloads the reviewed locked package with npm scripts disabled, and **Connect** asks before
+starting it. Existing custom servers and their policies remain available. No browser is bundled or downloaded.
+
+- **Playwright MCP** uses a separate system Chrome session by default. It offers navigation, snapshots and interactions.
+  Call `browser_snapshot` for inline content after an action; action responses may link a snapshot file that Sovran
+  does not open. Existing-profile mode is an advanced local choice: name the Chrome profile, install the companion
+  extension there and confirm the tab. It may expose signed-in accounts and is unavailable on Remote hosts.
+- **Chrome DevTools MCP** uses separate system Chrome for console, network and performance inspection. The managed
+  profile disables usage statistics, CrUX, update checks, JavaScript evaluation and file navigation.
+- **GitHub MCP** uses the hosted service and a PAT stored in Secret Storage. The default exposes a small read-only
+  set for issues and PRs; collaboration adds issue writes/comments and PR creation on Ask. Restrict token permissions
+  and repository access. Git does not require this integration.
+
+Node/npm and Chrome must exist on the **extension host**, which can be a Remote SSH/WSL/container machine. Missing
+components produce instructions. There is no automatic bridge to your desktop browser. Managed profile limits remain
+in force even if an individual tool is set to Allow. To use other launch settings, edit explicitly as a custom server.
+Browser integrations have wider network/session access than `web_fetch` and can initiate downloads. Playwright output
+is separate from chats in extension global storage (`mcp/artifacts`), with a 20 MiB eviction threshold, not a hard quota.
+Deleting a chat does not remove browser output. The managed tool surface excludes screenshots-to-model, arbitrary code
+and upload/install tools; no returned local path is opened automatically.
+
+### Tools for each chat
+
+Open **Tools** beside the chat input, or **Settings → Tools → Tools for this chat**, to choose native groups and
+configured integrations. Estimates show how much the available definitions add before selecting a group. Off,
+disconnected, Plan-incompatible and untrusted tools contribute no offered definitions. The estimate covers tool
+definitions, not the whole prompt or actual billed tokens. Selecting a disconnected group never connects it.
+
+Choices are saved with the chat when chat persistence is enabled. Older chats and new chats start with all groups
+selected, preserving existing behavior. A new integration starts selected unless excluded in that chat; its separate
+Connect and per-tool policies still apply. Deselecting a group also blocks pending calls. Global permissions and
+Plan/Restricted Mode remain in force. Re-enable a group and make a fresh model request to use definitions not offered
+in the previous request. No model request is used to select tools and no tool is silently removed by a token heuristic.
+
 ## Settings
+
+In **Settings → Tools**, enable or always review individual built-in tools. Under **Advanced native overrides**, **Disabled native tools** removes the named tools from model requests and blocks their
+execution, including actions already awaiting approval. **Always review native tools** requires confirmation for
+those tools even for reads and in Auto mode. Use names such as `read_file`, `write_file` or `execute_terminal`.
+These are user settings (`sovran.tools.disabled` and `sovran.tools.forceAsk`); repository settings cannot change them.
+MCP tools retain their separate Off / Ask / Allow controls in **Settings → Tools**.
+
+Tool availability, workspace trust and permissions are checked again after approval. If a definition or permission
+changes while the model responds or an approval is open, Sovran can refuse that pending call and ask the model to
+request it again with the current tools. Plan mode remains read-only.
 
 | Setting | Default | Description |
 |---|---|---|
@@ -385,6 +476,7 @@ output, including errors, is in **Show logs**.
 | `sovran.planModel` | `""` | Model for Plan mode. Empty means the same as Act |
 | `sovran.configFile.enabled` | `true` | Use `~/.sovran/config.yaml` when it exists, kept in sync with `sovran.providers`. User scope only |
 | `sovran.agent.maxIterations` | `25` | Maximum model round-trips per request |
+| `sovran.tools.disabled` / `sovran.tools.forceAsk` | `[]` | Native tool names to disable or always approve; user scope only |
 | `sovran.mcp.servers` | `[]` | MCP servers whose tools the agent can use in Act mode (see [MCP servers](#mcp-servers)). User scope only |
 | `sovran.approvals.mode` | `ask` | Approval mode a new window starts in: `ask`, `edits` (Auto-edit) or `auto`. User scope only |
 | `sovran.approvals.allowedCommands` | `[]` | Commands that run without asking, for example `npm test`. Never applies to commands that contain shell operators or trip a guardrail |
@@ -402,8 +494,8 @@ output, including errors, is in **Show logs**.
 | `sovran.approvals.fileEdits` | `ask` | *Deprecated*: use `sovran.approvals.mode`. `auto` here still starts windows in Auto-edit |
 
 All of these can be changed from **Sovran Settings** (the gear in the view title). Its areas, *Models*, *Approvals*,
-*Agent*, *MCP*, *Context* and *Data*, stay at the top as tabs: pick one to see only its settings (arrow keys move
-between them). The VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *MCP*, *Context*
+*Agent*, *Tools: Integrations*, *Context* and *Data*, stay at the top as tabs: pick one to see only its settings (arrow keys move
+between them). The VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *Tools: Integrations*, *Context*
 and *Chats*.
 
 ## Security
