@@ -8,6 +8,8 @@ import type {
   EditorContext,
   FileStat,
   ProcessPort,
+  FileProcessOptions,
+  FileProcessResult,
   ProcessResult,
   WorkspacePort,
   WorkspaceRoot,
@@ -131,6 +133,10 @@ export class FakeProcess implements ProcessPort {
     const output = this.result.output ?? `ran ${command}`;
     options.onOutput?.(output);
     return { exitCode: 0, signal: null, output, truncated: false, timedOut: false, cancelled: false, durationMs: 5, ...this.result };
+  }
+  async runFile(executable: string, argv: readonly string[], options: FileProcessOptions): Promise<FileProcessResult> {
+    const result = await this.run([executable, ...argv].join(' '), options);
+    return { ...result, stdout: result.output, stderr: '' };
   }
 }
 

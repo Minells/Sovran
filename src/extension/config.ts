@@ -135,6 +135,20 @@ export interface HostSettings {
   generateTitles: boolean;
 }
 
+/** Malformed user values never become a workspace override or crash the settings reader. */
+function readToolNames(key: string): string[] {
+  const raw = userSetting<unknown>(key, []);
+  return Array.isArray(raw)
+    ? [
+        ...new Set(
+          raw.filter(
+            (name): name is string => typeof name === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(name),
+          ),
+        ),
+      ]
+    : [];
+}
+
 export function readSettings(): HostSettings {
   const protectedPaths = userSetting<string[]>('security.protectedPaths', []).filter((p) => typeof p === 'string');
   return {
@@ -142,7 +156,11 @@ export function readSettings(): HostSettings {
       maxIterations: Math.min(200, Math.max(1, setting('agent.maxIterations', 25))),
       policy: {
         approvalMode: readDefaultApprovalMode(),
-        allowedCommands: userSetting<string[]>('approvals.allowedCommands', []).filter((c) => typeof c === 'string'),
+        disabledTools: readToolNames('tools.disabled'),
+        forceAskTools: readToolNames('tools.forceAsk'),
+        allowedCommands: userSetting<string[]>('approvals.allowedCommands', []).filter(
+          (c) => typeof c === 'string',
+        ),
         protectedPaths,
       },
       tools: {
@@ -186,6 +204,8 @@ export function readSettingsView(s: HostSettings = readSettings()): SettingsView
   return {
     defaultApprovalMode: s.agent.policy.approvalMode,
     allowedCommands: [...s.agent.policy.allowedCommands],
+    disabledTools: [...(s.agent.policy.disabledTools ?? [])],
+    forceAskTools: [...(s.agent.policy.forceAskTools ?? [])],
     protectedPaths: [...s.agent.policy.protectedPaths],
     defaultProtectedPaths: config.inspect<string[]>('security.protectedPaths')?.defaultValue ?? [],
     maxIterations: s.agent.maxIterations,

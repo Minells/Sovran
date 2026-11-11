@@ -42,7 +42,11 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
   `/review`, `/doc`, `/compact`, and `/new`. Add custom Markdown prompts under `.sovran/commands/`.
 - **Attachments:** extract text locally from PDF, modern Office, and OpenDocument files; list ZIP contents. Paste or
   attach images for vision-capable models.
-- **MCP tools:** user-configured stdio and Streamable HTTP servers, with per-tool Off / Ask / Allow controls.
+- **Native Git:** inspect status, diffs, history and branches in trusted Plan/Act workspaces; stage/unstage selected files and commit with mandatory review in Act.
+- **Workspace diagnostics:** read cached editor Problems for active or unopened files, filtered by file/folder, severity and result count. Protected and external paths are omitted; the tool does not run checks or start language servers.
+- **Public Web reads:** `web_fetch` reads one approved public URL as structured text with source links. Available in trusted Plan/Act, with approval for each URL even in Auto. No account, search service, browser or crawler installation.
+- **Tools:** built-in permissions and per-chat group selection with definition cost estimates. Optional Playwright,
+  Chrome DevTools and GitHub integrations, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
 - **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
   history that can persist across restarts.
 
@@ -94,7 +98,7 @@ pending, <kbd>Enter</kbd> approves from the empty input and <kbd>Esc</kbd> rejec
 
 ## Configuration
 
-Use the gear in the Sovran view title for **Models**, **Approvals**, **Agent**, **MCP**, **Context**, and **Data**.
+Use the gear in the Sovran view title for **Models**, **Approvals**, **Agent**, **Tools**, **Context**, and **Data**.
 Provider and security-sensitive settings are read from user scope; a repository cannot override them.
 
 For YAML configuration, run **Sovran: Open Model Config File (config.yaml)** to create `~/.sovran/config.yaml`.
@@ -120,6 +124,7 @@ Never put API keys in YAML or settings. Use **Sovran: Set Provider API Key…**.
 | `sovran.providers` | `[]` | OpenAI-compatible endpoints |
 | `sovran.defaultModel` / `sovran.planModel` | `""` | Act / Plan model; blank Plan inherits Act |
 | `sovran.approvals.mode` | `ask` | `ask`, `edits` (Auto-edit), or `auto` |
+| `sovran.tools.disabled` / `sovran.tools.forceAsk` | `[]` | Disable native tools or always review their calls |
 | `sovran.agent.maxIterations` | `25` | Model round-trips per request |
 | `sovran.terminal.timeoutSeconds` | `120` | Command timeout |
 | `sovran.context.autoCompact` | `true` | Summarize older turns when needed |

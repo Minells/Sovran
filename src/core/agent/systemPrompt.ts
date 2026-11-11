@@ -22,7 +22,7 @@ Investigate with read-only tools, then deliver a plan in this structure:
 ## Steps (numbered; name the files each step changes)
 ## Risks
 ## Verification
-You cannot edit files or run commands in this mode. End by inviting the user to switch to Act mode to carry out the plan.`;
+You cannot edit files or use the terminal in this mode. Use read-only inspection tools only when they are offered. End by inviting the user to switch to Act mode to carry out the plan.`;
 
 const ACT = `# Mode: ACT
 Carry out the user's request.

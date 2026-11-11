@@ -17,7 +17,7 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -35,13 +35,23 @@ jobs:
       - name: Extension smoke tests
         if: runner.os != 'Linux'
         run: npm run test:extension
+      - name: Minimum VS Code smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:extension
+        env:
+          SOVRAN_TEST_VSCODE_VERSION: '1.95.0'
+      - name: Minimum VS Code smoke
+        if: runner.os != 'Linux'
+        run: npm run test:extension
+        env:
+          SOVRAN_TEST_VSCODE_VERSION: '1.95.0'
 
   package:
     name: Package VSIX
     needs: check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -51,7 +61,12 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npx vsce package --no-dependencies --pre-release -o sovran.vsix
       - run: npx vsce ls --no-dependencies
-      - uses: actions/upload-artifact@v4
+      - run: npm run verify:vsix -- sovran.vsix
+      - name: Installed VSIX smoke in a fresh profile
+        run: xvfb-run -a npm run test:extension
+        env:
+          SOVRAN_TEST_VSIX: sovran.vsix
+      - uses: actions/upload-artifact@v7
         with:
           name: sovran-vsix
           path: sovran.vsix

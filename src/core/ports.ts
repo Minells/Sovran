@@ -32,6 +32,12 @@ export interface EditorDiagnostic {
   source?: string;
 }
 
+export interface FileDiagnostics {
+  /** Absolute file-system path. Non-file URI schemes must not be included. */
+  path: string;
+  diagnostics: readonly EditorDiagnostic[];
+}
+
 export interface EditorContext {
   /** Absolute path of the active document (file scheme only). */
   path: string;
@@ -77,7 +83,13 @@ export interface WorkspacePort {
   deleteFile(absPath: string): Promise<void>;
   /** Optional fast text search (e.g. ripgrep). Callers fall back to scanning files when absent. */
   searchText?(options: TextSearchOptions): Promise<TextSearchResult>;
+  /** Whether a saved-file operation would ignore unsaved editor changes. */
+  isDirty?(absPath: string): boolean;
   activeEditor(): EditorContext | null;
+  /** Cached editor diagnostics, including unopened files. Never opens documents or starts analysis.
+   * When supplied, absPath selects one exact file. Callers enforce workspace/protected-path boundaries.
+   */
+  diagnostics?(absPath?: string): readonly FileDiagnostics[];
   openEditors(): string[];
   environment(): { os: string; shell: string };
 }
@@ -92,20 +104,51 @@ export interface ProcessResult {
   durationMs: number;
 }
 
+export interface ProcessOptions {
+  cwd: string;
+  timeoutMs: number;
+  signal: AbortSignal;
+  maxOutputChars: number;
+  onOutput?: (chunk: string) => void;
+}
+
+export interface FileProcessOptions extends ProcessOptions {
+  /** Structured processes inherit a minimal host environment; these trusted overrides are applied last. */
+  env?: Readonly<Record<string, string>>;
+  /** Explicit host keys requested by trusted code (e.g. signing-agent locations), never model-controlled. */
+  inheritEnv?: readonly string[];
+  /** Never resolve an executable from these workspace roots, even through a PATH symlink. */
+  disallowedExecutableRoots?: readonly string[];
+  /** Final synchronous runtime authorization check after executable resolution, immediately before spawning. */
+  beforeSpawn?: () => void;
+}
+
+export interface FileProcessResult extends ProcessResult {
+  /** Kept separate and decoded incrementally; structured output must not be mixed with diagnostics. */
+  stdout: string;
+  stderr: string;
+}
+
 export interface ProcessPort {
-  run(
-    command: string,
-    options: {
-      cwd: string;
-      timeoutMs: number;
-      signal: AbortSignal;
-      maxOutputChars: number;
-      onOutput?: (chunk: string) => void;
-    },
-  ): Promise<ProcessResult>;
+  run(command: string, options: ProcessOptions): Promise<ProcessResult>;
+  /** Execute an executable and literal argv without a shell, using the host PATH outside workspace roots. */
+  runFile(executable: string, argv: readonly string[], options: FileProcessOptions): Promise<FileProcessResult>;
+}
+
+export interface GitApprovalDetail {
+  kind: 'git';
+  operation: 'stage' | 'unstage' | 'commit';
+  repository: string;
+  branch: string;
+  files: string[];
+  message?: string;
+  preview: string;
+  warnings: string[];
 }
 
 export type ApprovalDetail =
+  | GitApprovalDetail
+  | { kind: 'web'; url: string }
   | {
       kind: 'edit';
       path: string;

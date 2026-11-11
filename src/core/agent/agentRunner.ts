@@ -2,21 +2,36 @@ import { randomUUID } from 'node:crypto';
 import { planCompaction, renderForSummary, summarize } from '../context/compaction';
 import type { DocumentReader } from '../documents/reader';
 import { buildContext, estimateTokens } from '../context/contextManager';
+import { commandPathRisks } from '../permissions/commands';
 import { decide, type AgentMode, type PolicySettings, type SessionGrants } from '../permissions/policy';
 import type { ApprovalPort, Logger, ProcessPort, WorkspacePort } from '../ports';
-import { capabilityKey, resolveToolMode, resolveVision, type CapabilityStore } from '../providers/capabilities';
+import {
+  capabilityKey,
+  resolveToolMode,
+  resolveVision,
+  type CapabilityStore,
+} from '../providers/capabilities';
 import { effectiveLimits } from '../providers/limits';
 import { ProviderError, errorFromException } from '../providers/errors';
 import type { ChatProvider, ModelConfig, ResolvedToolMode } from '../providers/types';
 import { PathError } from '../security/paths';
 import { redact } from '../security/redact';
-import { messagesForModel, type AssistantMessage, type ErrorInfo, type Session, type ToolCall, type ToolMessage, type ToolStatus } from '../sessions/model';
+import {
+  messagesForModel,
+  type AssistantMessage,
+  type ErrorInfo,
+  type Session,
+  type ToolCall,
+  type ToolMessage,
+  type ToolStatus,
+} from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
 import type { ToolRegistry } from '../tools/registry';
-import { ToolError, type ToolContext, type ToolSettings } from '../tools/types';
+import { ToolError, type AnyTool, type ToolContext, type ToolSettings } from '../tools/types';
 import type { AgentEvent, RunOutcome } from './events';
 import { parseJsonLenient, parseToolCallBlock } from './promptedTools';
 import { buildSystemPrompt } from './systemPrompt';
+import type { WebFetchPort } from '../web/types';
 import { TaggedStreamParser } from './taggedStream';
 
 const defaultsOf = (s: Pick<AgentSettings, 'defaultContextWindow' | 'defaultMaxOutputTokens'>) => ({
@@ -42,6 +57,7 @@ export interface AgentDeps {
   logger: Logger;
   /** Lets `read_file` read PDF, Office and OpenDocument files (see ToolContext.documents). */
   documents?: DocumentReader;
+  web?: WebFetchPort;
   newId?: () => string;
   now?: () => number;
 }
@@ -69,7 +85,10 @@ export interface RunOptions {
   images?: ReadonlyMap<string, string>;
 }
 
-export type CompactOptions = Pick<RunOptions, 'session' | 'model' | 'settings' | 'signal' | 'emit' | 'secrets'>;
+export type CompactOptions = Pick<
+  RunOptions,
+  'session' | 'model' | 'settings' | 'signal' | 'emit' | 'secrets'
+>;
 
 interface TurnResult {
   text: string;
@@ -101,7 +120,11 @@ export class AgentRunner {
     let iteration = 0;
 
     const latest = [...o.session.messages].reverse().find((m) => m.role === 'user');
-    if (latest?.role === 'user' && latest.images?.length && !resolveVision(o.model.vision, this.deps.capabilities.get(key))) {
+    if (
+      latest?.role === 'user' &&
+      latest.images?.length &&
+      !resolveVision(o.model.vision, this.deps.capabilities.get(key))
+    ) {
       o.emit({
         type: 'notice',
         level: 'info',
@@ -127,6 +150,7 @@ export class AgentRunner {
       };
 
       let turn: TurnResult;
+      let offered: ReadonlyMap<string, AnyTool>;
       try {
         let built = this.buildRequest(o, toolMode, vision);
         if (built.droppedTurns > 0 && o.autoCompact && !compactedThisRun) {
@@ -141,18 +165,29 @@ export class AgentRunner {
             message: `Context window is full: ${built.droppedTurns} earlier exchange(s) are no longer sent to the model.`,
           });
         }
-        o.emit({ type: 'context', estimatedTokens: built.estimatedTokens, budgetTokens: built.budgetTokens, contextWindow: built.contextWindow });
+        o.emit({
+          type: 'context',
+          estimatedTokens: built.estimatedTokens,
+          budgetTokens: built.budgetTokens,
+          contextWindow: built.contextWindow,
+        });
         const request = built.request;
+        offered = built.offered;
         o.session.messages.push(assistant);
         o.emit({ type: 'message_started', message: { ...assistant } });
         turn = await this.streamTurn(assistant, request, toolMode, o);
       } catch (e) {
-        const err = e instanceof ProviderError ? e : errorFromException(e, { url: o.providerId, secrets: o.secrets });
+        const err =
+          e instanceof ProviderError ? e : errorFromException(e, { url: o.providerId, secrets: o.secrets });
         // Like tools: an unconfigured model that refuses images is remembered as text-only, and the step is retried
         // with each image's name in its place. A model configured with `vision: true` reports the error instead.
         if (err.kind === 'vision_unsupported' && vision && o.model.vision === undefined && !visionRefused) {
           visionRefused = true;
-          this.deps.capabilities.set(key, { ...this.deps.capabilities.get(key), vision: false, updatedAt: this.now() });
+          this.deps.capabilities.set(key, {
+            ...this.deps.capabilities.get(key),
+            vision: false,
+            updatedAt: this.now(),
+          });
           this.removeMessage(o, assistant.id);
           o.emit({
             type: 'notice',
@@ -162,10 +197,19 @@ export class AgentRunner {
           iteration--;
           continue;
         }
-        if (err.kind === 'tools_unsupported' && toolMode === 'native' && (o.model.toolMode ?? 'auto') === 'auto' && !downgraded) {
+        if (
+          err.kind === 'tools_unsupported' &&
+          toolMode === 'native' &&
+          (o.model.toolMode ?? 'auto') === 'auto' &&
+          !downgraded
+        ) {
           downgraded = true;
           // Merge: the same record also holds the limits the server reported.
-          this.deps.capabilities.set(key, { ...this.deps.capabilities.get(key), toolMode: 'prompted', updatedAt: this.now() });
+          this.deps.capabilities.set(key, {
+            ...this.deps.capabilities.get(key),
+            toolMode: 'prompted',
+            updatedAt: this.now(),
+          });
           this.removeMessage(o, assistant.id);
           o.emit({
             type: 'notice',
@@ -180,7 +224,11 @@ export class AgentRunner {
           this.commitOrDrop(o, assistant);
           return { reason: 'cancelled' };
         }
-        const info: ErrorInfo = { kind: err.kind, message: redact(err.message, o.secrets ?? []), hint: err.hint };
+        const info: ErrorInfo = {
+          kind: err.kind,
+          message: redact(err.message, o.secrets ?? []),
+          hint: err.hint,
+        };
         assistant.error = info;
         this.deps.logger.warn(`Provider error (${err.kind}): ${info.message}`);
         o.emit({ type: 'message_committed', message: { ...assistant } });
@@ -204,7 +252,7 @@ export class AgentRunner {
           this.cancelRemaining(o, turn.calls.slice(i));
           return { reason: 'cancelled' };
         }
-        const result = await this.executeCall(call, o);
+        const result = await this.executeCall(call, o, offered);
         o.session.messages.push(result);
         o.emit({ type: 'message_committed', message: { ...result } });
         if (result.status === 'cancelled') {
@@ -236,7 +284,14 @@ export class AgentRunner {
   }
 
   private buildRequest(o: RunOptions, toolMode: ResolvedToolMode, vision = false) {
-    const tools = toolMode === 'none' ? [] : this.deps.registry.list(o.mode);
+    const tools =
+      toolMode === 'none'
+        ? []
+        : this.deps.registry.list(o.mode, {
+            ...(o.policy?.() ?? o.settings.policy),
+            excludedToolGroups: o.session.excludedToolGroups,
+            workspaceTrusted: this.deps.workspace.isTrusted(),
+          });
     const schemas = this.deps.registry.schemas(tools);
     const env = this.deps.workspace.environment();
     const systemPrompt = buildSystemPrompt({
@@ -250,7 +305,11 @@ export class AgentRunner {
       trusted: this.deps.workspace.isTrusted(),
       projectInstructions: o.projectInstructions,
     });
-    const { contextWindow, reserveTokens: maxOutput } = effectiveLimits(o.model, o.model.serverLimits, defaultsOf(o.settings));
+    const { contextWindow, reserveTokens: maxOutput } = effectiveLimits(
+      o.model,
+      o.model.serverLimits,
+      defaultsOf(o.settings),
+    );
     const schemaTokens = toolMode === 'native' ? estimateTokens(JSON.stringify(schemas)) : 0;
     const budgetTokens = Math.max(1024, contextWindow - maxOutput);
     const ctx = buildContext({
@@ -265,6 +324,7 @@ export class AgentRunner {
       vision,
     });
     return {
+      offered: new Map(tools.map((tool) => [tool.name, tool])),
       request: {
         model: o.model.id,
         messages: ctx.messages,
@@ -309,7 +369,11 @@ export class AgentRunner {
       if (o.signal.aborted) return false;
       const message = e instanceof Error ? redact(e.message, o.secrets ?? []) : String(e);
       this.deps.logger.warn(`Compaction failed: ${message}`);
-      o.emit({ type: 'notice', level: 'warning', message: `Could not summarize earlier messages (${message}). Older messages will be dropped instead.` });
+      o.emit({
+        type: 'notice',
+        level: 'warning',
+        message: `Could not summarize earlier messages (${message}). Older messages will be dropped instead.`,
+      });
       return false;
     }
   }
@@ -388,14 +452,22 @@ export class AgentRunner {
         calls.push(
           parsed.ok
             ? { id: `call_${this.newId()}`, name: parsed.name, arguments: parsed.argumentsJson }
-            : { id: `call_${this.newId()}`, name: '__invalid__', arguments: JSON.stringify({ error: parsed.error }) },
+            : {
+                id: `call_${this.newId()}`,
+                name: '__invalid__',
+                arguments: JSON.stringify({ error: parsed.error }),
+              },
         );
       }
     }
     return { text: text.trim(), reasoning: reasoning.trim(), calls };
   }
 
-  private async executeCall(call: ToolCall, o: RunOptions): Promise<ToolMessage> {
+  private async executeCall(
+    call: ToolCall,
+    o: RunOptions,
+    offered: ReadonlyMap<string, AnyTool>,
+  ): Promise<ToolMessage> {
     const started = this.now();
     const result = (status: ToolStatus, content: string, extra: Partial<ToolMessage> = {}): ToolMessage => ({
       role: 'tool',
@@ -416,18 +488,40 @@ export class AgentRunner {
     }
     const tool = this.deps.registry.get(call.name);
     if (!tool) {
-      const names = this.deps.registry.list(o.mode).map((t) => t.name).join(', ');
+      const names = [...offered.keys()].join(', ');
       return result('error', `Unknown tool "${call.name}". Available tools: ${names}.`);
     }
     if (o.mode === 'plan' && tool.risk !== 'read') {
-      return result('denied', `${tool.name} is not available in Plan mode (read-only). Describe the change in your plan instead.`);
+      return result(
+        'denied',
+        `${tool.name} is not available in Plan mode (read-only). Describe the change in your plan instead.`,
+      );
     }
 
+    if (offered.get(call.name) !== tool) {
+      return result(
+        'denied',
+        `${call.name} was not offered in this model request, or its definition changed. Request the current tools before retrying.`,
+      );
+    }
+    const unavailable = () =>
+      this.deps.registry.unavailable(tool, o.mode, {
+        ...(o.policy?.() ?? o.settings.policy),
+        excludedToolGroups: o.session.excludedToolGroups,
+        workspaceTrusted: this.deps.workspace.isTrusted(),
+      });
+    const unavailableReason = unavailable();
+    if (unavailableReason) return result('denied', unavailableReason);
+    if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.');
+
     const parsedJson = parseJsonLenient(call.arguments);
-    if (!parsedJson.ok) return result('error', `Arguments for ${tool.name} are not valid JSON: ${parsedJson.error}`);
+    if (!parsedJson.ok)
+      return result('error', `Arguments for ${tool.name} are not valid JSON: ${parsedJson.error}`);
     const parsed = tool.schema.safeParse(parsedJson.value);
     if (!parsed.success) {
-      const issues = parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
+      const issues = parsed.error.issues
+        .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+        .join('; ');
       return result('error', `Invalid arguments for ${tool.name}: ${issues}`);
     }
     const args = parsed.data;
@@ -437,9 +531,10 @@ export class AgentRunner {
       workspace: this.deps.workspace,
       process: this.deps.process,
       signal: o.signal,
-      settings: o.settings.tools,
+      settings: { ...o.settings.tools, protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths },
       onOutput: (chunk) => o.emit({ type: 'tool_output', callId: call.id, chunk }),
       ...(this.deps.documents ? { documents: this.deps.documents } : {}),
+      ...(this.deps.web ? { web: this.deps.web } : {}),
     };
 
     let prepared;
@@ -449,50 +544,115 @@ export class AgentRunner {
       return result('error', describeToolFailure(e), { summary: label });
     }
 
-    const policy = o.policy?.() ?? o.settings.policy;
-    const decision = decide({
-      risk: tool.risk,
-      mode: o.mode,
-      workspaceTrusted: this.deps.workspace.isTrusted(),
-      paths: prepared.paths,
-      command: prepared.command,
-      risks: prepared.risks,
-      mcp: prepared.mcp,
-      settings: policy,
-      grants: o.grants,
-    });
+    if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.', { summary: label });
+    const preparedUnavailable = unavailable();
+    if (preparedUnavailable) return result('denied', preparedUnavailable, { summary: label });
+
+    const evaluate = () => {
+      const policy = o.policy?.() ?? o.settings.policy;
+      const mcp = tool.mcpPolicy?.() ?? prepared.mcp;
+      const commandRisks =
+        !mcp && prepared.command
+          ? commandPathRisks(prepared.command, {
+              protectedPaths: policy.protectedPaths,
+              roots: this.deps.workspace.roots().map((r) => r.path),
+            })
+          : [];
+      return decide({
+        toolName: tool.name,
+        risk: tool.risk,
+        mode: o.mode,
+        workspaceTrusted: this.deps.workspace.isTrusted(),
+        paths: prepared.paths,
+        command: prepared.command,
+        risks: [...(prepared.risks ?? []), ...commandRisks],
+        mcp,
+        network: prepared.network,
+        settings: policy,
+        grants: o.grants,
+      });
+    };
+    const decision = evaluate();
     if (decision.action === 'deny') return result('denied', decision.reason, { summary: label });
     // Changes made without a human decision are labelled, so the transcript shows what ran unattended.
-    const autoApproved = decision.action === 'allow' && tool.risk !== 'read' ? decision.reason : undefined;
+    let approvedReason: string | undefined;
 
     if (decision.action === 'ask') {
       o.emit({ type: 'tool_phase', callId: call.id, toolName: tool.name, label, phase: 'awaiting_approval' });
-      const detail = prepared.approval ?? { kind: 'read' as const, path: prepared.paths[0] ?? label, reason: decision.reason };
+      const detail = prepared.approval ?? {
+        kind: 'read' as const,
+        path: prepared.paths[0] ?? label,
+        reason: decision.reason,
+      };
       let response;
       try {
         response = await this.deps.approvals.request(
-          { id: this.newId(), callId: call.id, toolName: tool.name, title: label, detail, reason: decision.reason },
+          {
+            id: this.newId(),
+            callId: call.id,
+            toolName: tool.name,
+            title: label,
+            detail,
+            reason: decision.reason,
+          },
           o.signal,
         );
       } catch {
         return result('cancelled', 'The run was cancelled while waiting for approval.', { summary: label });
       }
-      if (o.signal.aborted) return result('cancelled', 'The run was cancelled while waiting for approval.', { summary: label });
+      if (o.signal.aborted)
+        return result('cancelled', 'The run was cancelled while waiting for approval.', { summary: label });
       if (!response.approved) {
         const feedback = response.feedback?.trim() ? ` User feedback: ${response.feedback.trim()}` : '';
         return result('denied', `The user rejected this action.${feedback}`, { summary: label });
       }
+      approvedReason = decision.reason;
       if (response.grant === 'session-edits') o.grants.edits = true;
     }
 
     o.emit({ type: 'tool_phase', callId: call.id, toolName: tool.name, label, phase: 'running' });
-    const audit = autoApproved ? { autoApproved } : {};
+    // No await between this final check and dispatch. UI event listeners may also change policy or cancel.
+    if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.', { summary: label });
+    const finalUnavailable = unavailable();
+    if (finalUnavailable) return result('denied', finalUnavailable, { summary: label });
+    const finalDecision = evaluate();
+    if (finalDecision.action === 'deny') return result('denied', finalDecision.reason, { summary: label });
+    if (finalDecision.action === 'ask' && approvedReason !== finalDecision.reason) {
+      return result(
+        'denied',
+        'Permissions changed before execution. Request this action again for approval.',
+        { summary: label },
+      );
+    }
+    ctx.settings = { ...ctx.settings, protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths };
+    const audit =
+      !approvedReason && finalDecision.action === 'allow' && tool.risk !== 'read'
+        ? { autoApproved: finalDecision.reason }
+        : {};
+    ctx.revalidate = () => {
+      if (o.signal.aborted) throw new ToolError('Cancelled by the user.');
+      const unavailableReason = unavailable();
+      if (unavailableReason) throw new ToolError(unavailableReason);
+      const current = evaluate();
+      if (current.action === 'deny') throw new ToolError(current.reason);
+      if (current.action === 'ask' && current.reason !== approvedReason) {
+        throw new ToolError('Permissions changed before execution. Request this action again for approval.');
+      }
+    };
     try {
       const r = await tool.execute(args, ctx, prepared);
       if (o.signal.aborted && tool.risk !== 'write') {
-        return result('cancelled', r.content || 'Cancelled.', { summary: r.summary ?? label, display: r.display, ...audit });
+        return result('cancelled', r.content || 'Cancelled.', {
+          summary: r.summary ?? label,
+          display: r.display,
+          ...audit,
+        });
       }
-      return result(r.isError ? 'error' : 'success', r.content, { summary: r.summary ?? label, display: r.display, ...audit });
+      return result(r.isError ? 'error' : 'success', r.content, {
+        summary: r.summary ?? label,
+        display: r.display,
+        ...audit,
+      });
     } catch (e) {
       if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.', { summary: label });
       this.deps.logger.warn(`Tool ${tool.name} failed: ${e instanceof Error ? e.message : String(e)}`);
@@ -542,7 +702,11 @@ export function canonicalArguments(raw: string): string {
     Array.isArray(v)
       ? v.map(sort)
       : v && typeof v === 'object'
-        ? Object.fromEntries(Object.entries(v as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, x]) => [k, sort(x)]))
+        ? Object.fromEntries(
+            Object.entries(v as Record<string, unknown>)
+              .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+              .map(([k, x]) => [k, sort(x)]),
+          )
         : v;
   return JSON.stringify(sort(parsed.value));
 }

@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { DirEntry, EditorContext, EditorDiagnostic, FileStat, TextSearchOptions, TextSearchResult, WorkspacePort, WorkspaceRoot } from '../../core/ports';
+import type { DirEntry, EditorContext, EditorDiagnostic, FileDiagnostics, FileStat, TextSearchOptions, TextSearchResult, WorkspacePort, WorkspaceRoot } from '../../core/ports';
 import type { RipgrepSearch } from './RipgrepSearch';
 
 const DEFAULT_EXCLUDES = ['**/node_modules/**', '**/.git/**', '**/.hg/**', '**/.svn/**', '**/__pycache__/**', '**/.venv/**', '**/venv/**'];
@@ -119,6 +119,12 @@ export class VscodeWorkspace implements WorkspacePort {
     if (!(await vscode.workspace.applyEdit(edit))) throw new Error(`VS Code refused to delete ${vscode.workspace.asRelativePath(absPath)}.`);
   }
 
+  isDirty(absPath: string): boolean {
+    return vscode.workspace.textDocuments.some(
+      (doc) => doc.uri.scheme === 'file' && path.relative(doc.uri.fsPath, absPath) === '' && doc.isDirty,
+    );
+  }
+
   activeEditor(): EditorContext | null {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.scheme !== 'file') return null;
@@ -137,6 +143,25 @@ export class VscodeWorkspace implements WorkspacePort {
         source: d.source,
       })),
     };
+  }
+
+  diagnostics(absPath?: string): FileDiagnostics[] {
+    // Read only the existing Problems collection. Do not open files or invoke language providers.
+    const entries: readonly [vscode.Uri, readonly vscode.Diagnostic[]][] =
+      absPath === undefined
+        ? vscode.languages.getDiagnostics()
+        : [[vscode.Uri.file(absPath), vscode.languages.getDiagnostics(vscode.Uri.file(absPath))]];
+    return entries
+      .filter(([uri]) => uri.scheme === 'file')
+      .map(([uri, diagnostics]) => ({
+        path: uri.fsPath,
+        diagnostics: diagnostics.map((d) => ({
+          line: d.range.start.line + 1,
+          severity: SEVERITY[d.severity],
+          message: d.message,
+          source: d.source,
+        })),
+      }));
   }
 
   openEditors(): string[] {

@@ -3,6 +3,8 @@
 !dist/extension.js.LEGAL.txt
 !dist/documentWorker.js
 !dist/documentWorker.js.LEGAL.txt
+!dist/webWorker.js
+!dist/webWorker.js.LEGAL.txt
 !dist/webview/**
 !media/brand/**
 !media/sovran.css
@@ -12,3 +14,5 @@
 !LICENSE
 !SECURITY.md
 !THIRD_PARTY_NOTICES.md
+!resources/mcp/**/package.json
+!resources/mcp/**/package-lock.json

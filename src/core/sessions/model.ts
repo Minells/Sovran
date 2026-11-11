@@ -27,7 +27,14 @@ export interface ContextAttachment {
 
 export type ToolDisplay =
   | { kind: 'diff'; path: string; diff: string; added: number; removed: number; isNew: boolean }
-  | { kind: 'command'; command: string; cwd: string; output: string; exitCode: number | null; timedOut: boolean }
+  | {
+      kind: 'command';
+      command: string;
+      cwd: string;
+      output: string;
+      exitCode: number | null;
+      timedOut: boolean;
+    }
   | { kind: 'list'; items: string[]; total: number }
   | { kind: 'text'; text: string };
 
@@ -127,6 +134,8 @@ export interface Session {
   providerId?: string;
   modelId?: string;
   messages: SessionMessage[];
+  /** Missing means all groups selected, preserving older chats. Empty groups remain excluded after reconnects. */
+  excludedToolGroups?: string[];
   usage?: ContextUsage;
   compaction?: CompactionState;
 }
@@ -181,7 +190,9 @@ export function summarize(session: Session): SessionSummary {
  * got a result. Normalize them so the transcript and the wire protocol stay consistent.
  */
 export function repairInterruptedSession(session: Session, now: number): Session {
-  const answered = new Set(session.messages.filter((m): m is ToolMessage => m.role === 'tool').map((m) => m.toolCallId));
+  const answered = new Set(
+    session.messages.filter((m): m is ToolMessage => m.role === 'tool').map((m) => m.toolCallId),
+  );
   const messages: SessionMessage[] = [];
   for (const m of session.messages) {
     if (m.role === 'assistant' && m.streaming) messages.push({ ...m, streaming: undefined });
