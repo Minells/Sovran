@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const tree = JSON.parse(execSync('npm ls --omit=dev --all --json', { encoding: 'utf8' }));
+const tree = JSON.parse(execSync('npm ls --omit=dev --all --long --json', { encoding: 'utf8' }));
 // Optional modules pdfjs-dist loads at run time only if they are installed. They are never bundled (esbuild follows
 // static imports only, and the VSIX ships no node_modules), and the canvas brings a native package per platform,
 // which would make this file differ between machines. Their own dependencies are skipped with them.
@@ -11,20 +11,24 @@ const NOT_BUNDLED = new Set(['@napi-rs/canvas', 'node-readable-to-web-readable-s
 const seen = new Map();
 (function walk(deps = {}) {
   for (const [name, info] of Object.entries(deps)) {
-    if (!info.version || seen.has(name) || NOT_BUNDLED.has(name)) continue;
-    seen.set(name, info.version);
+    if (!info.version || NOT_BUNDLED.has(name)) continue;
+    // Different bundled versions need their own notices and their actual nested package/license files.
+    const key = `${name}@${info.version}`;
+    if (!seen.has(key)) seen.set(key, { name, version: info.version, dir: info.path });
     walk(info.dependencies);
   }
 })(tree.dependencies);
 
 const sections = [];
 const summary = [];
-for (const [name, version] of [...seen.entries()].sort(([a], [b]) => a.localeCompare(b))) {
-  const dir = join('node_modules', name);
+for (const { name, version, dir } of [...seen.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))) {
+  if (!dir) throw new Error(`npm did not return the installed location of ${name}@${version}.`);
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
   const license = typeof pkg.license === 'string' ? pkg.license : pkg.license?.type ?? 'UNKNOWN';
   const file = readdirSync(dir).find((f) => /^(licen[sc]e|copying)(\.|$)/i.test(f));
-  const text = file && existsSync(join(dir, file)) ? readFileSync(join(dir, file), 'utf8').trim() : '(license text not included in package)';
+  const raw = file && existsSync(join(dir, file)) ? readFileSync(join(dir, file), 'utf8') : '(license text not included in package)';
+  // Preserve existing CRLF license texts verbatim; avoid trailing blanks in added LF notices.
+  const text = (raw.includes('\r\n') ? raw : raw.replace(/[ \t]+$/gm, '')).trim();
   summary.push(`| ${name} | ${version} | ${license} |`);
   sections.push(`## ${name} ${version} — ${license}\n\n\`\`\`\n${text}\n\`\`\``);
 }

@@ -62,3 +62,17 @@ code --install-extension sovran-<version>.vsix
 - Keep pre-release ahead of stable: publish the next pre-release before promoting a stable version.
 - Run `npm audit` monthly and update dependencies.
 - Re-check `engines.vscode` against the API surface used. `@types/vscode` must not be newer than `engines`.
+
+## Native tools release gates
+
+Before integrating the stacked native-tools branches, consult
+[the P9 verification record](plans/2026-11-10-native-tools-release-hardening-status.md). Code complete does not mean
+all platform/account gates passed. CI now covers source smoke on stable and minimum VS Code on three operating
+systems, verifies VSIX assets and tests a fresh installed artifact on Linux. Release packaging repeats asset validation
+and installed-artifact smoke before publishing. Those workflow definitions are not evidence that CI already ran.
+
+Record Windows/Linux/macOS and SSH/WSL/container results separately; test native/prompted model behavior, signing/hooks,
+Restricted Mode, cancellation and narrow/high-contrast UI. Use opted-in test accounts for Playwright extension session
+consent and GitHub token permissions. Test a genuine versioned upgrade as well as the development VSIX replacement;
+check saved secrets/chats manually. No general Web search, crawler/index, browser binary or automatic browser-port
+forwarding belongs to the current scope. This work does not publish or merge any branch.

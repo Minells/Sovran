@@ -30,17 +30,17 @@ export default tseslint.config(
     },
   },
   {
-    // The document parsers read untrusted files and install browser stand-ins for pdf.js: they run only in the worker.
+    // Document and Web parsers handle untrusted input only in their isolated workers.
     files: ['src/extension/**/*.ts'],
-    ignores: ['src/extension/adapters/documentWorker.ts'],
+    ignores: ['src/extension/adapters/documentWorker.ts', 'src/extension/adapters/webWorker.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
         {
           patterns: [
             {
-              group: ['**/core/documents/convert', '**/core/documents/pdf', '**/core/documents/docx', '**/core/documents/xlsx', '**/core/documents/pptx', '**/core/documents/odf', '**/core/documents/zip', 'pdfjs-dist', 'pdfjs-dist/*', 'fflate'],
-              message: 'Document parsers run in the document worker only. Use the DocumentConverterPort.',
+              group: ['**/core/documents/convert', '**/core/documents/pdf', '**/core/documents/docx', '**/core/documents/xlsx', '**/core/documents/pptx', '**/core/documents/odf', '**/core/documents/zip', 'pdfjs-dist', 'pdfjs-dist/*', 'fflate', '**/core/web/extract', 'htmlparser2', 'robots-parser'],
+              message: 'Document and Web parsers run in workers only. Use their ports.',
             },
           ],
         },

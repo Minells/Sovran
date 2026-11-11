@@ -16,6 +16,7 @@ import {
 } from '../../core/mcp/launch';
 
 export interface McpTransportDeps {
+  managedLaunch?: (server: McpServerConfig) => Promise<McpServerConfig>;
   /** Read for every connection: the open folder and the environment may change. */
   variables: () => McpVariables;
   /** The server's token from Secret Storage. */
@@ -26,6 +27,10 @@ export class NodeMcpTransports implements McpTransportFactory {
   constructor(private readonly deps: McpTransportDeps) {}
 
   async create(server: McpServerConfig, log: (line: string) => void): Promise<Transport> {
+    if (server.managed) {
+      if (!this.deps.managedLaunch) throw new McpConfigError('Managed integrations are unavailable in this host.');
+      server = await this.deps.managedLaunch(server);
+    }
     const token = server.auth.type === 'none' ? undefined : await this.deps.token(server.id);
     const launch = resolveLaunch(server, this.deps.variables(), token);
     if (launch.kind === 'http') {
