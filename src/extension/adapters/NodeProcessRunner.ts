@@ -1,37 +1,10 @@
 import * as vscode from 'vscode';
-import { spawn } from 'node:child_process';
-import type { ProcessPort, ProcessResult } from '../../core/ports';
+import type { FileProcessOptions, ProcessOptions, ProcessPort, ProcessResult } from '../../core/ports';
 import { agentCommandEnv } from './commandEnv';
 import { shellPath } from './VscodeWorkspace';
 
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)|\x1b[@-Z\\-_]/g;
-export const stripAnsi = (s: string) => s.replace(ANSI, '');
-
-/** Keeps the head and a rolling tail of command output within a character budget. */
-export class OutputBuffer {
-  private head = '';
-  private tail = '';
-  truncated = false;
-  constructor(private readonly max: number) {}
-  push(text: string) {
-    const headMax = Math.floor(this.max * 0.6);
-    if (!this.truncated && this.head.length + text.length <= headMax) {
-      this.head += text;
-      return;
-    }
-    if (!this.truncated) {
-      const room = headMax - this.head.length;
-      this.head += text.slice(0, Math.max(0, room));
-      text = text.slice(Math.max(0, room));
-      this.truncated = true;
-    }
-    this.tail = (this.tail + text).slice(-(this.max - headMax));
-  }
-  toString() {
-    return this.truncated ? `${this.head}\n[… output truncated …]\n${this.tail}` : this.head;
-  }
-}
+export { OutputBuffer, stripAnsi } from './processExecution';
+import { runFileProcess, runProcess } from './processExecution';
 
 /** Mirrors agent command output into a read-only "Sovran" terminal so users see it natively. */
 export class TerminalMirror implements vscode.Disposable {
@@ -89,88 +62,21 @@ export class TerminalMirror implements vscode.Disposable {
 export class NodeProcessRunner implements ProcessPort {
   constructor(private readonly mirror?: () => TerminalMirror | undefined) {}
 
-  run(
-    command: string,
-    o: { cwd: string; timeoutMs: number; signal: AbortSignal; maxOutputChars: number; onOutput?: (chunk: string) => void },
-  ): Promise<ProcessResult> {
-    const started = Date.now();
+  run(command: string, options: ProcessOptions): Promise<ProcessResult> {
     const mirror = this.mirror?.();
-    mirror?.begin(command, o.cwd);
-    const isWin = process.platform === 'win32';
-
-    return new Promise<ProcessResult>((resolve) => {
-      const out = new OutputBuffer(o.maxOutputChars);
-      let timedOut = false;
-      let cancelled = false;
-      let settled = false;
-
-      const child = spawn(command, {
-        cwd: o.cwd,
-        shell: shellPath(),
-        detached: !isWin,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: agentCommandEnv(process.env),
-      });
-
-      const killTree = () => {
-        if (child.pid === undefined || child.exitCode !== null) return;
-        try {
-          if (isWin) spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true });
-          else process.kill(-child.pid, 'SIGTERM');
-        } catch {
-          child.kill('SIGTERM');
-        }
-        setTimeout(() => {
-          try {
-            if (!isWin && child.pid !== undefined && child.exitCode === null) process.kill(-child.pid, 'SIGKILL');
-          } catch {
-            /* already gone */
-          }
-        }, 2000).unref();
-      };
-
-      const onData = (buf: Buffer) => {
-        const raw = buf.toString('utf8');
-        mirror?.write(raw);
-        const clean = stripAnsi(raw);
-        out.push(clean);
-        o.onOutput?.(clean);
-      };
-      child.stdout?.on('data', onData);
-      child.stderr?.on('data', onData);
-
-      const timer = setTimeout(() => {
-        timedOut = true;
-        killTree();
-      }, o.timeoutMs);
-      const onAbort = () => {
-        cancelled = true;
-        killTree();
-      };
-      if (o.signal.aborted) onAbort();
-      o.signal.addEventListener('abort', onAbort, { once: true });
-
-      const finish = (exitCode: number | null, signal: string | null, extra = '') => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        o.signal.removeEventListener('abort', onAbort);
-        if (extra) out.push(extra);
-        const result: ProcessResult = {
-          exitCode,
-          signal,
-          output: out.toString(),
-          truncated: out.truncated,
-          timedOut,
-          cancelled,
-          durationMs: Date.now() - started,
-        };
-        mirror?.end(result);
-        resolve(result);
-      };
-      child.on('error', (e) => finish(null, null, `Failed to start command: ${e.message}`));
-      child.on('close', (code, sig) => finish(code, sig));
+    if (!options.signal.aborted) mirror?.begin(command, options.cwd);
+    return runProcess(command, [], options, {
+      shell: shellPath(),
+      env: agentCommandEnv(process.env),
+      onRawOutput: (chunk) => mirror?.write(chunk),
+    }).then((result) => {
+      mirror?.end(result);
+      return result;
     });
+  }
+
+  runFile(executable: string, argv: readonly string[], options: FileProcessOptions) {
+    // Reads such as Git diff must be filtered by the core before reaching any UI or streaming output.
+    return runFileProcess(executable, argv, options);
   }
 }

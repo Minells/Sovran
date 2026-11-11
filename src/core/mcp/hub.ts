@@ -15,6 +15,7 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client';
 import { z } from 'zod';
+import { integrationCallProblem, integrationToolAllowed } from './catalog';
 import { estimateTokens } from '../context/contextManager';
 import type { Logger, McpToolHint } from '../ports';
 import { redact } from '../security/redact';
@@ -89,6 +90,8 @@ interface Connection {
   client?: Client;
   transport?: Transport;
   tools: Tool[];
+  /** Definitions remain stable across policy-only updates, but not discovery or reconnects. */
+  definitions: WeakMap<Tool, AnyTool>;
   server?: { name: string; version: string };
   stderr: string[];
 }
@@ -98,7 +101,7 @@ const argumentsSchema = z.preprocess((v) => (v == null ? {} : v), z.record(z.str
 
 /** Settings that need a new connection when they change. Names, timeouts and tool policies apply in place. */
 const connectionKey = (s: McpServerConfig) =>
-  JSON.stringify([s.command, s.args, s.env, s.cwd, s.url, s.headers, s.auth]);
+  JSON.stringify([s.command, s.args, s.env, s.cwd, s.url, s.headers, s.auth, s.managed]);
 
 function hintsOf(tool: Tool): McpToolHint[] {
   const a = tool.annotations;
@@ -174,6 +177,7 @@ export class McpHub implements ToolSource {
         generation: 0,
         status: config.enabled ? 'stopped' : 'disabled',
         tools: [],
+        definitions: new WeakMap(),
         stderr: [],
       };
       next.set(config.id, conn);
@@ -233,7 +237,7 @@ export class McpHub implements ToolSource {
       if (this.stale(conn, generation)) return void client.close().catch(() => undefined);
       const info = client.getServerVersion();
       conn.server = info ? { name: info.name, version: info.version } : undefined;
-      conn.tools = tools;
+      conn.tools = tools.filter((tool) => integrationToolAllowed(config.managed, tool.name));
       conn.status = 'connected';
       this.deps.logger.info(
         `MCP ${config.id}: connected${info ? ` to ${info.name} ${info.version}` : ''} · ${tools.length} tool${tools.length === 1 ? '' : 's'}`,
@@ -287,7 +291,7 @@ export class McpHub implements ToolSource {
       return this.deps.logger.warn(
         `MCP ${conn.config.id}: could not refresh the tool list: ${this.clean(error.message)}`,
       );
-    conn.tools = tools ?? [];
+    conn.tools = (tools ?? []).filter((tool) => integrationToolAllowed(conn.config.managed, tool.name));
     this.deps.logger.info(`MCP ${conn.config.id}: tool list changed · ${conn.tools.length} tools`);
     this.changed();
   }
@@ -360,7 +364,12 @@ export class McpHub implements ToolSource {
           continue;
         }
         names.add(name);
-        out.push(this.toolDefinition(c.config.id, t, name));
+        let definition = c.definitions.get(t);
+        if (!definition) {
+          definition = this.toolDefinition(c.config.id, t, name);
+          c.definitions.set(t, definition);
+        }
+        out.push(definition);
       }
     }
     return (this.cache = out);
@@ -369,12 +378,39 @@ export class McpHub implements ToolSource {
   private toolDefinition(serverId: string, tool: Tool, name: string): AnyTool {
     const server = () => this.connections.get(serverId)?.config;
     const label = () => `${tool.title ?? tool.name} · ${server()?.name ?? serverId}`;
-    return {
+    const connection = this.connections.get(serverId)!;
+    const generation = connection.generation;
+    const definition: AnyTool = {
       name,
       description: descriptionOf(tool, server()?.name ?? serverId),
       schema: argumentsSchema,
       parameters: parametersOf(tool),
       risk: 'execute',
+      source: { kind: 'mcp', serverId },
+      group: `mcp:${serverId}`,
+      requiresTrust: true,
+      unavailable: () => {
+        const current = this.connections.get(serverId);
+        if (
+          current !== connection ||
+          current.generation !== generation ||
+          current.status !== 'connected' ||
+          !current.tools.includes(tool)
+        ) {
+          return `${tool.name} is no longer available from this MCP connection.`;
+        }
+        const config = server();
+        return !this.active || !config?.enabled || toolPolicy(config, tool.name) === 'off'
+          ? `${tool.name} is turned off in Sovran's MCP settings.`
+          : undefined;
+      },
+      mcpPolicy: () => {
+        const config = server();
+        return {
+          server: config?.name ?? serverId,
+          allowed: !!config && toolPolicy(config, tool.name) === 'allow',
+        };
+      },
       label,
       prepare: async (args: Record<string, unknown>) => {
         // Read at call time: the user may have changed the tool's policy while the run was going.
@@ -382,6 +418,8 @@ export class McpHub implements ToolSource {
         const policy = config ? toolPolicy(config, tool.name) : 'off';
         if (!config || policy === 'off')
           throw new ToolError(`${tool.name} is turned off in Sovran's MCP settings.`);
+        const problem = integrationCallProblem(config.managed, tool.name, args);
+        if (problem) throw new ToolError(problem);
         const shown = JSON.stringify(args, null, 2);
         return {
           paths: [],
@@ -398,9 +436,13 @@ export class McpHub implements ToolSource {
           },
         };
       },
-      execute: async (args: Record<string, unknown>, ctx) =>
-        this.callTool(serverId, tool.name, args, ctx.signal, label()),
+      execute: async (args: Record<string, unknown>, ctx) => {
+        const reason = definition.unavailable?.();
+        if (reason) throw new ToolError(reason);
+        return this.callTool(serverId, tool.name, args, ctx.signal, label());
+      },
     };
+    return definition;
   }
 
   /** Calls a tool. Protocol failures become a `ToolError` the model can read; a failed tool is an error result. */
@@ -415,9 +457,17 @@ export class McpHub implements ToolSource {
     const name = conn?.config.name ?? serverId;
     if (!conn?.client || conn.status !== 'connected') {
       throw new ToolError(
-        `The MCP server ${name} is not connected${conn?.error ? ` (${conn.error})` : ''}. Restart it in Sovran Settings → MCP.`,
+        `The MCP server ${name} is not connected${conn?.error ? ` (${conn.error})` : ''}. Restart it in Sovran Settings → Tools.`,
       );
     }
+    if (signal.aborted) throw new ToolError('Cancelled by the user.');
+    if (!this.active || !conn.config.enabled || toolPolicy(conn.config, tool) === 'off') {
+      throw new ToolError(`${tool} is turned off in Sovran's MCP settings.`);
+    }
+    if (!conn.tools.some((t) => t.name === tool))
+      throw new ToolError(`${tool} is no longer offered by ${name}.`);
+    const problem = integrationCallProblem(conn.config.managed, tool, args);
+    if (problem) throw new ToolError(problem);
     const timeout = conn.config.timeoutSeconds * 1000;
     try {
       const result = await conn.client.callTool(
@@ -469,13 +519,13 @@ export class McpHub implements ToolSource {
   private describeCallFailure(e: unknown, conn: Connection): string {
     const name = conn.config.name;
     if (SdkError.isInstance(e) && e.code === SdkErrorCode.RequestTimeout) {
-      return `${name} did not answer within ${conn.config.timeoutSeconds} seconds. If this tool is slow, raise the timeout in Sovran Settings → MCP.`;
+      return `${name} did not answer within ${conn.config.timeoutSeconds} seconds. If this tool is slow, raise the timeout in Sovran Settings → Tools.`;
     }
     if (
       SdkError.isInstance(e) &&
       (e.code === SdkErrorCode.ConnectionClosed || e.code === SdkErrorCode.NotConnected)
     ) {
-      return `${name} stopped during the call. Restart it in Sovran Settings → MCP.`;
+      return `${name} stopped during the call. Restart it in Sovran Settings → Tools.`;
     }
     if (ProtocolError.isInstance(e)) return `${name} refused the call: ${this.clean(e.message)}`;
     return `The call to ${name} failed: ${this.clean(e instanceof Error ? e.message : String(e))}`;

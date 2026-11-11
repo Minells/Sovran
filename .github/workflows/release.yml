@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - run: npm ci --ignore-scripts
       - run: npm run check
       - name: Verify tag matches package.json version
         run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
@@ -32,6 +32,11 @@ jobs:
           minor=$(node -p "require('./package.json').version.split('.')[1]")
           if [ $((minor % 2)) -eq 1 ]; then echo "flag=--pre-release" >> "$GITHUB_OUTPUT"; else echo "flag=" >> "$GITHUB_OUTPUT"; fi
       - run: npx vsce package --no-dependencies ${{ steps.channel.outputs.flag }} -o sovran.vsix
+      - run: npm run verify:vsix -- sovran.vsix
+      - name: Installed VSIX smoke in a fresh profile
+        run: xvfb-run -a npm run test:extension
+        env:
+          SOVRAN_TEST_VSIX: sovran.vsix
       # The pre-release marker is already baked into the VSIX at package time.
       - run: npx vsce publish --packagePath sovran.vsix --oidc
       - uses: softprops/action-gh-release@v2
