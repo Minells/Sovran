@@ -228,6 +228,13 @@ describe('slash commands', () => {
     expect(merged.find((c) => c.name === 'compact')!.kind).toBe('action');
     expect(merged.find((c) => c.name === 'review')!.description).toBe('team review');
   });
+
+  it.each(['-->', '--!>'])('extracts a custom command label ending with %s', (closing) => {
+    const template = `\r\n  <!-- Draft release notes ${closing} Extra prompt text\r\nSummarize $ARGUMENTS.`;
+    const command = parseCustomCommand('release-notes.md', template);
+
+    expect(command).toMatchObject({ description: 'Draft release notes', template });
+  });
 });
 
 describe('fuzzy matching', () => {
