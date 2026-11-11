@@ -72,8 +72,15 @@ export function expandCommand(command: SlashCommand, args: string): string {
 export function parseCustomCommand(fileName: string, content: string): SlashCommand | null {
   const name = fileName.replace(/\.md$/i, '').toLowerCase();
   if (!NAME_RE.test(name) || !content.trim()) return null;
-  const first = content.split(/\r?\n/).find((l) => l.trim()) ?? '';
-  const description = first.replace(/^#+\s*|^<!--\s*|\s*-->$/g, '').trim().slice(0, 80) || `Custom command /${name}`;
+  const first = content.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '';
+  let label = first.replace(/^#+\s*/, '');
+  if (first.startsWith('<!--')) {
+    const comment = first.slice('<!--'.length);
+    // Extract only the comment text for the plain-text label. The template keeps the whole line.
+    const closing = /--!?>/.exec(comment);
+    label = comment.slice(0, closing?.index);
+  }
+  const description = label.trim().slice(0, 80) || `Custom command /${name}`;
   return { name, description, kind: 'prompt', source: 'workspace', template: content.slice(0, 20_000) };
 }
 
