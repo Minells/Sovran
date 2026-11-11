@@ -115,6 +115,18 @@ describe('bounded HTML extraction', () => {
       '',
     );
   });
+  it('keeps backslashes and literal pipes inside table cells without counting extra columns', () => {
+    const page = extractPage(
+      String.raw`<table><tr><th>A\|B</th><th>Value</th></tr><tr><td><code>x\|y</code></td><td>text</td></tr></table>`,
+      'https://example.com/docs',
+      1000,
+    );
+    expect(page.text.split('\n')).toEqual([
+      String.raw`| A\\\|B | Value |`,
+      '| --- | --- |',
+      '| ` x\\\\|y ` | text |',
+    ]);
+  });
   it('caps text, links and pathological nesting and uses safe code fences', () => {
     expect(extractPage('<p>' + 'a'.repeat(10_000) + '</p>', 'https://example.com', 100).truncated).toBe(true);
     expect(

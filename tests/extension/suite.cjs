@@ -231,7 +231,7 @@ exports.run = async function run() {
       assert.ok(result.content.includes('Smoke docs'));
       assert.ok(result.content.includes('# Read me'));
       assert.ok(result.content.includes('const x = 1;'));
-      assert.ok(result.content.includes('https://docs.example.com/api'));
+      assert.equal(result.content.split('\n\nLinks:\n').at(-1), '- https://docs.example.com/api');
       assert.ok(result.content.length <= 2000);
       assert.deepStrictEqual(seen, ['/robots.txt', '/guide']);
     } finally {

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   fileProcessEnvironment,
@@ -80,10 +81,9 @@ describe('structured process execution', () => {
       const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'sovran-tree-'));
       folders.push(folder);
       const marker = path.join(folder, 'descendant-finished');
-      const descendant = `process.stdout.write('ready');setTimeout(()=>require('node:fs').writeFileSync(${JSON.stringify(marker)},'bad'),1000)`;
-      const parent = `require('node:child_process').spawn(process.execPath,['-e',${JSON.stringify(descendant)}],{stdio:'inherit'});process.exit(0)`;
+      const fixture = fileURLToPath(new URL('../fixtures/descendantProcess.cjs', import.meta.url));
       const abort = new AbortController();
-      const result = await runFileProcess(process.execPath, ['-e', parent], {
+      const result = await runFileProcess(process.execPath, [fixture, 'parent'], {
         ...options(folder),
         signal: abort.signal,
         onOutput: (chunk) => {

@@ -21,7 +21,8 @@ const SKIP = new Set([
   'head',
 ]);
 const BLOCK = new Set(['p', 'div', 'section', 'article', 'main', 'blockquote', 'ul', 'ol', 'dl', 'dt', 'dd']);
-const escape = (value: string) => value.replace(/[\\`*_[\]<>]/g, '\\$&');
+const escape = (value: string, inCell: boolean) =>
+  value.replace(inCell ? /[\\`*_[\]<>|]/g : /[\\`*_[\]<>]/g, '\\$&');
 const fence = (value: string, minimum: number) => {
   let length = minimum;
   for (const match of value.matchAll(/`+/g)) length = Math.max(length, match[0].length + 1);
@@ -60,12 +61,12 @@ export function extractPage(
   const codeBlocks: string[] = [];
   let rendered = 0;
   let limited = scanned >= 50_000;
-  const render = (node: Node, depth = 0, inPre = false): string => {
+  const render = (node: Node, depth = 0, inPre = false, inCell = false): string => {
     if (++rendered > 50_000 || depth > 64) {
       limited = true;
       return '';
     }
-    if (node.type === 'text') return inPre ? node.data : escape(node.data.replace(/\s+/g, ' '));
+    if (node.type === 'text') return inPre ? node.data : escape(node.data.replace(/\s+/g, ' '), inCell);
     if (
       !('attribs' in node) ||
       SKIP.has(node.name) ||
@@ -74,7 +75,9 @@ export function extractPage(
     )
       return '';
     const tag = node.name;
-    const children = () => node.children.map((n) => render(n, depth + 1, inPre || tag === 'pre')).join('');
+    const isCell = tag === 'td' || tag === 'th';
+    const children = () =>
+      node.children.map((n) => render(n, depth + 1, inPre || tag === 'pre', inCell || isCell)).join('');
     if (tag === 'pre') {
       const value = children().replace(/^\n|\n$/g, '');
       const marker = fence(value, 3);
@@ -85,14 +88,17 @@ export function extractPage(
       if (inPre) return children();
       const value = plain(node).replace(/\s+/g, ' ');
       const marker = fence(value, 1);
-      return `${marker} ${value} ${marker}`;
+      // The table parser consumes a backslash before each pipe before parsing the code span.
+      const code = inCell ? value.split('|').join('\\|') : value;
+      return `${marker} ${code} ${marker}`;
     }
     if (tag === 'a') {
       const value = children().trim();
       try {
         const link = webUrl(new URL(node.attribs.href ?? '', url).href).href;
         if (links.size < WEB_LIMITS.links) links.add(link);
-        return value ? `[${value}](<${link}>)` : '';
+        const destination = inCell ? link.replaceAll('|', '%7C') : link;
+        return value ? `[${value}](<${destination}>)` : '';
       } catch {
         return value;
       }
@@ -102,18 +108,18 @@ export function extractPage(
     if (tag === 'hr') return '\n\n---\n\n';
     if (tag === 'li') return `\n- ${children().trim()}\n`;
     if (tag === 'tr') return `\n| ${children().replace(/\s+/g, ' ').trim()}\n`;
-    if (tag === 'td' || tag === 'th') return `${children().trim().replace(/\|/g, '\\|')} | `;
+    if (isCell) return `${children().trim()} | `;
     if (tag === 'table') {
       const rows = children()
         .trim()
         .split('\n')
         .filter((line) => line.trim());
-      const count = rows[0]?.split('|').length ?? 2;
+      const count = rows[0]?.split(/(?<!\\)\|/).length ?? 2;
       if (rows.length)
         rows.splice(1, 0, `| ${Array.from({ length: Math.max(1, count - 2) }, () => '---').join(' | ')} |`);
       return `\n\n${rows.join('\n')}\n\n`;
     }
-    if (tag === 'img') return node.attribs.alt ? escape(node.attribs.alt) : '';
+    if (tag === 'img') return node.attribs.alt ? escape(node.attribs.alt, inCell) : '';
     const value = children();
     return BLOCK.has(tag) ? `\n\n${value.trim()}\n\n` : value;
   };
