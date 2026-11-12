@@ -44,6 +44,7 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
   attach images for vision-capable models.
 - **Native Git:** inspect status, diffs, history and branches in trusted Plan/Act workspaces; stage/unstage selected files and commit with mandatory review in Act.
 - **Workspace diagnostics:** read cached editor Problems for active or unopened files, filtered by file/folder, severity and result count. Protected and external paths are omitted; the tool does not run checks or start language servers.
+- **Semantic navigation:** list file symbols, locate definitions and find references using the active VS Code language providers in trusted workspaces.
 - **Public Web reads:** `web_fetch` reads one approved public URL as structured text with source links. Available in trusted Plan/Act, with approval for each URL even in Auto. No account, search service, browser or crawler installation.
 - **Tools:** built-in permissions and per-chat group selection with definition cost estimates. Optional Playwright,
   Chrome DevTools and GitHub integrations, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.

@@ -38,6 +38,23 @@ export interface FileDiagnostics {
   diagnostics: readonly EditorDiagnostic[];
 }
 
+/** One-based position, with columns measured in UTF-16 code units. */
+export interface SourcePosition {
+  line: number;
+  column: number;
+}
+
+export type SemanticQuery =
+  | { kind: 'symbols'; path: string }
+  | ({ kind: 'definition' | 'references'; path: string } & SourcePosition);
+
+export interface SemanticLocation extends SourcePosition {
+  /** Absolute file path. Hosts omit locations without a filesystem path. */
+  path: string;
+  /** Present for document symbols. */
+  name?: string;
+}
+
 export interface EditorContext {
   /** Absolute path of the active document (file scheme only). */
   path: string;
@@ -90,6 +107,8 @@ export interface WorkspacePort {
    * When supplied, absPath selects one exact file. Callers enforce workspace/protected-path boundaries.
    */
   diagnostics?(absPath?: string): readonly FileDiagnostics[];
+  /** Queries an existing editor language provider. The query path is absolute. */
+  querySemantic?(query: SemanticQuery, signal: AbortSignal): Promise<Iterable<SemanticLocation>>;
   openEditors(): string[];
   environment(): { os: string; shell: string };
 }
