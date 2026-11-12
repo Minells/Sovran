@@ -967,7 +967,7 @@ export function McpArea() {
 
   return (
     <SettingsDisclosure
-      title="Integrations"
+      title="MCP integrations"
       status={status}
       description={
         mcp.active && attention
