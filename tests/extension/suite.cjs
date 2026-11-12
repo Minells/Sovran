@@ -203,7 +203,8 @@ exports.run = async function run() {
       collection.dispose();
       // Discard the disposable buffer rather than saving it into the fixture workspace.
       await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
-      await fs.rm(dir, { recursive: true, force: true });
+      // Windows may still hold the workspace directory briefly after closing its editor.
+      await fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   });
   await test('native Web adapters load the packaged worker and read only the controlled fixture', async () => {

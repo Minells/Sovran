@@ -349,6 +349,21 @@ describe('sync with Settings', () => {
     const once = updateConfigText(configFileTemplate(), settings);
     expect(updateConfigText(once, settings)).toBe(once);
   });
+
+  it('keeps the starter template byte-for-byte when empty Settings are already in sync', () => {
+    const template = configFileTemplate();
+    expect(updateConfigText(template, [], { defaultModel: '', planModel: '', titleModel: '' })).toBe(
+      template,
+    );
+  });
+
+  it('keeps handwritten formatting when providers and declared model choices already agree', () => {
+    const file =
+      'providers: [{ id: a, baseUrl: "http://localhost:1234/v1", models: [m] }]\ndefaultModel: "a/m"';
+    const parsed = parseConfigFile(file);
+    if (!parsed.ok) throw new Error('expected a valid file');
+    expect(updateConfigText(file, parsed.config.providers, { defaultModel: 'a/m' })).toBe(file);
+  });
 });
 
 describe('vision in the config file', () => {
