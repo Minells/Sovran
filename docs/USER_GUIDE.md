@@ -390,9 +390,11 @@ moment, the file wins and Sovran says so.
 ## MCP servers
 
 [MCP](https://modelcontextprotocol.io) servers give the agent tools from other programs and services. Open
-**Sovran Settings → Tools → Integrations**. Choose **Add integration** for the catalog or **Add custom server**
+**Sovran Settings → Tools → Integrations**. Choose **Browse Catalog** for a preset or **Custom MCP Server**
 to enter a command or URL. The custom server form can also import a JSON snippet in the Claude Desktop, Cursor,
-Cline or VS Code format and move its token to Secret Storage.
+Cline or VS Code format and move its token to Secret Storage. Save the server, then choose **Connect**.
+Sovran shows the command before launching a custom local server. Environment, working folder, plain HTTP headers,
+and request timeout are under **Advanced connection settings**.
 
 - **Local servers** are commands Sovran starts, such as
   `npx -y @modelcontextprotocol/server-filesystem ${workspaceFolder}`. They talk MCP over stdin and stdout, start in
@@ -429,14 +431,17 @@ The same list is the `sovran.mcp.servers` user setting:
 ]
 ```
 
-Servers start in the background when a window opens, only in trusted workspaces, and stop with the window. Their
-output, including errors, is in **Show logs**.
+Enabled servers start in the background when a trusted window opens and stop with the window. **Disconnect** stops
+the connection and withdraws its tools from the agent. **Connection failed** offers **Try again** and **Show logs**.
+Editing a server’s command or endpoint in Settings saves it disconnected and clears the previous credential unless
+you supply a replacement.
 
 ### Optional managed integrations
 
-In **Settings → Tools → Integrations**, choose **Add integration** and select a catalog entry to see its setup.
-**Add to Sovran** saves it disconnected. **Install dependencies** downloads the reviewed locked package with npm
-scripts disabled, and **Connect** asks before starting it. Existing custom servers and their policies remain available.
+In **Browse Catalog**, each entry shows where it runs, what it requires, and its configuration state. **Configure**
+saves it disconnected. For browser integrations, **Install dependencies** downloads a locked package with npm scripts
+disabled after confirmation. **Connect** starts the server or opens its remote connection. Sovran shows **Connected**
+after MCP initialization and tool discovery complete.
 
 - **Playwright MCP** uses a separate system Chrome session by default. It offers navigation, snapshots and interactions.
   Call `browser_snapshot` for inline content after an action; action responses may link a snapshot file that Sovran
@@ -446,7 +451,11 @@ scripts disabled, and **Connect** asks before starting it. Existing custom serve
   profile disables usage statistics, CrUX, update checks, JavaScript evaluation and file navigation.
 - **GitHub MCP** uses the hosted service and a PAT stored in Secret Storage. The default exposes a small read-only
   set for issues and PRs; collaboration adds issue writes/comments and PR creation on Ask. Restrict token permissions
-  and repository access. Git does not require this integration.
+  and repository access.
+- **Context7 MCP** looks up documentation and examples in the hosted Context7 index. You can try it without a key.
+  If the service requires authentication or you hit the anonymous limit, choose **Set API key (optional)**. The free
+  keyed plan covers public libraries and has a monthly quota. Keep credentials and private code out of lookup queries.
+  [Context7 plans](https://context7.com/plans)
 
 Node/npm and Chrome must exist on the **extension host**, which can be a Remote SSH/WSL/container machine. Missing
 components produce instructions. There is no automatic bridge to your desktop browser. Managed profile limits remain
@@ -455,6 +464,22 @@ Browser integrations have wider network/session access than `web_fetch` and can 
 is separate from chats in extension global storage (`mcp/artifacts`), with a 20 MiB eviction threshold, not a hard quota.
 Deleting a chat does not remove browser output. The managed tool surface excludes screenshots-to-model, arbitrary code
 and upload/install tools; no returned local path is opened automatically.
+
+### Optional custom setups
+
+- **Serena.** Follow the upstream instructions to install the reviewed version you want using uv and initialize its
+  language backend. In **Custom MCP Server**, choose **Local command**, use the installed `serena` executable and add
+  `start-mcp-server` as its first argument. To select one project explicitly, add `--project` and an absolute path on
+  separate lines. Review its language-server downloads and keep tool permissions on Ask while evaluating it.
+  [Serena installation](https://oraios.github.io/serena/02-usage/010_installation.html),
+  [running Serena](https://oraios.github.io/serena/02-usage/020_running.html)
+- **DBHub.** Obtain and unpack the pinned upstream v1.6.1 MCP bundle. Use a Node.js 22.5+ executable and pass the
+  absolute `server/index.js` path, `--transport`, `stdio`, `--config`, and the absolute path to the bundle's
+  `dbhub.toml` as separate arguments. In **Token**, choose **Environment variable**, name it `DBHUB_DSN`, and
+  enter the DSN there to store it in VS Code Secret Storage. The bundle configures read-only SQL and a row cap.
+  Use a dedicated read-only database account with access to curated schemas or views and keep SQL calls on Ask.
+  Query results may reach your configured model provider and be saved in chats.
+  [DBHub v1.6.1](https://github.com/bytebase/dbhub/releases/tag/v1.6.1), [DBHub bundle](https://dbhub.ai/mcpb)
 
 ### Tools for each chat
 
@@ -527,7 +552,7 @@ Read [SECURITY.md](../SECURITY.md) for the threat model and known limitations. C
 
 - **Quality depends on the model.** Tool-trained coding models work best. Small models may need `"toolMode": "prompted"`, and some still struggle with multi-step tasks.
 - **Undo covers only what the agent writes.** Changes made by terminal commands, such as code generators or `git checkout`, are not covered.
-- **MCP covers tools.** Resources, prompts and sampling are not used yet. Remote servers must speak Streamable HTTP (the older SSE-only transport is not supported) and take a token: OAuth sign-in flows are not implemented. Images a tool returns are described to the model, not shown to it. MCP servers are configured in Settings, not in `config.yaml`.
+- **MCP covers tools.** Resources, prompts and sampling are not used yet. Remote servers must speak Streamable HTTP (the older SSE-only transport is not supported) and may use a static token. OAuth sign-in flows are not implemented. Images a tool returns are described to the model, not shown to it. MCP servers are configured in Settings, not in `config.yaml`.
 - **Documents arrive as text only.** The images, charts and page layout inside a document are not sent, and scanned PDFs (no text layer) cannot be read. Each attachment is cut at 50 000 characters, and the model is told when it is.
 - **Some servers ignore images instead of refusing them**, and their model then answers without having seen the image. Set `"vision": false` for such a model. BMP, TIFF and HEIC images are not sent: save them as PNG or JPEG.
 - **Search uses VS Code's bundled ripgrep.** It falls back to a slower built-in scan when ripgrep cannot be found.

@@ -9,17 +9,18 @@ import { ManagedMcpPackages } from './adapters/ManagedMcpPackages';
 import {
   integration,
   integrationArguments,
-  integrationHeaders,
   PROFILE_LABELS,
   type ManagedIntegration,
   type IntegrationId,
   type IntegrationProfile,
 } from '../core/mcp/catalog';
 import {
+  connectionKey,
   fromEntry,
   mcpServerEntrySchema,
   MCP_TIMEOUT_SECONDS,
   newServerId,
+  requiresToken,
   toEntry,
   transportOf,
   type McpServerConfig,
@@ -27,6 +28,7 @@ import {
 } from '../core/mcp/config';
 import { McpHub, type McpServerState, type McpTransportFactory } from '../core/mcp/hub';
 import { normalizeApiKey } from '../core/providers/connection';
+import { redact } from '../core/security/redact';
 import type { McpServerInput, McpServerView, McpView } from '../shared/protocol';
 import { sendsKeyInsecurely } from '../shared/endpoints';
 import { NodeMcpTransports } from './adapters/McpTransports';
@@ -209,72 +211,87 @@ export class McpHost implements vscode.Disposable {
   /** Applies `change` to the latest server list in settings and writes it. Returns what `change` returns. */
   private mutate<T>(
     change: (servers: McpServerConfig[]) => { servers: McpServerConfig[]; result: T } | undefined,
+    effects?: {
+      beforeWrite?: (result: T) => Promise<void>;
+      afterWrite?: (result: T) => Promise<void>;
+    },
   ): Promise<T | undefined> {
-    const run = this.writes.then(async () => {
+    return this.serializeWrite(async () => {
       const outcome = change(readMcpServers());
       if (!outcome) return undefined;
+      await effects?.beforeWrite?.(outcome.result);
       await writeMcpServers(outcome.servers);
+      await effects?.afterWrite?.(outcome.result);
       await this.reload();
       return outcome.result;
     });
+  }
+
+  private serializeWrite<T>(write: () => Promise<T>): Promise<T> {
+    const run = this.writes.then(write);
     this.writes = run.catch(() => undefined);
     return run;
   }
 
-  /** Adds a server or replaces one. A new token goes to Secret Storage; tool policies and the on/off state are kept. */
+  /** Saves the configuration. A new destination requires a new Connect action and its own credential. */
   async save(input: McpServerInput): Promise<void> {
-    const managed = input.id && this.servers.find((s) => s.id === input.id)?.managed;
+    const selected = this.servers.find((s) => s.id === input.id);
     if (
-      managed &&
+      selected?.managed &&
       (await vscode.window.showWarningMessage(
         'Save this integration as a custom server?',
         {
           modal: true,
           detail:
-            'Your command and connection fields will be used directly. Sovran will no longer manage its package or profile. Tool permissions are preserved.',
+            'Sovran will use your command or URL directly. Connect again to use the custom configuration. Tool permissions are preserved.',
         },
         'Save custom server',
       )) !== 'Save custom server'
     )
       return;
-    const config = await this.mutate((servers) => {
-      const existing = input.id ? servers.find((s) => s.id === input.id) : undefined;
-      if (input.id && !existing) throw new Error(`The MCP server "${input.name}" was removed meanwhile.`);
-      const id = existing?.id ?? newServerId(input.name, new Set(servers.map((s) => s.id)));
-      const local = input.transport === 'stdio';
-      const entry = mcpServerEntrySchema.safeParse(
-        toEntry({
-          id,
-          name: input.name.trim(),
-          enabled: existing?.enabled ?? true,
-          ...(local
-            ? { command: input.command, args: input.args, env: input.env, cwd: input.cwd }
-            : { url: input.url, headers: input.headers }),
-          auth: input.auth,
-          timeoutSeconds: input.timeoutSeconds ?? existing?.timeoutSeconds ?? MCP_TIMEOUT_SECONDS.default,
-          allowedTools: existing?.allowedTools ?? [],
-          disabledTools: existing?.disabledTools ?? [],
-        }),
-      );
-      if (!entry.success) throw new Error(entry.error.issues.map((i) => i.message).join(' '));
-      const config = fromEntry(entry.data);
-      const next = existing ? servers.map((s) => (s.id === id ? config : s)) : [...servers, config];
-      return { servers: next, result: config };
-    });
-    if (!config) return;
-    if (config.auth.type === 'none') {
-      // Changing the auth type reconnects by itself; a token left from before is only removed.
-      await this.deps.secrets.delete(config.id);
-      this.tokens.delete(config.id);
-    } else if (input.token?.trim()) {
-      const { key } = normalizeApiKey(input.token);
-      await this.deps.secrets.set(config.id, key);
-      this.tokens.set(config.id, key);
-      this.deps.logger.addSecret(key);
-      // The settings were applied before the token was stored: connect again with it.
-      await this.hub.restart(config.id);
-    }
-    if (config.auth.type !== 'none' && !this.tokens.has(config.id)) {
+    const key = this.tokenValue(input.auth, input.token ?? '');
+    const saved = await this.mutate(
+      (servers) => {
+        const existing = input.id ? servers.find((s) => s.id === input.id) : undefined;
+        if (input.id && !existing) throw new Error(`The MCP server "${input.name}" was removed meanwhile.`);
+        if (existing && (!selected || connectionKey(existing) !== connectionKey(selected)))
+          throw new Error('The MCP connection changed while editing. Open its settings again.');
+        const id = existing?.id ?? newServerId(input.name, new Set(servers.map((s) => s.id)));
+        const local = input.transport === 'stdio';
+        const entry = mcpServerEntrySchema.safeParse(
+          toEntry({
+            id,
+            name: input.name.trim(),
+            enabled: false,
+            ...(local
+              ? { command: input.command, args: input.args, env: input.env, cwd: input.cwd }
+              : { url: input.url, headers: input.headers }),
+            auth: input.auth,
+            timeoutSeconds: input.timeoutSeconds ?? existing?.timeoutSeconds ?? MCP_TIMEOUT_SECONDS.default,
+            allowedTools: existing?.allowedTools ?? [],
+            disabledTools: existing?.disabledTools ?? [],
+          }),
+        );
+        if (!entry.success) throw new Error(entry.error.issues.map((i) => i.message).join(' '));
+        const config = fromEntry(entry.data);
+        const changed = !!existing && connectionKey(existing) !== connectionKey(config);
+        config.enabled = !!existing?.enabled && !changed;
+        const next = existing ? servers.map((s) => (s.id === id ? config : s)) : [...servers, config];
+        return { servers: next, result: { config, changed } };
+      },
+      {
+        beforeWrite: async ({ config, changed }) => {
+          if (changed || config.auth.type === 'none') await this.storeToken(config.id, undefined);
+        },
+        afterWrite: async ({ config }) => {
+          if (config.auth.type !== 'none' && key) await this.storeToken(config.id, key);
+        },
+      },
+    );
+    if (!saved) return;
+    const { config } = saved;
+    if (key && config.auth.type !== 'none' && config.enabled) await this.hub.restart(config.id);
+    if (requiresToken(config) && !this.tokens.has(config.id)) {
       this.deps.notify(
         'info',
         `${config.name} needs a token before it can connect. Use Set token on its card in Settings → Tools.`,
@@ -295,38 +312,61 @@ export class McpHost implements vscode.Disposable {
       'Remove',
     );
     if (choice !== 'Remove') return;
-    await this.mutate((servers) => ({ servers: servers.filter((s) => s.id !== id), result: true }));
-    await this.deps.secrets.delete(id);
-    this.tokens.delete(id);
+    await this.mutate((servers) => ({ servers: servers.filter((s) => s.id !== id), result: id }), {
+      beforeWrite: (removed) => this.storeToken(removed, undefined),
+    });
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<void> {
     const selected = this.servers.find((s) => s.id === id);
-    if (enabled && selected?.managed) {
+    if (!selected || selected.enabled === enabled) return;
+    if (enabled) {
       this.requireTrust();
-      if (!this.packages) throw new Error('Managed integrations are unavailable in this host.');
-      if (selected.auth.type !== 'none' && !this.tokens.has(id))
-        throw new Error('Set the integration token before connecting.');
-      await this.packages.launch(selected);
-      const snapshot = JSON.stringify(toEntry(selected));
-      const choice = await vscode.window.showWarningMessage(
-        `Connect ${selected.name}?`,
-        {
-          modal: true,
-          detail: `${integration(selected.managed.id).description}\nRuns on ${this.deps.managed?.host ?? 'the extension host'}. ${PROFILE_LABELS[selected.managed.profile]}.${selected.managed.profile === 'extension' ? ` Chrome profile: ${selected.managed.browserProfile}. Requires the Playwright companion extension and its tab confirmation. Approved tabs can expose signed-in accounts and session data.` : ''}${selected.managed.profile === 'collaboration' ? ' Issue and pull request writes are available and start on Ask.' : ''} Browser tools act outside native Web safeguards and ask unless you allow them. While enabled, it starts again in trusted windows.`,
-        },
-        'Connect',
-      );
-      if (choice !== 'Connect') return;
-      this.requireTrust();
-      if (JSON.stringify(toEntry(readMcpServers().find((s) => s.id === id) ?? selected)) !== snapshot)
-        throw new Error('The integration changed while awaiting confirmation. Connect again.');
+      if (requiresToken(selected) && !this.tokens.has(id))
+        throw new Error('Set the server token before connecting.');
+      if ((selected.managed || selected.command) && !(await this.confirmConnection(selected))) return;
     }
-    await this.mutate((servers) =>
-      servers.some((s) => s.id === id)
-        ? { servers: servers.map((s) => (s.id === id ? { ...s, enabled } : s)), result: true }
-        : undefined,
+    await this.mutate((servers) => {
+      const current = servers.find((s) => s.id === id);
+      if (!current || current.enabled === enabled) return;
+      if (enabled) {
+        this.requireTrust();
+        if (connectionKey(current) !== connectionKey(selected))
+          throw new Error('The server changed while awaiting confirmation. Connect again.');
+        if (requiresToken(current) && !this.tokens.has(id))
+          throw new Error('Set the server token before connecting.');
+      }
+      return { servers: servers.map((s) => (s.id === id ? { ...s, enabled } : s)), result: true };
+    });
+  }
+
+  private async confirmConnection(server: McpServerConfig): Promise<boolean> {
+    const managed = server.managed;
+    const item = managed && integration(managed.id);
+    const host = this.deps.managed?.host ?? 'the extension host';
+    const detail = item
+      ? [
+          item.remote
+            ? `Connects to ${item.remote.url}.`
+            : `Runs ${item.package}@${item.version} on ${host}.`,
+          item.id === 'context7' ? undefined : `${PROFILE_LABELS[managed.profile]}.`,
+          item.security,
+          managed.profile === 'extension'
+            ? `Chrome profile ${managed.browserProfile} uses the Playwright companion extension. Approved tabs can expose signed-in accounts.`
+            : undefined,
+          managed.profile === 'collaboration' ? 'Issue and pull request writes start on Ask.' : undefined,
+        ]
+      : [
+          `Runs on ${host} with your permissions.`,
+          [server.command, ...(server.args ?? []).map((arg) => JSON.stringify(arg))].join(' '),
+        ];
+    detail.push('While enabled, this server reconnects in trusted windows.');
+    const choice = await vscode.window.showWarningMessage(
+      `Connect ${server.name}?`,
+      { modal: true, detail: redact(detail.filter(Boolean).join('\n'), this.secrets()) },
+      'Connect',
     );
+    return choice === 'Connect';
   }
 
   async setToolPolicy(id: string, tool: string, policy: McpToolPolicy): Promise<void> {
@@ -383,17 +423,29 @@ export class McpHost implements vscode.Disposable {
       ignoreFocusOut: true,
     });
     if (value === undefined) return;
-    const { key } = normalizeApiKey(value);
+    await this.serializeWrite(async () => {
+      const current = readMcpServers().find((s) => s.id === id);
+      if (!current || connectionKey(current) !== connectionKey(server))
+        throw new Error('The server changed while setting the token. Try again.');
+      await this.storeToken(id, this.tokenValue(server.auth, value) || undefined);
+    });
+    await this.hub.restart(id);
+    this.changed();
+  }
+
+  private async storeToken(id: string, key: string | undefined): Promise<void> {
     if (key) {
       await this.deps.secrets.set(id, key);
       this.tokens.set(id, key);
       this.deps.logger.addSecret(key);
-    } else {
-      await this.deps.secrets.delete(id);
-      this.tokens.delete(id);
+      return;
     }
-    await this.hub.restart(id);
-    this.changed();
+    await this.deps.secrets.delete(id);
+    this.tokens.delete(id);
+  }
+
+  private tokenValue(auth: McpServerConfig['auth'], value: string): string {
+    return auth.type === 'bearer' ? normalizeApiKey(value).key : value.trim();
   }
 
   async dispose(): Promise<void> {
@@ -436,10 +488,10 @@ export class McpHost implements vscode.Disposable {
         name: item.name,
         enabled: false,
         managed,
-        ...(id === 'github'
+        ...(item.remote
           ? {
-              url: 'https://api.githubcopilot.com/mcp/',
-              headers: integrationHeaders(profile),
+              url: item.remote.url,
+              headers: item.remote.headers?.(profile),
               auth: { type: 'bearer' as const },
             }
           : { command: 'node', args: [], auth: { type: 'none' as const } }),

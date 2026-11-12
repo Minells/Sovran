@@ -572,6 +572,17 @@ describe('McpHub', () => {
     expect(hub.tools()).toEqual([]);
   });
 
+  it('withdraws tools during restart and does not reopen a disabled connection', async () => {
+    const config = server({ id: 'notes' });
+    const { hub, transports } = await connect([config]);
+    const restarting = hub.restart('notes');
+    expect(hub.tools()).toEqual([]);
+    hub.update([{ ...config, enabled: false }], true);
+    await restarting;
+    expect(transports.created.get('notes')).toBe(1);
+    expect(hub.states()[0]).toMatchObject({ status: 'disabled', tools: [] });
+  });
+
   it('follows the tool list when the server changes it', async () => {
     const { hub, transports } = await connect();
     transports.servers

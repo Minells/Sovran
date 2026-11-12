@@ -1,5 +1,5 @@
 /** Reviewed optional integrations. This metadata never starts or installs a server. */
-export const INTEGRATION_IDS = ['playwright', 'devtools', 'github'] as const;
+export const INTEGRATION_IDS = ['playwright', 'devtools', 'github', 'context7'] as const;
 export type IntegrationId = (typeof INTEGRATION_IDS)[number];
 export type IntegrationProfile = 'isolated' | 'extension' | 'readonly' | 'collaboration';
 export interface ManagedIntegration {
@@ -18,6 +18,12 @@ export interface IntegrationDefinition {
   entry?: string;
   documentation: string;
   requirements: string;
+  remote?: {
+    url: string;
+    token: 'required' | 'optional';
+    headers?: (profile: IntegrationProfile) => Record<string, string>;
+  };
+  security?: string;
   defaultProfile: IntegrationProfile;
   profiles: readonly IntegrationProfile[];
 }
@@ -32,6 +38,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     entry: 'node_modules/@playwright/mcp/cli.js',
     documentation: 'https://github.com/microsoft/playwright-mcp',
     requirements: 'Node.js 20+ with npm and Google Chrome on the extension host.',
+    security: 'Browser tools can reach sites and services available to the extension host.',
     defaultProfile: 'isolated',
     profiles: ['isolated', 'extension'],
   },
@@ -45,6 +52,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     entry: 'node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js',
     documentation: 'https://github.com/ChromeDevTools/chrome-devtools-mcp',
     requirements: 'Node.js 20.19+, 22.12+ or 23+ with npm and Google Chrome on the extension host.',
+    security: 'Browser tools can reach sites and services available to the extension host.',
     defaultProfile: 'isolated',
     profiles: ['isolated'],
   },
@@ -56,8 +64,26 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     version: 'hosted-v1',
     documentation: 'https://github.com/github/github-mcp-server',
     requirements: 'A GitHub personal access token with access to the repositories you select.',
+    remote: {
+      url: 'https://api.githubcopilot.com/mcp/',
+      token: 'required',
+      headers: integrationHeaders,
+    },
     defaultProfile: 'readonly',
     profiles: ['readonly', 'collaboration'],
+  },
+  {
+    id: 'context7',
+    name: 'Context7 MCP',
+    description: 'Look up current documentation and code examples for libraries and frameworks.',
+    icon: 'book',
+    version: 'hosted-v1',
+    documentation: 'https://github.com/upstash/context7',
+    requirements: 'Internet access. An optional Context7 API key raises the usage limits.',
+    remote: { url: 'https://mcp.context7.com/mcp', token: 'optional' },
+    security: 'Documentation queries go to Context7. Keep credentials and private code out of queries.',
+    defaultProfile: 'readonly',
+    profiles: ['readonly'],
   },
 ];
 export function integration(id: IntegrationId): IntegrationDefinition {
@@ -133,6 +159,11 @@ const GITHUB_READ_TOOLS = [
   'search_pull_requests',
 ];
 const GITHUB_WRITE_TOOLS = ['issue_write', 'add_issue_comment', 'create_pull_request'];
+const CONTEXT7_TOOLS: Readonly<Record<string, string>> = {
+  'resolve-library-id': 'Find the Context7 ID for a library or framework. Send a public documentation query.',
+  'query-docs':
+    'Find docs and code examples for a Context7 library ID. Keep credentials and private code out of the query.',
+};
 const PLAYWRIGHT_TOOLS = [
   'browser_navigate',
   'browser_navigate_back',
@@ -179,8 +210,17 @@ export function integrationToolAllowed(managed: ManagedIntegration | undefined, 
       ? PLAYWRIGHT_TOOLS
       : managed.id === 'devtools'
         ? DEVTOOLS_TOOLS
-        : [...GITHUB_READ_TOOLS, ...(managed.profile === 'collaboration' ? GITHUB_WRITE_TOOLS : [])];
+        : managed.id === 'context7'
+          ? Object.keys(CONTEXT7_TOOLS)
+          : [...GITHUB_READ_TOOLS, ...(managed.profile === 'collaboration' ? GITHUB_WRITE_TOOLS : [])];
   return allowed.includes(tool);
+}
+
+export function reviewedToolDescription(
+  managed: ManagedIntegration | undefined,
+  tool: string,
+): string | undefined {
+  return managed?.id === 'context7' && Object.hasOwn(CONTEXT7_TOOLS, tool) ? CONTEXT7_TOOLS[tool] : undefined;
 }
 /** Managed browser tools return text; saving a result to a caller-selected host path is outside these profiles. */
 export function integrationCallProblem(
@@ -188,7 +228,7 @@ export function integrationCallProblem(
   tool: string,
   args: Record<string, unknown>,
 ): string | undefined {
-  if (!managed || managed.id === 'github') return;
+  if (!managed || integration(managed.id).remote) return;
   if (['filename', 'filePath'].some((key) => args[key] !== undefined))
     return 'Managed browser tools cannot save results to a caller-selected path. Request an inline result instead.';
   if (['browser_navigate', 'new_page'].includes(tool)) {

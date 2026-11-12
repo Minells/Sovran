@@ -34,8 +34,8 @@ const result = (stdout = ''): FileProcessResult => ({
 });
 
 describe('optional integration catalog contracts', () => {
-  it('contains only three optional integrations and exact package candidates', () => {
-    expect(INTEGRATIONS.map((i) => i.id)).toEqual(['playwright', 'devtools', 'github']);
+  it('contains the reviewed integrations and exact package candidates', () => {
+    expect(INTEGRATIONS.map((i) => i.id)).toEqual(['playwright', 'devtools', 'github', 'context7']);
     expect(integration('playwright').version).toBe('0.0.84');
     expect(integration('devtools').version).toBe('1.12.0');
     expect(INTEGRATIONS.some((item) => /latest/.test(item.version))).toBe(false);
@@ -220,6 +220,22 @@ describe('managed package installation lifecycle', () => {
     await expect(f.manager.launch({ ...config, url: 'https://other.example/mcp' })).rejects.toThrow(
       /filters changed/,
     );
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it('validates the hosted Context7 destination without inspecting or running a package', async () => {
+    const f = await fixture();
+    const config = fromEntry({
+      id: 'context7',
+      url: 'https://mcp.context7.com/mcp',
+      auth: { type: 'bearer' },
+      managed: { id: 'context7', profile: 'readonly', version: 'hosted-v1' },
+    });
+    expect(await f.manager.launch(config)).toBe(config);
+    await expect(f.manager.launch({ ...config, url: 'https://other.example/mcp' })).rejects.toThrow(
+      /endpoint/,
+    );
+    await expect(f.manager.launch({ ...config, auth: { type: 'none' } })).rejects.toThrow(/authentication/);
+    expect(f.manager.states()).toContainEqual({ id: 'context7', status: 'remote' });
     expect(f.run).not.toHaveBeenCalled();
   });
   it('rejects a managed local preset redirected to a URL or custom environment before spawning', async () => {

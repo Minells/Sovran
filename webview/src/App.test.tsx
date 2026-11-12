@@ -2310,7 +2310,7 @@ describe('MCP servers', () => {
     await open([github, jira]);
     const card = screen.getByRole('region', { name: 'GitHub' });
     expect(within(card).getByRole('status')).toHaveTextContent('Connected');
-    await userEvent.click(within(card).getByRole('button', { name: 'Server settings' }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Advanced settings' }));
     expect(within(card).getByText('https://api.githubcopilot.com/mcp/')).toBeVisible();
     expect(within(card).getByText(/github-mcp-server 1.4.2/)).toBeVisible();
     expect(within(card).getByRole('button', { name: 'Replace token' })).toBeVisible();
@@ -2321,7 +2321,7 @@ describe('MCP servers', () => {
     expect(sent).toContainEqual({ type: 'restartMcpServer', id: 'jira' });
     await userEvent.click(within(broken).getByRole('button', { name: 'Set token' }));
     expect(sent).toContainEqual({ type: 'setMcpToken', id: 'jira' });
-    await userEvent.click(within(card).getByRole('switch', { name: 'Use GitHub' }));
+    await userEvent.click(within(card).getByRole('button', { name: 'Disconnect' }));
     expect(sent).toContainEqual({ type: 'setMcpServerEnabled', id: 'github', enabled: false });
     await userEvent.click(within(card).getByRole('button', { name: 'Remove GitHub' }));
     expect(sent).toContainEqual({ type: 'deleteMcpServer', id: 'github' });
@@ -2356,9 +2356,9 @@ describe('MCP servers', () => {
 
   it('uses native Git instead of the basic preset and preserves saved Git MCP servers', async () => {
     const { unmount } = await open([]);
-    await clickButton(/^Add integration$/);
+    await clickButton(/^Browse Catalog$/);
     const presets = screen.getByRole('list', { name: 'Integration catalog' });
-    expect(within(presets).queryByRole('button', { name: /^Git\b/ })).not.toBeInTheDocument();
+    expect(within(presets).queryByRole('button', { name: /^Configure Git$/ })).not.toBeInTheDocument();
     unmount();
     await open([
       {
@@ -2372,7 +2372,7 @@ describe('MCP servers', () => {
       },
     ]);
     const saved = screen.getByRole('region', { name: 'Git' });
-    await userEvent.click(within(saved).getByRole('button', { name: 'Server settings' }));
+    await userEvent.click(within(saved).getByRole('button', { name: 'Advanced settings' }));
     expect(within(saved).getByText(/mcp-server-git/)).toBeVisible();
     expect(
       sent.some((message) => message.type === 'deleteMcpServer' || message.type === 'saveMcpServer'),
@@ -2383,12 +2383,14 @@ describe('MCP servers', () => {
     );
   });
 
-  it('selects catalog metadata without installing, launching or saving anything', async () => {
+  it('shows the unified catalog and configures a preset without installing or connecting it', async () => {
     await open([]);
-    await clickButton(/^Add integration$/);
-    await userEvent.click(screen.getByRole('button', { name: 'Playwright MCP' }));
-    expect(screen.getByRole('region', { name: 'Playwright MCP setup' })).toBeInTheDocument();
-    expect(screen.getByText(/Node.js 20/)).toBeInTheDocument();
+    await clickButton(/^Browse Catalog$/);
+    const catalog = screen.getByRole('list', { name: 'Integration catalog' });
+    expect(within(catalog).getAllByRole('listitem')).toHaveLength(4);
+    expect(within(catalog).getByRole('button', { name: 'Configure Context7 MCP' })).toBeInTheDocument();
+    expect(within(catalog).getAllByText('Remote · Not configured')).toHaveLength(2);
+    expect(within(catalog).getByText(/Node\.js 20\+ with npm/)).toBeInTheDocument();
     expect(
       sent.some((message) =>
         ['installMcpIntegration', 'addMcpIntegration', 'setMcpServerEnabled', 'saveMcpServer'].includes(
@@ -2396,7 +2398,7 @@ describe('MCP servers', () => {
         ),
       ),
     ).toBe(false);
-    await userEvent.click(screen.getByRole('button', { name: 'Add to Sovran' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Configure Playwright MCP' }));
     expect(sent).toContainEqual({
       type: 'addMcpIntegration',
       integration: 'playwright',
@@ -2409,10 +2411,44 @@ describe('MCP servers', () => {
     ).toBe(false);
   });
 
+  it('can connect Context7 without a key and shows Connected only on the host status', async () => {
+    const context7: McpServerView = {
+      ...github,
+      id: 'context7-mcp',
+      name: 'Context7 MCP',
+      url: 'https://mcp.context7.com/mcp',
+      managed: { id: 'context7', profile: 'readonly', version: 'hosted-v1' },
+      enabled: false,
+      hasToken: false,
+      status: 'disabled',
+      tools: [],
+      toolTokens: 0,
+    };
+    await open([context7]);
+    const card = screen.getByRole('region', { name: 'Context7 MCP' });
+    expect(within(card).getByRole('status')).toHaveTextContent('Configured');
+    expect(within(card).getByRole('button', { name: 'Set API key (optional)' })).toBeVisible();
+    await userEvent.click(within(card).getByRole('button', { name: 'Connect' }));
+    expect(sent).toContainEqual({ type: 'setMcpServerEnabled', id: context7.id, enabled: true });
+    expect(within(card).getByRole('status')).toHaveTextContent('Configured');
+    host({
+      type: 'patch',
+      patch: { mcp: { active: true, servers: [{ ...context7, enabled: true, status: 'starting' }] } },
+    });
+    expect(within(card).getByRole('status')).toHaveTextContent('Connecting');
+    expect(within(card).getByRole('button', { name: 'Disconnect' })).toBeEnabled();
+    host({
+      type: 'patch',
+      patch: { mcp: { active: true, servers: [{ ...context7, enabled: true, status: 'connected' }] } },
+    });
+    expect(within(card).getByRole('status')).toHaveTextContent('Connected');
+  });
+
   it('keeps custom local commands and field validation available', async () => {
     await open([]);
-    await clickButton(/^Add custom server$/);
+    await clickButton(/^Custom MCP Server$/);
     await userEvent.type(screen.getByLabelText('Name'), 'My files');
+    await clickButton(/^Advanced connection settings$/);
     await userEvent.type(screen.getByLabelText('Environment'), 'bad name=1');
     await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
     expect(
@@ -2438,7 +2474,7 @@ describe('MCP servers', () => {
 
   it('preserves the custom server draft when collapsed and returns focus after cancel', async () => {
     await open([]);
-    const add = screen.getByRole('button', { name: 'Add custom server' });
+    const add = screen.getByRole('button', { name: 'Custom MCP Server' });
     await userEvent.click(add);
     const name = screen.getByLabelText('Name');
     expect(name).toHaveFocus();
@@ -2454,26 +2490,34 @@ describe('MCP servers', () => {
 
   it('makes existing-profile browser access and GitHub writes explicit choices', async () => {
     await open([]);
-    await clickButton(/^Add integration$/);
-    await userEvent.click(screen.getByRole('button', { name: 'Playwright MCP' }));
-    await userEvent.selectOptions(screen.getByLabelText('Browser or access mode'), 'extension');
+    await clickButton(/^Browse Catalog$/);
+    await userEvent.click(
+      within(screen.getByRole('listitem', { name: 'Playwright MCP' })).getByRole('button', {
+        name: 'Advanced settings',
+      }),
+    );
+    await userEvent.selectOptions(screen.getByLabelText('Browser profile'), 'extension');
     expect(screen.getByText(/Approved tabs can expose signed-in accounts/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Add to Sovran' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Configure Playwright MCP' }));
     expect(sent).toContainEqual({
       type: 'addMcpIntegration',
       integration: 'playwright',
       profile: 'extension',
     });
-    await clickButton(/^Add integration$/);
-    await userEvent.click(screen.getByRole('button', { name: 'GitHub MCP' }));
-    expect(screen.getByLabelText('Browser or access mode')).toHaveValue('readonly');
-    await userEvent.selectOptions(screen.getByLabelText('Browser or access mode'), 'collaboration');
-    expect(screen.getByText(/Every write starts on Ask/)).toBeInTheDocument();
+    await clickButton(/^Browse Catalog$/);
+    await userEvent.click(
+      within(screen.getByRole('listitem', { name: 'GitHub MCP' })).getByRole('button', {
+        name: 'Advanced settings',
+      }),
+    );
+    expect(screen.getByLabelText('Access mode')).toHaveValue('readonly');
+    await userEvent.selectOptions(screen.getByLabelText('Access mode'), 'collaboration');
+    expect(screen.getByText(/writes start on Ask/)).toBeInTheDocument();
   });
 
   it('fills the form from a README snippet and moves its token to Secret Storage', async () => {
     await open([github]);
-    await clickButton(/^Add custom server$/);
+    await clickButton(/^Custom MCP Server$/);
     await userEvent.click(screen.getByText("Paste the JSON from the server's README"));
     const snippet =
       '{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_123456789" } } } }';
@@ -2483,6 +2527,7 @@ describe('MCP servers', () => {
     expect(screen.getByRole('list', { name: 'What the import changed' })).toHaveTextContent(
       'GITHUB_PERSONAL_ACCESS_TOKEN moves to Secret Storage.',
     );
+    await clickButton(/^Advanced connection settings$/);
     expect(screen.getByLabelText('Environment')).toHaveValue('');
     expect(screen.getByLabelText('Environment variable name')).toHaveValue('GITHUB_PERSONAL_ACCESS_TOKEN');
     expect(screen.getByLabelText('Token')).toHaveAttribute('type', 'password');
@@ -2502,11 +2547,14 @@ describe('MCP servers', () => {
 
   it('edits a remote server without showing its token, and warns about plain http', async () => {
     await open([github]);
-    await clickButton(/^Server settings/);
+    await clickButton(/^Advanced settings/);
     await userEvent.click(screen.getByRole('button', { name: 'Edit GitHub' }));
     expect(screen.queryByText("Paste the JSON from the server's README")).not.toBeInTheDocument();
     expect(screen.getByLabelText('Token')).toHaveValue('');
-    expect(screen.getByLabelText('Token')).toHaveAttribute('placeholder', 'Stored. Leave empty to keep it');
+    expect(screen.getByLabelText('Token')).toHaveAttribute(
+      'placeholder',
+      'Token stored for the current connection',
+    );
     await userEvent.clear(screen.getByLabelText('URL'));
     await userEvent.type(screen.getByLabelText('URL'), 'http://mcp.corp.example/mcp');
     expect(screen.getByRole('note')).toHaveTextContent('the token would travel unencrypted');

@@ -3864,50 +3864,23 @@ body.vscode-high-contrast-light .sv-starter-card {
   font-size: var(--sv-text-sm);
 }
 
-/* An on/off switch: role="switch" on a button, drawn with theme colours only. */
-.sv-switch {
-  position: relative;
-  flex: none;
-  width: 28px;
-  height: 16px;
-  margin-left: 2px;
+.sv-mcp-catalog {
+  display: grid;
+  list-style: none;
+  margin: 0;
   padding: 0;
-  border: 1px solid var(--vscode-checkbox-border, var(--sv-border));
-  border-radius: 8px;
-  background: var(--vscode-checkbox-background, var(--sv-surface));
-  cursor: pointer;
-  transition:
-    background-color 120ms var(--sv-ease),
-    border-color 120ms var(--sv-ease);
 }
 
-.sv-switch::after {
-  content: '';
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--sv-muted);
-  transition:
-    transform 120ms var(--sv-ease),
-    background-color 120ms var(--sv-ease);
+.sv-mcp-catalog > .sv-integration {
+  gap: var(--sv-s1);
 }
 
-.sv-switch[aria-checked='true'] {
-  border-color: var(--sv-button-bg);
-  background: var(--sv-button-bg);
+.sv-mcp-catalog .sv-disclosure {
+  border-top: 0;
 }
 
-.sv-switch[aria-checked='true']::after {
-  transform: translateX(12px);
-  background: var(--sv-button-fg);
-}
-
-.sv-switch:focus-visible {
-  outline: 1px solid var(--sv-focus);
-  outline-offset: 2px;
+.sv-mcp-catalog .sv-disclosure__trigger {
+  padding-inline: 0;
 }
 
 .sv-mcp-tools__list {
@@ -4098,16 +4071,6 @@ body.vscode-high-contrast-light .sv-starter-card {
   .sv-mcp-dot[data-state='busy'] {
     animation: none;
   }
-
-  .sv-switch,
-  .sv-switch::after {
-    transition: none;
-  }
-}
-
-body.vscode-high-contrast .sv-switch[aria-checked='true'],
-body.vscode-high-contrast-light .sv-switch[aria-checked='true'] {
-  border-color: var(--vscode-contrastActiveBorder, var(--sv-focus));
 }
 
 /* Tool groups stay within the sidebar; settings reuse VS Code typography and theme tokens. */

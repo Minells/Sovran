@@ -5,7 +5,6 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   integration,
   integrationArguments,
-  integrationHeaders,
   supportedNode,
   INTEGRATIONS,
   type IntegrationId,
@@ -223,17 +222,18 @@ export class ManagedMcpPackages {
     if (!managed) return server;
     const args = integrationArguments(managed);
     this.options.authorize();
-    if (managed.id === 'github') {
-      const headers = integrationHeaders(managed.profile);
+    const item = integration(managed.id);
+    if (item.remote) {
+      const headers = item.remote.headers?.(managed.profile) ?? {};
       if (
         server.command ||
-        server.url !== 'https://api.githubcopilot.com/mcp/' ||
+        server.url !== item.remote.url ||
         server.auth.type !== 'bearer' ||
         Object.keys(server.headers ?? {}).length !== Object.keys(headers).length ||
         Object.entries(headers).some(([key, value]) => server.headers?.[key] !== value)
       ) {
         throw new Error(
-          'The managed GitHub endpoint or filters changed. Add the catalog entry again, or explicitly edit it as a custom server.',
+          `The managed ${item.name} endpoint, authentication or filters changed. Add the catalog entry again, or explicitly edit it as a custom server.`,
         );
       }
       return server;

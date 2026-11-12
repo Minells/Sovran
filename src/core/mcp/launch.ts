@@ -3,7 +3,7 @@
  * resolved. Separate from config.ts, which the webview also uses and which must stay free of Node modules.
  */
 import * as path from 'node:path';
-import type { McpServerConfig } from './config';
+import { requiresToken, type McpServerConfig } from './config';
 
 /** Values `${…}` variables expand to. `env` is the extension host's environment. */
 export interface McpVariables {
@@ -96,8 +96,7 @@ export function resolveLaunch(s: McpServerConfig, vars: McpVariables, token: str
   const x = (v: string) => expandVariables(v, vars, problems);
   const map = (m: Record<string, string> | undefined) =>
     Object.fromEntries(Object.entries(m ?? {}).map(([k, v]) => [k, x(v)]));
-  if (s.auth.type !== 'none' && !token)
-    problems.push(`No token is stored for ${s.name}. Add it with Set token.`);
+  if (requiresToken(s) && !token) problems.push(`No token is stored for ${s.name}. Add it with Set token.`);
 
   let launch: McpLaunch;
   if (s.url) {
