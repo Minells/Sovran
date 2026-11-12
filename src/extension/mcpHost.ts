@@ -5,11 +5,15 @@
  */
 import * as vscode from 'vscode';
 import * as os from 'node:os';
+import { createHash } from 'node:crypto';
 import { ManagedMcpPackages } from './adapters/ManagedMcpPackages';
 import {
   integration,
   integrationArguments,
-  PROFILE_LABELS,
+  integrationEndpoint,
+  integrationProfileLabel,
+  integrationToolRequiresApproval,
+  normalizeGitLabInstance,
   type ManagedIntegration,
   type IntegrationId,
   type IntegrationProfile,
@@ -34,6 +38,15 @@ import { sendsKeyInsecurely } from '../shared/endpoints';
 import { NodeMcpTransports } from './adapters/McpTransports';
 import { readMcpServers, writeMcpServers } from './config';
 import type { HostLogger, McpSecrets } from './services';
+
+/** Bind managed GitLab credentials to both the connection and its approved destination. */
+function credentialKey(server: McpServerConfig): string {
+  if (server.managed?.id !== 'gitlab') return server.id;
+  const destination = createHash('sha256')
+    .update(server.managed.instanceUrl ?? '')
+    .digest('hex');
+  return `${server.id}.gitlab.${destination}`;
+}
 
 const MAX_DESCRIPTION_SHOWN = 2000;
 
@@ -83,7 +96,7 @@ export class McpHost implements vscode.Disposable {
             userHome: os.homedir(),
             env: process.env,
           }),
-          token: async (id) => this.tokens.get(id) ?? (await this.deps.secrets.get(id)),
+          token: async (server) => this.deps.secrets.get(credentialKey(server)),
         }),
       logger: deps.logger,
       client: { name: 'sovran', version: deps.version },
@@ -122,7 +135,8 @@ export class McpHost implements vscode.Disposable {
     const servers = readMcpServers(this.deps.logger);
     const tokens = await Promise.all(
       servers.map(
-        async (s) => [s.id, s.auth.type === 'none' ? undefined : await this.deps.secrets.get(s.id)] as const,
+        async (s) =>
+          [s.id, s.auth.type === 'none' ? undefined : await this.deps.secrets.get(credentialKey(s))] as const,
       ),
     );
     this.servers = servers;
@@ -195,6 +209,7 @@ export class McpHost implements vscode.Disposable {
         modelName: t.modelName,
         policy: t.policy,
         hints: t.hints,
+        ...(t.requiresApproval ? { requiresApproval: true } : {}),
       })),
       toolTokens: offered.reduce((sum, t) => sum + t.definitionTokens, 0),
     };
@@ -277,14 +292,18 @@ export class McpHost implements vscode.Disposable {
         const changed = !!existing && connectionKey(existing) !== connectionKey(config);
         config.enabled = !!existing?.enabled && !changed;
         const next = existing ? servers.map((s) => (s.id === id ? config : s)) : [...servers, config];
-        return { servers: next, result: { config, changed } };
+        return { servers: next, result: { config, changed, existing } };
       },
       {
-        beforeWrite: async ({ config, changed }) => {
-          if (changed || config.auth.type === 'none') await this.storeToken(config.id, undefined);
+        beforeWrite: async ({ config, changed, existing }) => {
+          if (changed || config.auth.type === 'none') {
+            await this.storeToken(existing ?? config, undefined);
+            if (existing && credentialKey(existing) !== credentialKey(config))
+              await this.storeToken(config, undefined);
+          }
         },
         afterWrite: async ({ config }) => {
-          if (config.auth.type !== 'none' && key) await this.storeToken(config.id, key);
+          if (config.auth.type !== 'none' && key) await this.storeToken(config, key);
         },
       },
     );
@@ -312,9 +331,18 @@ export class McpHost implements vscode.Disposable {
       'Remove',
     );
     if (choice !== 'Remove') return;
-    await this.mutate((servers) => ({ servers: servers.filter((s) => s.id !== id), result: id }), {
-      beforeWrite: (removed) => this.storeToken(removed, undefined),
-    });
+    await this.mutate(
+      (servers) => {
+        const current = servers.find((s) => s.id === id);
+        if (!current) return;
+        if (connectionKey(current) !== connectionKey(server))
+          throw new Error('The server changed while awaiting confirmation. Review it again.');
+        return { servers: servers.filter((s) => s.id !== id), result: current };
+      },
+      {
+        beforeWrite: (removed) => this.storeToken(removed, undefined),
+      },
+    );
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<void> {
@@ -347,14 +375,18 @@ export class McpHost implements vscode.Disposable {
     const detail = item
       ? [
           item.remote
-            ? `Connects to ${item.remote.url}.`
+            ? `Connects to ${integrationEndpoint(managed)}.`
             : `Runs ${item.package}@${item.version} on ${host}.`,
-          item.id === 'context7' ? undefined : `${PROFILE_LABELS[managed.profile]}.`,
+          item.id === 'context7' ? undefined : `${integrationProfileLabel(item.id, managed.profile)}.`,
           item.security,
           managed.profile === 'extension'
             ? `Chrome profile ${managed.browserProfile} uses the Playwright companion extension. Approved tabs can expose signed-in accounts.`
             : undefined,
-          managed.profile === 'collaboration' ? 'Issue and pull request writes start on Ask.' : undefined,
+          item.id === 'gitlab' || managed.profile === 'developer'
+            ? 'Each write requires approval.'
+            : managed.profile === 'collaboration'
+              ? 'Issue and pull request writes start on Ask.'
+              : undefined,
         ]
       : [
           `Runs on ${host} with your permissions.`,
@@ -371,7 +403,10 @@ export class McpHost implements vscode.Disposable {
 
   async setToolPolicy(id: string, tool: string, policy: McpToolPolicy): Promise<void> {
     await this.mutate((servers) => {
-      if (!servers.some((s) => s.id === id)) return undefined;
+      const current = servers.find((s) => s.id === id);
+      if (!current) return undefined;
+      if (policy === 'allow' && integrationToolRequiresApproval(current.managed, tool))
+        throw new Error('This managed tool requires approval for each use.');
       const next = servers.map((s) =>
         s.id !== id
           ? s
@@ -427,21 +462,22 @@ export class McpHost implements vscode.Disposable {
       const current = readMcpServers().find((s) => s.id === id);
       if (!current || connectionKey(current) !== connectionKey(server))
         throw new Error('The server changed while setting the token. Try again.');
-      await this.storeToken(id, this.tokenValue(server.auth, value) || undefined);
+      await this.storeToken(current, this.tokenValue(server.auth, value) || undefined);
     });
     await this.hub.restart(id);
     this.changed();
   }
 
-  private async storeToken(id: string, key: string | undefined): Promise<void> {
+  private async storeToken(server: McpServerConfig, key: string | undefined): Promise<void> {
+    const destination = credentialKey(server);
     if (key) {
-      await this.deps.secrets.set(id, key);
-      this.tokens.set(id, key);
+      await this.deps.secrets.set(destination, key);
+      this.tokens.set(server.id, key);
       this.deps.logger.addSecret(key);
       return;
     }
-    await this.deps.secrets.delete(id);
-    this.tokens.delete(id);
+    await this.deps.secrets.delete(destination);
+    this.tokens.delete(server.id);
   }
 
   private tokenValue(auth: McpServerConfig['auth'], value: string): string {
@@ -463,6 +499,24 @@ export class McpHost implements vscode.Disposable {
   async addIntegration(id: IntegrationId, profile: IntegrationProfile): Promise<void> {
     const item = integration(id);
     const managed: ManagedIntegration = { id, profile, version: item.version };
+    if (!item.profiles.includes(profile)) throw new Error('This integration profile is unavailable.');
+    if (item.remote?.configurableInstance) {
+      const value = await vscode.window.showInputBox({
+        title: 'GitLab instance URL',
+        prompt: 'Enter the base HTTPS URL, including any instance path.',
+        value: 'https://gitlab.com',
+        ignoreFocusOut: true,
+        validateInput: (input) => {
+          try {
+            normalizeGitLabInstance(input);
+          } catch (error) {
+            return error instanceof Error ? error.message : 'Enter a valid HTTPS GitLab instance URL.';
+          }
+        },
+      });
+      if (value === undefined) return;
+      managed.instanceUrl = normalizeGitLabInstance(value);
+    }
     if (profile === 'extension') {
       if (this.deps.managed?.remote)
         throw new Error(
@@ -485,12 +539,14 @@ export class McpHost implements vscode.Disposable {
     await this.mutate((servers) => {
       const server = fromEntry({
         id: newServerId(item.name, new Set(servers.map((s) => s.id))),
-        name: item.name,
+        name: managed.instanceUrl
+          ? `GitLab MCP · ${managed.instanceUrl.slice('https://'.length)}`.slice(0, 80)
+          : item.name,
         enabled: false,
         managed,
         ...(item.remote
           ? {
-              url: item.remote.url,
+              url: integrationEndpoint(managed),
               headers: item.remote.headers?.(profile),
               auth: { type: 'bearer' as const },
             }

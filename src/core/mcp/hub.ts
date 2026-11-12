@@ -15,7 +15,12 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client';
 import { z } from 'zod';
-import { integrationCallProblem, integrationToolAllowed, reviewedToolDescription } from './catalog';
+import {
+  integrationCallProblem,
+  integrationToolAllowed,
+  integrationToolRequiresApproval,
+  reviewedToolDescription,
+} from './catalog';
 import { estimateTokens } from '../context/contextManager';
 import type { Logger, McpToolHint } from '../ports';
 import { redact } from '../security/redact';
@@ -56,6 +61,7 @@ export interface McpToolInfo {
   modelName: string;
   policy: McpToolPolicy;
   hints: McpToolHint[];
+  requiresApproval?: true;
   /** Estimated tokens its definition adds to every request while it is offered. */
   definitionTokens: number;
 }
@@ -345,6 +351,9 @@ export class McpHub implements ToolSource {
           modelName,
           policy: toolPolicy(c.config, t.name),
           hints: hintsOf(t),
+          ...(integrationToolRequiresApproval(c.config.managed, t.name)
+            ? { requiresApproval: true as const }
+            : {}),
           definitionTokens: estimateTokens(
             modelName + descriptionOf(t, c.config) + JSON.stringify(parametersOf(t)),
           ),
@@ -448,6 +457,7 @@ export class McpHub implements ToolSource {
             arguments:
               shown.length > MAX_ARGUMENTS_SHOWN ? `${shown.slice(0, MAX_ARGUMENTS_SHOWN)}\n…` : shown,
             hints: hintsOf(tool),
+            ...(integrationToolRequiresApproval(config.managed, tool.name) ? { requiresApproval: true } : {}),
           },
         };
       },

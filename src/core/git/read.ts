@@ -264,6 +264,11 @@ export class GitReader {
       throw new ToolError(
         'Use a commit ID, branch/tag name or HEAD ancestry; revision flags, ranges and path expressions are not accepted.',
       );
+    return this.resolveCommit(revision);
+  }
+
+  /** Resolve a revision already validated by the caller, including a fully qualified ref from Git. */
+  async resolveCommit(revision: string): Promise<string> {
     const result = await this.call(['rev-parse', '--verify', '--end-of-options', `${revision}^{commit}`]);
     const oid = result.stdout.trim();
     if (!OID.test(oid)) throw new ToolError('Git did not resolve the revision to one commit.');

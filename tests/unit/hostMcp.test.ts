@@ -207,6 +207,30 @@ beforeEach(async () => {
 });
 
 describe('integration catalog host lifecycle', () => {
+  it('keeps a managed GitLab token scoped to the configured instance even after settings edits', async () => {
+    h.inputAnswer = 'https://gitlab.example.test:8443/team/';
+    await mcp.addIntegration('gitlab', 'collaboration');
+    const config = servers().find(
+      (entry) => entry.url === 'https://gitlab.example.test:8443/team/api/v4/mcp',
+    )!;
+    expect(config).toMatchObject({
+      enabled: false,
+      managed: { id: 'gitlab', instanceUrl: 'https://gitlab.example.test:8443/team' },
+      auth: { type: 'bearer' },
+    });
+    const id = config.id as string;
+    h.inputAnswer = 'glpat-fixture-only';
+    await mcp.promptToken(id);
+    expect(mcp.view().servers.find((server) => server.id === id)?.hasToken).toBe(true);
+    expect(JSON.stringify(servers())).not.toContain('glpat-fixture-only');
+    await expect(mcp.setToolPolicy(id, 'save_merge_request', 'allow')).rejects.toThrow(/requires approval/);
+
+    config.url = 'https://another.example.test/api/v4/mcp';
+    config.managed = { ...(config.managed as object), instanceUrl: 'https://another.example.test' };
+    for (const listener of h.configListeners) await listener({ affectsConfiguration: () => true });
+    expect(mcp.view().servers.find((server) => server.id === id)?.hasToken).toBe(false);
+    await expect(mcp.setEnabled(id, true)).rejects.toThrow(/Set the server token/);
+  });
   it('cancels existing-profile setup without saving and stores only an explicitly named profile', async () => {
     const before = structuredClone(servers());
     h.inputAnswer = undefined;

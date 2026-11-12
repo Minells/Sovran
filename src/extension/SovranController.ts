@@ -3091,6 +3091,7 @@ export class SovranController implements vscode.Disposable {
                   branch: d.branch,
                   files: [...d.files],
                   ...(d.message !== undefined ? { message: d.message } : {}),
+                  ...(d.target ? { target: d.target } : {}),
                   preview: d.preview,
                   warnings: [...d.warnings],
                 }
@@ -3119,6 +3120,7 @@ export class SovranController implements vscode.Disposable {
                         ...(d.title ? { title: d.title } : {}),
                         arguments: d.arguments,
                         hints: d.hints,
+                        ...(d.requiresApproval ? { requiresApproval: true } : {}),
                       }
                     : { kind: 'read', path: d.path, reason: d.reason },
         ...(request.reason ? { reason: request.reason } : {}),
@@ -3228,7 +3230,7 @@ export class SovranController implements vscode.Disposable {
       }
     }
     // "Always allow" on an MCP tool: the tool named by the pending request, never one the webview names.
-    if (response.approved && allowTool && detail.kind === 'mcp') {
+    if (response.approved && allowTool && detail.kind === 'mcp' && !detail.requiresApproval) {
       // The call runs either way: failing to save the choice must not leave the run waiting.
       await this.deps.mcp?.allowTool(detail.serverId, detail.tool).catch((e: unknown) => {
         this.notice(

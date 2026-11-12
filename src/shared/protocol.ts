@@ -24,7 +24,12 @@ import {
 } from '../core/mcp/config';
 import type { McpStatus } from '../core/mcp/status';
 import type { GitApprovalDetail, McpToolHint } from '../core/ports';
-import { INTEGRATION_IDS, type ManagedIntegration, type IntegrationCatalogView } from '../core/mcp/catalog';
+import {
+  INTEGRATION_IDS,
+  INTEGRATION_PROFILES,
+  type ManagedIntegration,
+  type IntegrationCatalogView,
+} from '../core/mcp/catalog';
 
 export type {
   SessionMessage,
@@ -104,7 +109,15 @@ export type ApprovalDetailView =
   /** `allowPrefix` is the suggested "always allow" entry, or null when this command can never be allow-listed. */
   | { kind: 'command'; command: string; cwd: string; warnings: string[]; allowPrefix: string | null }
   | { kind: 'read'; path: string; reason: string }
-  | { kind: 'mcp'; server: string; tool: string; title?: string; arguments: string; hints: McpToolHint[] };
+  | {
+      kind: 'mcp';
+      server: string;
+      tool: string;
+      title?: string;
+      arguments: string;
+      hints: McpToolHint[];
+      requiresApproval?: true;
+    };
 
 export interface ApprovalView {
   id: string;
@@ -239,6 +252,7 @@ export interface McpToolView {
   modelName: string;
   policy: McpToolPolicy;
   hints: McpToolHint[];
+  requiresApproval?: true;
 }
 
 /** A configured MCP server and how it is doing. Tokens never reach the webview: only `hasToken`. */
@@ -565,7 +579,7 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('addMcpIntegration'),
     integration: z.enum(INTEGRATION_IDS),
-    profile: z.enum(['isolated', 'extension', 'readonly', 'collaboration']),
+    profile: z.enum(INTEGRATION_PROFILES),
   }),
   z.object({ type: z.literal('installMcpIntegration'), integration: z.enum(INTEGRATION_IDS) }),
   /** The host confirms first: the server's stored token is deleted too. */

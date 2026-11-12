@@ -102,6 +102,8 @@ export interface WorkspacePort {
   searchText?(options: TextSearchOptions): Promise<TextSearchResult>;
   /** Whether a saved-file operation would ignore unsaved editor changes. */
   isDirty?(absPath: string): boolean;
+  /** Paths of unsaved file-backed documents known to the editor. */
+  dirtyFiles?(): string[];
   activeEditor(): EditorContext | null;
   /** Cached editor diagnostics, including unopened files. Never opens documents or starts analysis.
    * When supplied, absPath selects one exact file. Callers enforce workspace/protected-path boundaries.
@@ -156,11 +158,12 @@ export interface ProcessPort {
 
 export interface GitApprovalDetail {
   kind: 'git';
-  operation: 'stage' | 'unstage' | 'commit';
+  operation: 'stage' | 'unstage' | 'commit' | 'fetch' | 'push' | 'pull' | 'rebase';
   repository: string;
   branch: string;
   files: string[];
   message?: string;
+  target?: { destination: string; refs: string[] };
   preview: string;
   warnings: string[];
 }
@@ -192,6 +195,7 @@ export type ApprovalDetail =
       arguments: string;
       /** What the server says about the tool (MCP annotations). Only claims the server made explicitly. */
       hints: McpToolHint[];
+      requiresApproval?: true;
     };
 
 /** MCP tool annotations as the user reads them. They come from the server, so they are claims, not guarantees. */

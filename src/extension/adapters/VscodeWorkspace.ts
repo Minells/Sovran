@@ -127,6 +127,12 @@ export class VscodeWorkspace implements WorkspacePort {
     );
   }
 
+  dirtyFiles(): string[] {
+    return vscode.workspace.textDocuments
+      .filter((doc) => doc.isDirty && doc.uri.scheme === 'file')
+      .map((doc) => doc.uri.fsPath);
+  }
+
   activeEditor(): EditorContext | null {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.uri.scheme !== 'file') return null;

@@ -18,7 +18,7 @@ import { parseMcpSnippet, type McpDraft } from '../../../src/shared/mcpImport';
 import {
   INTEGRATIONS,
   integration,
-  PROFILE_LABELS,
+  integrationProfileLabel,
   type IntegrationDefinition,
   type IntegrationProfile,
   type InstallationState,
@@ -104,18 +104,19 @@ const pairsText = (pairs: Record<string, string> | undefined, separator: string)
 
 function PolicyChoice({ server, tool }: { server: McpServerView; tool: McpToolView }) {
   const label = `${tool.title ?? tool.name}: when the agent uses it`;
+  const policies = tool.requiresApproval ? POLICIES.filter((policy) => policy.value !== 'allow') : POLICIES;
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const i = POLICIES.findIndex((p) => p.value === tool.policy);
+    const i = policies.findIndex((p) => p.value === tool.policy);
     const next = { ArrowRight: i + 1, ArrowDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1 }[e.key];
     if (next === undefined) return;
     e.preventDefault();
-    const p = POLICIES[(next + POLICIES.length) % POLICIES.length]!;
+    const p = policies[(next + policies.length) % policies.length]!;
     post({ type: 'setMcpToolPolicy', id: server.id, tool: tool.name, policy: p.value });
     (e.currentTarget.querySelector(`[data-value="${p.value}"]`) as HTMLButtonElement | null)?.focus();
   };
   return (
     <div className="sv-segment sv-mcp-policy" role="radiogroup" aria-label={label} onKeyDown={onKeyDown}>
-      {POLICIES.map((p) => (
+      {policies.map((p) => (
         <button
           key={p.value}
           type="button"
@@ -280,7 +281,9 @@ function ServerCard({
           </code>
           {managed ? (
             <div className="sv-field__help">
-              {item?.id !== 'context7' ? PROFILE_LABELS[managed.profile] : item.requirements}
+              {item?.id !== 'context7'
+                ? integrationProfileLabel(managed.id, managed.profile)
+                : item.requirements}
               {managed.browserProfile ? ` (${managed.browserProfile})` : ''} · {host ?? 'Extension host'}
             </div>
           ) : null}
@@ -852,7 +855,7 @@ function CatalogEntry({
             >
               {item.profiles.map((value) => (
                 <option key={value} value={value} disabled={value === 'extension' && remoteHost}>
-                  {PROFILE_LABELS[value]}
+                  {integrationProfileLabel(item.id, value)}
                 </option>
               ))}
             </select>
@@ -864,7 +867,11 @@ function CatalogEntry({
             signed-in accounts.
           </p>
         ) : null}
-        {profile === 'collaboration' ? (
+        {profile === 'developer' || (item.id === 'gitlab' && profile === 'collaboration') ? (
+          <p className="sv-field__help">
+            Each write requires approval. Limit your token to the projects and permissions you need.
+          </p>
+        ) : profile === 'collaboration' ? (
           <p className="sv-field__help">
             Issue and pull request writes start on Ask. Limit your token to the repositories and permissions
             you need.

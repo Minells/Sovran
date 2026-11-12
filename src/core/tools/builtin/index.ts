@@ -1,5 +1,5 @@
 import { gitBranchesTool, gitDiffTool, gitLogTool, gitShowTool, gitStatusTool } from './gitTools';
-import { gitStageTool, gitUnstageTool, gitCommitTool } from './gitWriteTools';
+import { gitStageTool, gitUnstageTool, gitCommitTool, gitFetchTool, gitPushTool, gitPullTool, gitRebaseTool } from './gitWriteTools';
 import { ToolRegistry } from '../registry';
 import { diagnosticsTool } from './diagnosticsTool';
 import { documentSymbolsTool, definitionTool, referencesTool } from './semanticTools';
@@ -16,7 +16,8 @@ export function createBuiltinRegistry(): ToolRegistry {
     web: [webFetchTool],
     editing: [writeFileTool, editFileTool, applyDiffTool],
     terminal: [executeTerminalTool],
-    git: [gitStatusTool, gitDiffTool, gitLogTool, gitShowTool, gitBranchesTool, gitStageTool, gitUnstageTool, gitCommitTool],
+    git: [gitStatusTool, gitDiffTool, gitLogTool, gitShowTool, gitBranchesTool, gitStageTool, gitUnstageTool, gitCommitTool,
+      gitFetchTool, gitPushTool, gitPullTool, gitRebaseTool],
   };
   for (const [group, tools] of Object.entries(groups)) {
     for (const tool of tools) registry.register({ ...tool, source: { kind: 'native' }, group });

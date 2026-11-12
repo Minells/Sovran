@@ -29,6 +29,7 @@ export class CheckpointRecorder implements WorkspacePort {
   /** Optional capabilities pass through as the inner workspace has them (read_file needs readBytes for documents). */
   readonly readBytes: WorkspacePort['readBytes'];
   readonly isDirty: WorkspacePort['isDirty'];
+  readonly dirtyFiles: WorkspacePort['dirtyFiles'];
   readonly diagnostics: WorkspacePort['diagnostics'];
   readonly querySemantic: WorkspacePort['querySemantic'];
 
@@ -36,6 +37,7 @@ export class CheckpointRecorder implements WorkspacePort {
     this.searchText = inner.searchText?.bind(inner);
     this.readBytes = inner.readBytes?.bind(inner);
     this.isDirty = inner.isDirty?.bind(inner);
+    this.dirtyFiles = inner.dirtyFiles?.bind(inner);
     this.diagnostics = inner.diagnostics?.bind(inner);
     this.querySemantic = inner.querySemantic?.bind(inner);
   }
