@@ -424,8 +424,8 @@ flowchart LR
   connection do nothing. The SDK's `listChanged` option keeps tool lists current.
 - **Settings.** `sovran.mcp.servers` follows the `command`/`url` shape every MCP host uses. Changes are applied in place:
   names, timeouts and tool policies (`allowedTools`, `disabledTools`) never reconnect; the command, arguments,
-  environment, folder, URL, headers or auth do. Writes from Settings keep any entry Sovran could not read, unchanged
-  and in place. `rules.ts` holds what the webview form shares with the host's zod schema, without zod.
+  environment, folder, URL, headers or auth do. In the UI, editing a connection saves it disconnected and removes
+  its old credential before changing the destination. User settings entries Sovran cannot read stay in place. `rules.ts` holds what the webview form shares with the host's zod schema, without zod.
 - **Launch (`launch.ts`).** `${workspaceFolder}`, `${userHome}` and `${env:NAME}` are expanded; any other variable, or
   one without a value, is reported instead of becoming an empty string. The token from Secret Storage goes to
   `Authorization: Bearer`, a named header, or an environment variable. Local servers start in the first workspace
@@ -438,14 +438,18 @@ flowchart LR
   `PolicyInput.mcp` makes them ask in every approval mode until the user allows the tool; the hub reads the policy at
   call time, so a tool turned off mid-run is refused.
 - **Lifecycle.** Servers start in the background at activation (and when the workspace is trusted), never blocking it;
-  `deactivate` awaits `McpHost.dispose()`, which ends HTTP sessions and stops local processes.
+  `deactivate` awaits `McpHost.dispose()`, which ends HTTP sessions and stops local processes. Disconnect withdraws
+  tools before closing the transport. Restart checks its generation after closing so it cannot revive a replaced or
+  disabled connection.
 
 ### Managed profiles and chat selection
 
 `core/mcp/catalog.ts` holds reviewed versions, profiles and explicit tool allowlists. The host owns installation in
-extension global storage via bundled lockfiles and `npm ci --ignore-scripts`; UI selection never starts I/O. Managed
-launch checks Node and known system Chrome, resolves an installed entrypoint and rejects altered endpoint/launch
-settings. Custom-server conversion is explicit. Remote extension-profile attachment is unavailable. Hub discovery,
+extension global storage via bundled lockfiles and `npm ci --ignore-scripts`. Managed browser launch checks Node and
+known system Chrome and resolves the installed entrypoint. Hosted launch validates the registry endpoint, headers and
+authentication placement before retrieving a credential. GitHub requires a token. Context7 can connect without a key
+and uses the same Secret Storage bearer path when a key is present. The registry holds connection defaults and
+reviewed profiles. User settings hold server IDs, enabled state and tool policies. Custom-server conversion is explicit. Remote extension-profile attachment is unavailable. Hub discovery,
 list refresh and dispatch retain the profile bound independently of Off/Ask/Allow. Browser outputs remain outside
 chat retention; returned local paths are data and are never dereferenced by the client.
 
@@ -454,7 +458,12 @@ single registry: model visibility and execution use the same selection, with cur
 before/after approval and by delayed-effect revalidation. Native user disabled/force-Ask overrides stay global.
 The controller projects available group counts and estimated schema cost per surface, refreshing after MCP, mode,
 trust or settings changes. Cost is an estimate, not a budget-based eviction mechanism. The UI keeps the internal
-`mcp` settings route for compatibility while presenting **Tools** with native controls and optional integrations.
+`mcp` settings route for compatibility. **Browse Catalog** and **Custom MCP Server** both create disconnected entries
+and use the same status projection. Only the custom editor and advanced details show connection mechanics.
+
+Tool discovery and transport stay behind the hub. A future tool lookup or Code Mode can use the existing registry and
+controlled dispatch boundary, including live workspace trust, approvals, group exclusions and cancellation. The
+[catalog assessment](plans/2026-11-12-mcp-catalog-expansion.md) records the upstream review and follow-up criteria.
 
 ## 13. Extension points for the future
 

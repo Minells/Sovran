@@ -101,7 +101,9 @@ A linked worktree's ordinary `.git` file can reference its administrative Git di
 Catalog selection has no installation or launch side effect. Explicit installation runs locked npm dependencies with
 scripts disabled outside the workspace; explicit Connect starts the component, and enabled entries reconnect in
 trusted windows. No browser binary ships in the VSIX. Chrome is resolved from known system locations outside workspace
-roots. Managed launch configuration and hosted GitHub filters are validated; custom-server conversion is explicit.
+roots. Managed launch validates the configured hosted endpoint and required headers before loading its credential.
+Custom local servers require confirmation of the configured command on Connect. Changing a server's connection in
+the UI clears the prior credential and requires a new Connect action.
 
 Browser isolation separates cookies/profile state; it is not a network boundary. Browser tools can reach internal
 services, interact with signed-in sites in opted-in extension mode, and initiate downloads. Native fetch's public-IP,
@@ -110,6 +112,10 @@ rejected by managed browser profiles; returned local paths are never read automa
 separately from chats, with a best-effort eviction threshold rather than a hard quota. DevTools telemetry/CrUX/update
 checks are disabled by the managed preset; a custom server has its own behavior. GitHub's default read-only filter is
 also enforced by a client allowlist; write profile selection does not grant token scopes or auto-approve tools.
+
+Context7 receives documentation queries at its hosted endpoint. Use public library names and documentation questions
+that contain no credentials or private code. The preset offers only library resolution and documentation lookup
+with reviewed descriptions. Server schemas and returned documentation still contain untrusted data.
 
 ## Known limitations
 

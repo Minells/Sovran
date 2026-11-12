@@ -15,13 +15,13 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client';
 import { z } from 'zod';
-import { integrationCallProblem, integrationToolAllowed } from './catalog';
+import { integrationCallProblem, integrationToolAllowed, reviewedToolDescription } from './catalog';
 import { estimateTokens } from '../context/contextManager';
 import type { Logger, McpToolHint } from '../ports';
 import { redact } from '../security/redact';
 import type { ToolSource } from '../tools/registry';
 import { ToolError, type AnyTool, type ToolResult } from '../tools/types';
-import { toolPolicy, transportOf, type McpServerConfig, type McpToolPolicy } from './config';
+import { connectionKey, toolPolicy, transportOf, type McpServerConfig, type McpToolPolicy } from './config';
 import { commandNotFound, McpConfigError } from './launch';
 import { mcpToolName } from './naming';
 import { formatToolResult } from './results';
@@ -99,10 +99,6 @@ interface Connection {
 /** Arguments are an object; a model that sends nothing at all means "no arguments". */
 const argumentsSchema = z.preprocess((v) => (v == null ? {} : v), z.record(z.string(), z.unknown()));
 
-/** Settings that need a new connection when they change. Names, timeouts and tool policies apply in place. */
-const connectionKey = (s: McpServerConfig) =>
-  JSON.stringify([s.command, s.args, s.env, s.cwd, s.url, s.headers, s.auth, s.managed]);
-
 function hintsOf(tool: Tool): McpToolHint[] {
   const a = tool.annotations;
   if (!a) return [];
@@ -122,10 +118,12 @@ function parametersOf(tool: Tool): Record<string, unknown> {
     : object;
 }
 
-function descriptionOf(tool: Tool, server: string): string {
+function descriptionOf(tool: Tool, server: McpServerConfig): string {
+  const reviewed = reviewedToolDescription(server.managed, tool.name);
+  if (reviewed) return `${reviewed} (MCP server "${server.name}")`;
   const text = (tool.description ?? '').trim();
   const cut = text.length > MAX_DESCRIPTION ? `${text.slice(0, MAX_DESCRIPTION - 1).trimEnd()}…` : text;
-  return `${tool.title ? `${tool.title}. ` : ''}${cut || `Tool "${tool.name}".`} (MCP server "${server}")`;
+  return `${tool.title ? `${tool.title.slice(0, MAX_DESCRIPTION)}. ` : ''}${cut || `Tool "${tool.name}".`} (MCP server "${server.name}")`;
 }
 
 /** Words of a line that explains a failure, in the server's own output. */
@@ -143,6 +141,7 @@ export function tellingLine(lines: readonly string[]): string | undefined {
 
 export class McpHub implements ToolSource {
   private connections = new Map<string, Connection>();
+  private readonly closing = new Map<string, Promise<void>>();
   private active = false;
   private generation = 0;
   private cache: AnyTool[] | undefined;
@@ -192,13 +191,18 @@ export class McpHub implements ToolSource {
   async restart(id: string): Promise<void> {
     const conn = this.connections.get(id);
     if (!conn || !conn.config.enabled || !this.active) return;
-    await this.stop(conn);
+    const stopped = this.stop(conn);
+    const generation = conn.generation;
+    this.changed();
+    await stopped;
+    if (this.stale(conn, generation) || !this.active) return;
     await this.start(conn);
   }
 
   async dispose(): Promise<void> {
     this.disposed = true;
     await Promise.all([...this.connections.values()].map((c) => this.stop(c)));
+    await Promise.all(this.closing.values());
     this.connections.clear();
   }
 
@@ -216,6 +220,8 @@ export class McpHub implements ToolSource {
     this.changed();
     let client: Client | undefined;
     try {
+      await this.closing.get(config.id);
+      if (this.stale(conn, generation)) return;
       const transport = await this.deps.transports.create(config, (line) =>
         this.onLog(conn, generation, line),
       );
@@ -244,25 +250,34 @@ export class McpHub implements ToolSource {
       );
     } catch (e) {
       if (this.stale(conn, generation)) return;
+      const error = this.clean(this.describeStartFailure(e, conn));
+      void this.stop(conn);
       conn.status = 'error';
-      conn.error = this.describeStartFailure(e, conn);
-      conn.client = undefined;
-      conn.transport = undefined;
-      this.deps.logger.warn(`MCP ${config.id}: ${conn.error}`);
-      void client?.close().catch(() => undefined);
+      conn.error = error;
+      this.deps.logger.warn(`MCP ${config.id}: ${error}`);
     }
     this.changed();
   }
 
-  private async stop(conn: Connection): Promise<void> {
+  private stop(conn: Connection): Promise<void> {
     conn.generation = ++this.generation;
     const { client, transport } = conn;
     conn.client = undefined;
     conn.transport = undefined;
+    conn.server = undefined;
     conn.tools = [];
     conn.error = undefined;
     conn.status = conn.config.enabled ? 'stopped' : 'disabled';
-    if (!client) return;
+    const id = conn.config.id;
+    if (!client) return this.closing.get(id) ?? Promise.resolve();
+    const closing = this.close(client, transport).finally(() => {
+      if (this.closing.get(id) === closing) this.closing.delete(id);
+    });
+    this.closing.set(id, closing);
+    return closing;
+  }
+
+  private async close(client: Client, transport: Transport | undefined): Promise<void> {
     // A Streamable HTTP server keeps a session until it is told to end it; never wait long for that.
     const terminate = (transport as { terminateSession?: () => Promise<void> } | undefined)?.terminateSession;
     if (terminate)
@@ -286,7 +301,7 @@ export class McpHub implements ToolSource {
   }
 
   private onToolsChanged(conn: Connection, generation: number, error: Error | null, tools: Tool[] | null) {
-    if (this.stale(conn, generation)) return;
+    if (this.stale(conn, generation) || conn.status !== 'connected') return;
     if (error)
       return this.deps.logger.warn(
         `MCP ${conn.config.id}: could not refresh the tool list: ${this.clean(error.message)}`,
@@ -325,13 +340,13 @@ export class McpHub implements ToolSource {
         const modelName = mcpToolName(c.config.id, t.name);
         return {
           name: t.name,
-          ...(t.title ? { title: t.title } : {}),
-          ...(t.description ? { description: t.description } : {}),
+          ...(t.title ? { title: this.clean(t.title.slice(0, MAX_DESCRIPTION)) } : {}),
+          ...(t.description ? { description: this.clean(t.description) } : {}),
           modelName,
           policy: toolPolicy(c.config, t.name),
           hints: hintsOf(t),
           definitionTokens: estimateTokens(
-            modelName + descriptionOf(t, c.config.name) + JSON.stringify(parametersOf(t)),
+            modelName + descriptionOf(t, c.config) + JSON.stringify(parametersOf(t)),
           ),
         };
       }),
@@ -382,7 +397,7 @@ export class McpHub implements ToolSource {
     const generation = connection.generation;
     const definition: AnyTool = {
       name,
-      description: descriptionOf(tool, server()?.name ?? serverId),
+      description: this.clean(descriptionOf(tool, connection.config)),
       schema: argumentsSchema,
       parameters: parametersOf(tool),
       risk: 'execute',
@@ -464,7 +479,7 @@ export class McpHub implements ToolSource {
     if (!this.active || !conn.config.enabled || toolPolicy(conn.config, tool) === 'off') {
       throw new ToolError(`${tool} is turned off in Sovran's MCP settings.`);
     }
-    if (!conn.tools.some((t) => t.name === tool))
+    if (!integrationToolAllowed(conn.config.managed, tool) || !conn.tools.some((t) => t.name === tool))
       throw new ToolError(`${tool} is no longer offered by ${name}.`);
     const problem = integrationCallProblem(conn.config.managed, tool, args);
     if (problem) throw new ToolError(problem);
@@ -506,10 +521,14 @@ export class McpHub implements ToolSource {
     if (typeof status === 'number') {
       const hint =
         status === 401 || status === 403
-          ? ' Check the token and where it is sent.'
-          : status === 404
-            ? ' Check the URL: it is usually the server address followed by /mcp.'
-            : '';
+          ? conn.config.managed?.id === 'context7'
+            ? ' Set or replace the Context7 API key, then retry.'
+            : ' Check the token and where it is sent.'
+          : status === 429
+            ? ' The service is rate-limiting requests. Wait before retrying.'
+            : status === 404
+              ? ' Check the URL: it is usually the server address followed by /mcp.'
+              : '';
       return `The server answered ${status}.${hint}`;
     }
     const message = this.clean(e instanceof Error ? e.message : String(e));

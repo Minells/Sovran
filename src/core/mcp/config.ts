@@ -6,7 +6,7 @@
  * maps onto it field by field. Tokens never live here: `auth` only says where the token stored in Secret Storage goes.
  */
 import { z } from 'zod';
-import { INTEGRATION_IDS, type ManagedIntegration } from './catalog';
+import { integration, INTEGRATION_IDS, type ManagedIntegration } from './catalog';
 import {
   ENV_NAME_PATTERN,
   HEADER_NAME_PATTERN,
@@ -52,6 +52,14 @@ export interface McpServerConfig {
 }
 
 export const transportOf = (s: Pick<McpServerConfig, 'url'>): McpTransportKind => (s.url ? 'http' : 'stdio');
+
+export const requiresToken = (server: Pick<McpServerConfig, 'auth' | 'managed'>): boolean =>
+  server.auth.type !== 'none' &&
+  (!server.managed || integration(server.managed.id).remote?.token !== 'optional');
+
+/** Changes to these fields can send a credential to a different endpoint or executable. */
+export const connectionKey = (s: McpServerConfig) =>
+  JSON.stringify([s.command, s.args, s.env, s.cwd, s.url, s.headers, s.auth, s.managed]);
 
 export function toolPolicy(
   server: Pick<McpServerConfig, 'allowedTools' | 'disabledTools'>,

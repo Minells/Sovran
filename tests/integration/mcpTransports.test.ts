@@ -22,6 +22,8 @@ afterEach(async () => hub?.dispose());
 
 function makeHub(token: string | undefined, env: Record<string, string> = {}, logger: Logger = nullLogger) {
   const transports = new NodeMcpTransports({
+    // Managed endpoints are validated separately. Use the loopback URL to exercise the transport.
+    managedLaunch: async (config) => config,
     variables: () => ({
       workspaceFolder: os.tmpdir(),
       userHome: os.homedir(),
@@ -115,11 +117,13 @@ describe('Streamable HTTP transport', { timeout: 30_000 }, () => {
   const seen: http.IncomingHttpHeaders[] = [];
   const handler = createMcpHandler(() => {
     const s = new McpServer({ name: 'web', version: '2.0.0' });
-    s.registerTool(
-      'echo',
-      { description: 'Echoes.', inputSchema: z.object({ text: z.string() }) },
-      async ({ text }) => ({ content: [{ type: 'text', text }] }),
-    );
+    for (const name of ['echo', 'query-docs', 'resolve-library-id']) {
+      s.registerTool(
+        name,
+        { description: 'Echoes.', inputSchema: z.object({ text: z.string() }) },
+        async ({ text }) => ({ content: [{ type: 'text', text }] }),
+      );
+    }
     return s;
   });
 
@@ -196,4 +200,39 @@ describe('Streamable HTTP transport', { timeout: 30_000 }, () => {
     expect(seen.filter((x) => x.host?.startsWith('localhost'))).toEqual([]);
     expect(h.states()[1]!.error).toBe('The server answered 401. Check the token and where it is sent.');
   });
+
+  it.each([undefined, 'ctx7sk-fixture-key'])(
+    'discovers and calls only reviewed Context7 tools with optional credentials (%s)',
+    async (token) => {
+      const h = makeHub(token);
+      const config = server({
+        id: 'context7',
+        command: undefined,
+        url: `${base}/mcp`,
+        auth: { type: 'bearer' },
+        managed: { id: 'context7', profile: 'readonly', version: 'hosted-v1' },
+      });
+      h.update([config], true);
+      expect(h.tools()).toEqual([]);
+      await until(() => h.states()[0]!.status !== 'starting', 10_000);
+      expect(h.states()[0]).toMatchObject({ status: 'connected' });
+      expect(
+        h
+          .tools()
+          .map((t) => t.name)
+          .sort(),
+      ).toEqual(['mcp__context7__query-docs', 'mcp__context7__resolve-library-id']);
+      await expect(h.callTool('context7', 'echo', { text: 'hi' }, signal())).rejects.toThrow(
+        /no longer offered/,
+      );
+      expect(await h.callTool('context7', 'query-docs', { text: 'docs' }, signal())).toMatchObject({
+        content: 'docs',
+      });
+      expect(seen.at(-1)?.authorization).toBe(token ? `Bearer ${token}` : undefined);
+      h.update([{ ...config, enabled: false }], true);
+      expect(h.states()[0]).toMatchObject({ status: 'disabled', tools: [] });
+      expect(h.tools()).toEqual([]);
+      await expect(h.callTool('context7', 'query-docs', {}, signal())).rejects.toThrow(/not connected/);
+    },
+  );
 });

@@ -468,16 +468,25 @@ export function updateConfigText(
     doc.set('providers', seq);
   }
 
+  const previousItems = seq.items;
   const existing = new Map<string, YAMLMap>();
-  for (const item of seq.items) {
+  for (const item of previousItems) {
     const id = isMap(item) ? item.get('id') : undefined;
     if (typeof id === 'string') existing.set(id, item as YAMLMap);
   }
-  seq.items = providers.map((p) => {
+  let changed = providers.length !== previousItems.length;
+  seq.items = providers.map((p, index) => {
     const node = existing.get(p.id);
-    if (!node) return doc.createNode(toYamlValue(p));
+    if (!node) {
+      changed = true;
+      return doc.createNode(toYamlValue(p));
+    }
     const before = fromYamlValue(node.toJSON());
-    if (before && sameProviders([before], [p])) return node;
+    if (before && sameProviders([before], [p])) {
+      if (node !== previousItems[index]) changed = true;
+      return node;
+    }
+    changed = true;
     // Replace only the fields that differ, so comments on the others survive.
     const next = toYamlValue(p);
     const was = before ? canonicalProvider(before) : undefined;
@@ -495,11 +504,12 @@ export function updateConfigText(
   });
 
   for (const [key, value] of Object.entries(choices) as Array<[ModelChoiceKey, string | undefined]>) {
-    if (value === undefined || !doc.has(key)) continue;
+    if (value === undefined || !doc.has(key) || (value && doc.get(key) === value)) continue;
     if (value) doc.set(key, value);
     else doc.delete(key);
+    changed = true;
   }
-  return doc.toString();
+  return changed ? doc.toString() : text;
 }
 
 const CONFIG_FILE_HEADER = `# Sovran model configuration

@@ -47,7 +47,7 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
 - **Semantic navigation:** list file symbols, locate definitions and find references using the active VS Code language providers in trusted workspaces.
 - **Public Web reads:** `web_fetch` reads one approved public URL as structured text with source links. Available in trusted Plan/Act, with approval for each URL even in Auto. No account, search service, browser or crawler installation.
 - **Tools:** built-in permissions and per-chat group selection with definition cost estimates. Optional Playwright,
-  Chrome DevTools and GitHub integrations, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
+  Chrome DevTools, GitHub and Context7 integrations, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
 - **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
   history that can persist across restarts.
 
@@ -96,6 +96,10 @@ validation path, propose a fix, and add a regression test.” The agent's result
 <kbd>Alt+M</kbd> switches modes, <kbd>Alt+A</kbd> cycles approvals, and <kbd>Esc</kbd> stops a run. While an approval is
 pending, <kbd>Enter</kbd> approves from the empty input and <kbd>Esc</kbd> rejects. See the
 [complete user guide](docs/USER_GUIDE.md) for shortcuts, attachments, recovery, and MCP configuration.
+
+Open **Settings → Tools → Integrations → Browse Catalog** for managed integrations, or **Custom MCP Server**
+for your own command or endpoint. New entries are saved disconnected. Context7 queries use the hosted documentation
+service and can use an optional API key stored in VS Code Secret Storage. [MCP setup guide](docs/USER_GUIDE.md#mcp-servers)
 
 ## Configuration
 

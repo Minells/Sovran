@@ -264,6 +264,18 @@ describe('integration catalog host lifecycle', () => {
     h.trusted = false;
     await expect(mcp.installIntegration('playwright')).rejects.toThrow(/Trust/);
   });
+
+  it('configures hosted Context7 without installing anything or requiring a credential', async () => {
+    await controller.handle({ type: 'addMcpIntegration', integration: 'context7', profile: 'readonly' });
+    expect(servers().at(-1)).toMatchObject({
+      enabled: false,
+      url: 'https://mcp.context7.com/mcp',
+      managed: { id: 'context7', profile: 'readonly' },
+      auth: { type: 'bearer' },
+    });
+    expect(mcpView().servers.at(-1)).toMatchObject({ status: 'disabled', hasToken: false, tools: [] });
+    expect(stored.size).toBe(0);
+  });
 });
 
 afterEach(async () => {
@@ -368,11 +380,14 @@ describe('MCP in the host', () => {
     expect(servers()[1]).toEqual({
       id: 'docs',
       name: 'Docs',
+      enabled: false,
       url: 'https://docs.example/mcp',
       headers: { 'X-Team': 'core' },
       auth: { type: 'bearer' },
     });
     expect(stored.get('sovran.mcp.docs.token')).toBe(token);
+    expect(mcpView().servers[1]?.status).toBe('disabled');
+    await controller.handle({ type: 'setMcpServerEnabled', id: 'docs', enabled: true });
     await until(() => mcpView().servers[1]?.status === 'connected');
     expect(mcpView().servers[1]).toMatchObject({
       transport: 'http',
@@ -391,12 +406,27 @@ describe('MCP in the host', () => {
         name: 'Team docs',
         transport: 'http',
         url: 'https://docs.example/mcp',
+        headers: { 'X-Team': 'core' },
         auth: { type: 'bearer' },
       },
     });
     expect(servers()[1]).toMatchObject({ id: 'docs', name: 'Team docs', disabledTools: ['broken'] });
-    expect(servers()[1]!.headers).toBeUndefined();
+    expect(servers()[1]!.enabled).toBeUndefined();
     expect(stored.get('sovran.mcp.docs.token')).toBe(token);
+
+    await controller.handle({
+      type: 'saveMcpServer',
+      server: {
+        id: 'docs',
+        name: 'Team docs',
+        transport: 'http',
+        url: 'https://other.example/mcp',
+        auth: { type: 'bearer' },
+      },
+    });
+    expect(mcpView().servers[1]).toMatchObject({ status: 'disabled', hasToken: false, tools: [] });
+    expect(servers()[1]).toMatchObject({ disabledTools: ['broken'] });
+    expect(stored.has('sovran.mcp.docs.token')).toBe(false);
   });
 
   it('says when a server still needs its token, and stores one from the password box', async () => {
@@ -461,6 +491,9 @@ describe('MCP in the host', () => {
     await controller.handle({ type: 'setMcpServerEnabled', id: 'notes', enabled: false });
     expect(servers()[0]).toMatchObject({ enabled: false });
     expect(mcpView().servers[0]).toMatchObject({ status: 'disabled', tools: [] });
+    await controller.handle({ type: 'setMcpServerEnabled', id: 'notes', enabled: true });
+    expect(mcpView().servers[0]).toMatchObject({ status: 'disabled', tools: [] });
+    h.warningAnswer = 'Connect';
     await controller.handle({ type: 'setMcpServerEnabled', id: 'notes', enabled: true });
     await until(() => mcpView().servers[0]?.status === 'connected');
   });

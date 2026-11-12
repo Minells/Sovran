@@ -19,7 +19,7 @@ import {
   INTEGRATIONS,
   integration,
   PROFILE_LABELS,
-  type IntegrationId,
+  type IntegrationDefinition,
   type IntegrationProfile,
   type InstallationState,
 } from '../../../src/core/mcp/catalog';
@@ -39,10 +39,10 @@ import { SettingsDisclosure } from './SettingsDisclosure';
 
 const STATUS: Record<McpServerView['status'], { label: string; dot: string }> = {
   connected: { label: 'Connected', dot: 'ok' },
-  starting: { label: 'Starting…', dot: 'busy' },
-  error: { label: 'Not connected', dot: 'error' },
-  stopped: { label: 'Stopped', dot: 'off' },
-  disabled: { label: 'Off', dot: 'off' },
+  starting: { label: 'Connecting…', dot: 'busy' },
+  error: { label: 'Connection failed', dot: 'error' },
+  stopped: { label: 'Disconnected', dot: 'off' },
+  disabled: { label: 'Configured', dot: 'off' },
 };
 
 const HINT_LABEL: Record<McpToolView['hints'][number], { label: string; title: string; tone?: 'warn' }> = {
@@ -189,10 +189,12 @@ function ServerCard({
   active: boolean;
 }) {
   const status = STATUS[s.status];
-  const needsToken = s.auth.type !== 'none' && !s.hasToken;
+  const item = s.managed && integration(s.managed.id);
+  const keyLabel = item?.remote?.token === 'optional' ? 'API key' : 'token';
+  const needsToken = s.auth.type !== 'none' && !s.hasToken && item?.remote?.token !== 'optional';
   const busy = s.status === 'starting';
   const managed = s.managed;
-  const localIntegration = managed && managed.id !== 'github';
+  const localIntegration = !!item?.package;
   const needsInstall = localIntegration && installation?.status !== 'ready';
   const hasError = s.status === 'error';
   const configureToken = () => post({ type: 'setMcpToken', id: s.id });
@@ -208,25 +210,18 @@ function ServerCard({
             {status.label}
           </span>
         </div>
-        {managed ? (
-          <Button
-            disabled={!active || busy || (!s.enabled && (needsToken || needsInstall))}
-            onClick={() => post({ type: 'setMcpServerEnabled', id: s.id, enabled: !s.enabled })}
-          >
-            {s.enabled ? 'Disconnect' : 'Connect'}
-          </Button>
-        ) : (
-          <button
-            type="button"
-            role="switch"
-            className="sv-switch"
-            aria-checked={s.enabled}
-            aria-label={`Use ${s.name}`}
-            title={s.enabled ? 'On: Sovran starts this server' : 'Off: the server does not start'}
-            onClick={() => post({ type: 'setMcpServerEnabled', id: s.id, enabled: !s.enabled })}
-          />
-        )}
+        <Button
+          disabled={!s.enabled && (!active || needsToken || needsInstall)}
+          onClick={() => post({ type: 'setMcpServerEnabled', id: s.id, enabled: !s.enabled })}
+        >
+          {s.enabled ? 'Disconnect' : 'Connect'}
+        </Button>
       </div>
+      <p className="sv-field__help">
+        {s.transport === 'http' ? 'Remote' : 'Local'}
+        {installation?.status === 'ready' ? ' · Dependencies installed' : ''}
+        {item ? ` · ${item.description}` : ''}
+      </p>
       {hasError && s.error ? (
         <p className="sv-field__error" role="alert">
           {s.error}
@@ -240,14 +235,14 @@ function ServerCard({
       {s.insecure ? (
         <p className="sv-field__note">This server sends its token over unencrypted HTTP.</p>
       ) : null}
-      {needsToken || needsInstall || hasError ? (
+      {needsToken || needsInstall || hasError || (item?.remote?.token === 'optional' && !s.hasToken) ? (
         <div className="sv-approval__actions">
-          {needsToken ? (
+          {needsToken || (item?.remote?.token === 'optional' && !s.hasToken) ? (
             <Button icon="key" onClick={configureToken}>
-              Set token
+              {keyLabel === 'API key' ? 'Set API key (optional)' : 'Set token'}
             </Button>
           ) : null}
-          {localIntegration && needsInstall ? (
+          {localIntegration && needsInstall && managed ? (
             <Button
               disabled={!active || s.enabled || installation?.status === 'installing'}
               onClick={() => post({ type: 'installMcpIntegration', integration: managed.id })}
@@ -257,7 +252,7 @@ function ServerCard({
           ) : null}
           {hasError ? (
             <>
-              <Button icon="debug-restart" onClick={restart}>
+              <Button icon="debug-restart" disabled={!active} onClick={restart}>
                 Try again
               </Button>
               <Button variant="ghost" icon="output" onClick={() => post({ type: 'showLogs' })}>
@@ -274,30 +269,29 @@ function ServerCard({
           <span className="sv-field__help">This server offers no tools.</span>
         )
       ) : null}
-      <SettingsDisclosure title="Server settings">
+      <SettingsDisclosure title="Advanced settings">
         <div className="sv-field">
           <div className="sv-field__help">
             {s.transport === 'http' ? 'Remote server' : 'Local server'}
             {s.server ? ` · ${s.server.name} ${s.server.version}` : ''}
           </div>
           <code className="sv-integration__endpoint">
-            {managed ? (integration(managed.id).package ?? s.url) : summary(s)}
+            {item?.package ? `${item.package}@${item.version}` : summary(s)}
           </code>
           {managed ? (
             <div className="sv-field__help">
-              {integration(managed.id).name} {managed.version} · {PROFILE_LABELS[managed.profile]}
+              {item?.id !== 'context7' ? PROFILE_LABELS[managed.profile] : item.requirements}
               {managed.browserProfile ? ` (${managed.browserProfile})` : ''} · {host ?? 'Extension host'}
-              {localIntegration && !needsInstall ? ' · Dependencies installed' : ''}
             </div>
           ) : null}
         </div>
         <div className="sv-approval__actions">
           <Button icon="edit" onClick={(event) => onEdit(event.currentTarget)}>
-            Edit <span className="sv-visually-hidden">{s.name}</span>
+            {managed ? 'Edit as custom' : 'Edit'} <span className="sv-visually-hidden">{s.name}</span>
           </Button>
           {s.auth.type !== 'none' && s.hasToken ? (
             <Button variant="ghost" icon="key" onClick={configureToken}>
-              Replace token
+              Replace {keyLabel}
             </Button>
           ) : null}
           {s.enabled && active && !hasError ? (
@@ -626,36 +620,6 @@ function ServerForm({
               server starts.
             </span>
           </div>
-          <div className="sv-field">
-            <label htmlFor="sv-mcp-env">Environment</label>
-            <textarea
-              id="sv-mcp-env"
-              className="sv-textarea sv-textarea--code"
-              rows={2}
-              value={v.env}
-              onChange={(e) => set({ env: e.target.value })}
-              placeholder="LOG_LEVEL=info"
-              spellCheck={false}
-              aria-invalid={!!shown.env}
-            />
-            {shown.env ? (
-              <span className="sv-field__error">{shown.env}</span>
-            ) : (
-              <span className="sv-field__help">
-                NAME=value, one per line. Saved in settings.json as plain text: put the token below instead.
-              </span>
-            )}
-          </div>
-          <div className="sv-field">
-            <label htmlFor="sv-mcp-cwd">Working folder</label>
-            <input
-              id="sv-mcp-cwd"
-              value={v.cwd}
-              onChange={(e) => set({ cwd: e.target.value })}
-              placeholder="The first workspace folder"
-              spellCheck={false}
-            />
-          </div>
         </>
       ) : (
         <>
@@ -673,26 +637,6 @@ function ServerForm({
               <span className="sv-field__error">{shown.url}</span>
             ) : (
               <span className="sv-field__help">The server's MCP endpoint, often ending in /mcp.</span>
-            )}
-          </div>
-          <div className="sv-field">
-            <label htmlFor="sv-mcp-headers">Headers</label>
-            <textarea
-              id="sv-mcp-headers"
-              className="sv-textarea sv-textarea--code"
-              rows={2}
-              value={v.headers}
-              onChange={(e) => set({ headers: e.target.value })}
-              placeholder="X-Team: platform"
-              spellCheck={false}
-              aria-invalid={!!shown.headers}
-            />
-            {shown.headers ? (
-              <span className="sv-field__error">{shown.headers}</span>
-            ) : (
-              <span className="sv-field__help">
-                Name: value, one per line. Saved in settings.json as plain text: put the token below instead.
-              </span>
             )}
           </div>
         </>
@@ -733,7 +677,7 @@ function ServerForm({
             autoComplete="off"
             value={v.token}
             onChange={(e) => set({ token: e.target.value })}
-            placeholder={hasToken ? 'Stored. Leave empty to keep it' : 'Paste the token'}
+            placeholder={hasToken ? 'Token stored for the current connection' : 'Paste the token'}
           />
         ) : null}
         <span className="sv-field__help">
@@ -754,23 +698,84 @@ function ServerForm({
           </span>
         ) : null}
       </div>
-      <div className="sv-field">
-        <label htmlFor="sv-mcp-timeout">Timeout (seconds)</label>
-        <input
-          id="sv-mcp-timeout"
-          className="sv-number"
-          inputMode="numeric"
-          value={v.timeout}
-          placeholder={String(MCP_TIMEOUT_SECONDS.default)}
-          onChange={(e) => set({ timeout: e.target.value.replace(/\D/g, '') })}
-          aria-invalid={!!shown.timeout}
-        />
-        {shown.timeout ? (
-          <span className="sv-field__error">{shown.timeout}</span>
+      <SettingsDisclosure
+        title="Advanced connection settings"
+        warning={!!(shown.env || shown.headers || shown.timeout)}
+        description={shown.env || shown.headers || shown.timeout ? 'Review the connection fields' : undefined}
+      >
+        {local ? (
+          <>
+            <div className="sv-field">
+              <label htmlFor="sv-mcp-env">Environment</label>
+              <textarea
+                id="sv-mcp-env"
+                className="sv-textarea sv-textarea--code"
+                rows={2}
+                value={v.env}
+                onChange={(e) => set({ env: e.target.value })}
+                placeholder="LOG_LEVEL=info"
+                spellCheck={false}
+                aria-invalid={!!shown.env}
+              />
+              {shown.env ? (
+                <span className="sv-field__error">{shown.env}</span>
+              ) : (
+                <span className="sv-field__help">
+                  NAME=value, one per line. Saved in settings.json as plain text: put the token below instead.
+                </span>
+              )}
+            </div>
+            <div className="sv-field">
+              <label htmlFor="sv-mcp-cwd">Working folder</label>
+              <input
+                id="sv-mcp-cwd"
+                value={v.cwd}
+                onChange={(e) => set({ cwd: e.target.value })}
+                placeholder="The first workspace folder"
+                spellCheck={false}
+              />
+            </div>
+          </>
         ) : (
-          <span className="sv-field__help">A request that sends nothing for this long is stopped.</span>
+          <div className="sv-field">
+            <label htmlFor="sv-mcp-headers">Headers</label>
+            <textarea
+              id="sv-mcp-headers"
+              className="sv-textarea sv-textarea--code"
+              rows={2}
+              value={v.headers}
+              onChange={(e) => set({ headers: e.target.value })}
+              placeholder="X-Team: platform"
+              spellCheck={false}
+              aria-invalid={!!shown.headers}
+            />
+            {shown.headers ? (
+              <span className="sv-field__error">{shown.headers}</span>
+            ) : (
+              <span className="sv-field__help">
+                Name: value, one per line. Saved in settings.json as plain text: put the token below instead.
+              </span>
+            )}
+          </div>
         )}
-      </div>
+        <div className="sv-field">
+          <label htmlFor="sv-mcp-timeout">Timeout (seconds)</label>
+          <input
+            id="sv-mcp-timeout"
+            className="sv-number"
+            inputMode="numeric"
+            value={v.timeout}
+            placeholder={String(MCP_TIMEOUT_SECONDS.default)}
+            onChange={(e) => set({ timeout: e.target.value.replace(/\D/g, '') })}
+            aria-invalid={!!shown.timeout}
+          />
+          {shown.timeout ? (
+            <span className="sv-field__error">{shown.timeout}</span>
+          ) : (
+            <span className="sv-field__help">A request that sends nothing for this long is stopped.</span>
+          )}
+        </div>
+      </SettingsDisclosure>
       {shown.form ? (
         <span className="sv-field__error" role="alert">
           {shown.form}
@@ -790,16 +795,98 @@ function ServerForm({
 
 // --------------------------------------------------------------------------------------------- area
 
+function CatalogEntry({
+  item,
+  servers,
+  installation,
+  remoteHost,
+  onDone,
+}: {
+  item: IntegrationDefinition;
+  servers: McpServerView[];
+  installation?: InstallationState;
+  remoteHost?: boolean;
+  onDone: () => void;
+}) {
+  const [profile, setProfile] = useState(item.defaultProfile);
+  const server = servers.find((s) => s.status === 'connected') ?? servers[0];
+  const status = server ? STATUS[server.status] : { label: 'Not configured', dot: 'off' };
+  const add = () => {
+    post({ type: 'addMcpIntegration', integration: item.id, profile });
+    onDone();
+  };
+  return (
+    <li className="sv-integration" aria-label={item.name}>
+      <div className="sv-integration__head">
+        <div className="sv-integration__identity">
+          <strong>
+            <Icon name={item.icon} /> {item.name}
+          </strong>
+          <span className="sv-integration__status">
+            <span className="sv-mcp-dot" data-state={status.dot} aria-hidden="true" />
+            {item.remote ? 'Remote' : 'Local'} · {status.label}
+          </span>
+        </div>
+        <Button onClick={server ? onDone : add}>
+          {server ? 'Manage' : 'Configure'} <span className="sv-visually-hidden">{item.name}</span>
+        </Button>
+      </div>
+      <p>{item.description}</p>
+      <p className="sv-field__help">
+        {item.requirements}
+        {item.package ? ' No account required.' : ''}
+        {installation?.status === 'ready' ? ' Dependencies installed.' : ''}
+      </p>
+      <SettingsDisclosure title="Advanced settings">
+        {item.package ? (
+          <code className="sv-integration__endpoint">
+            {item.package}@{item.version}
+          </code>
+        ) : null}
+        {item.profiles.length > 1 ? (
+          <label className="sv-field">
+            {item.remote ? 'Access mode' : 'Browser profile'}
+            <select
+              value={profile}
+              onChange={(event) => setProfile(event.target.value as IntegrationProfile)}
+            >
+              {item.profiles.map((value) => (
+                <option key={value} value={value} disabled={value === 'extension' && remoteHost}>
+                  {PROFILE_LABELS[value]}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {profile === 'extension' ? (
+          <p className="sv-field__help">
+            Requires the Playwright companion extension and tab confirmation. Approved tabs can expose
+            signed-in accounts.
+          </p>
+        ) : null}
+        {profile === 'collaboration' ? (
+          <p className="sv-field__help">
+            Issue and pull request writes start on Ask. Limit your token to the repositories and permissions
+            you need.
+          </p>
+        ) : null}
+        {item.security ? <p className="sv-field__help">{item.security}</p> : null}
+        <div className="sv-approval__actions">
+          {server ? <Button onClick={add}>Configure another</Button> : null}
+          <Button variant="ghost" onClick={() => post({ type: 'openExternal', url: item.documentation })}>
+            Documentation
+          </Button>
+        </div>
+      </SettingsDisclosure>
+    </li>
+  );
+}
+
 function IntegrationCatalog({ onDone }: { onDone: () => void }) {
   const {
-    app: {
-      mcp: { catalog },
-    },
+    app: { mcp },
   } = useStore();
-  const [selected, setSelected] = useState<IntegrationId | null>(null);
-  const [profile, setProfile] = useState<IntegrationProfile>('isolated');
   const heading = useRef<HTMLHeadingElement>(null);
-  const candidate = selected ? integration(selected) : undefined;
 
   useLayoutEffect(() => {
     heading.current?.focus();
@@ -809,95 +896,24 @@ function IntegrationCatalog({ onDone }: { onDone: () => void }) {
     <section className="sv-field">
       <div className="sv-integration__head">
         <h3 ref={heading} tabIndex={-1}>
-          Add an integration
+          MCP catalog
         </h3>
         <Button variant="ghost" icon="arrow-left" onClick={onDone}>
           Back
         </Button>
       </div>
-      <ul className="sv-presets" aria-label="Integration catalog">
+      <ul className="sv-mcp-catalog" aria-label="Integration catalog">
         {INTEGRATIONS.map((item) => (
-          <li key={item.id}>
-            <button
-              type="button"
-              className="sv-preset"
-              aria-label={item.name}
-              aria-describedby={`integration-${item.id}-description`}
-              aria-pressed={selected === item.id}
-              onClick={() => {
-                setSelected(item.id);
-                setProfile(item.defaultProfile);
-              }}
-            >
-              <Icon name={item.icon} className="sv-preset__icon" />
-              <span className="sv-preset__name">{item.name}</span>
-              <span className="sv-preset__url" id={`integration-${item.id}-description`}>
-                {item.description}
-              </span>
-            </button>
-          </li>
+          <CatalogEntry
+            key={item.id}
+            item={item}
+            servers={mcp.servers.filter((server) => server.managed?.id === item.id)}
+            installation={mcp.catalog?.entries.find((entry) => entry.id === item.id)}
+            remoteHost={mcp.catalog?.remote}
+            onDone={onDone}
+          />
         ))}
       </ul>
-      {candidate ? (
-        <section className="sv-card" aria-label={`${candidate.name} setup`}>
-          <h3>{candidate.name}</h3>
-          <p className="sv-field__help">{candidate.requirements}</p>
-          <p className="sv-field__help">
-            Runs on {catalog?.host ?? 'the extension host'}.{' '}
-            {candidate.package
-              ? `${candidate.package}@${candidate.version}. Installation and connection are separate actions.`
-              : 'Hosted service; no local package installation.'}
-          </p>
-          {candidate.profiles.length > 1 ? (
-            <label className="sv-field">
-              Browser or access mode
-              <select
-                value={profile}
-                onChange={(event) => setProfile(event.target.value as IntegrationProfile)}
-              >
-                {candidate.profiles.map((value) => (
-                  <option key={value} value={value} disabled={value === 'extension' && catalog?.remote}>
-                    {PROFILE_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : null}
-          {profile === 'extension' ? (
-            <p className="sv-field__help">
-              Choose an explicit local Chrome profile in the next step. Requires the Playwright companion
-              extension and tab confirmation. Approved tabs can expose signed-in accounts. Unavailable on
-              Remote hosts.
-            </p>
-          ) : null}
-          {profile === 'collaboration' ? (
-            <p className="sv-field__help">
-              Adds issue creation, editing, comments and pull request creation. Every write starts on Ask. Use
-              a token restricted to the repositories and permissions you need.
-            </p>
-          ) : null}
-          <div className="sv-approval__actions">
-            <Button
-              onClick={() => {
-                post({ type: 'addMcpIntegration', integration: candidate.id, profile });
-                onDone();
-              }}
-            >
-              Add to Sovran
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => post({ type: 'openExternal', url: candidate.documentation })}
-            >
-              Documentation
-            </Button>
-          </div>
-          <p className="sv-field__help">
-            Added disconnected. Every tool starts on Ask. Browser tools can reach sites and services beyond
-            native Web safeguards.
-          </p>
-        </section>
-      ) : null}
     </section>
   );
 }
@@ -930,7 +946,10 @@ export function McpArea() {
     (server) =>
       server.status === 'error' ||
       server.insecure ||
-      (server.enabled && server.auth.type !== 'none' && !server.hasToken) ||
+      (server.enabled &&
+        server.auth.type !== 'none' &&
+        !server.hasToken &&
+        (!server.managed || integration(server.managed.id).remote?.token !== 'optional')) ||
       (server.managed && installations.get(server.managed.id)?.error),
   ).length;
   const status = !mcp.active
@@ -969,7 +988,7 @@ export function McpArea() {
                 setBrowsing(true);
               }}
             >
-              Add integration
+              Browse Catalog
             </Button>
             <Button
               variant="ghost"
@@ -978,7 +997,7 @@ export function McpArea() {
                 setEditing({ key: 'new-custom', values: valuesOf({}), hasToken: false });
               }}
             >
-              Add custom server
+              Custom MCP Server
             </Button>
           </div>
           {mcp.servers.map((server) => (
