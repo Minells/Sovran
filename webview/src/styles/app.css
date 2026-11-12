@@ -2524,6 +2524,97 @@ body.vscode-high-contrast-light .sv-settings__tab[aria-selected='true'] {
   width: 120px;
 }
 
+.sv-settings__sections {
+  border-bottom: 1px solid var(--sv-border);
+}
+
+.sv-disclosure {
+  min-width: 0;
+  border-top: 1px solid var(--sv-border);
+}
+
+.sv-disclosure__trigger {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: var(--sv-s2);
+  width: 100%;
+  padding: var(--sv-s2);
+  border: 0;
+  border-radius: var(--sv-radius);
+  background: transparent;
+  text-align: start;
+  cursor: pointer;
+}
+
+.sv-disclosure__trigger > .codicon {
+  margin-top: 2px;
+  color: var(--sv-muted);
+}
+
+.sv-disclosure__trigger:hover {
+  background: var(--sv-hover);
+}
+
+.sv-disclosure__trigger:focus-visible {
+  outline: 1px solid var(--sv-focus);
+  outline-offset: -1px;
+}
+
+.sv-disclosure__label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px var(--sv-s2);
+  overflow-wrap: anywhere;
+}
+
+.sv-disclosure__title {
+  flex: 1 0 auto;
+  max-width: 100%;
+  font-weight: 600;
+}
+
+.sv-disclosure__status,
+.sv-disclosure__description {
+  color: var(--sv-muted);
+  font-size: var(--sv-text-sm);
+}
+
+.sv-disclosure__description {
+  flex-basis: 100%;
+}
+
+.sv-disclosure__warning {
+  color: var(--sv-warn);
+}
+
+.sv-disclosure__body {
+  display: grid;
+  gap: var(--sv-s3);
+  min-width: 0;
+  padding: 0 var(--sv-s2) var(--sv-s3);
+}
+
+.sv-disclosure__body > p,
+.sv-tool-groups > p {
+  margin: 0;
+}
+
+.sv-disclosure__body > .sv-disclosure + .sv-disclosure {
+  margin-top: calc(-1 * var(--sv-s3));
+}
+
+.sv-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .sv-provider-list {
   margin: 0;
   padding: 0;
@@ -3696,7 +3787,7 @@ body.vscode-high-contrast-light .sv-starter-card {
   color: var(--sv-muted);
 }
 
-/* ---------------------------------------------------------------- MCP servers (Settings → MCP) */
+/* ---------------------------------------------------------------- Integrations (Settings → Tools) */
 
 .sv-mcp-dot {
   width: 8px;
@@ -3728,25 +3819,49 @@ body.vscode-high-contrast-light .sv-starter-card {
   }
 }
 
-.sv-mcp-card[data-status='disabled'] .sv-card__title,
-.sv-mcp-card[data-status='disabled'] .sv-card__url {
+.sv-integration-list,
+.sv-integration {
+  display: grid;
+  gap: var(--sv-s2);
+  min-width: 0;
+}
+
+.sv-integration {
+  padding: var(--sv-s2) 0;
+  border-top: 1px solid var(--sv-border);
+  overflow-wrap: anywhere;
+}
+
+.sv-integration__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sv-s2);
+  min-width: 0;
+}
+
+.sv-integration__head h3,
+.sv-integration > p {
+  margin: 0;
+}
+
+.sv-integration__identity,
+.sv-integration__endpoint {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sv-integration__status {
+  display: flex;
+  align-items: center;
+  gap: var(--sv-s1);
   color: var(--sv-muted);
+  font-size: var(--sv-text-sm);
 }
 
-.sv-mcp-card .sv-card__url {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  overflow-wrap: normal;
-}
-
-.sv-mcp-card__fix {
-  margin-top: var(--sv-s2);
-}
-
-/* Only the status icon of the error is red; the buttons under it keep their usual colours. */
-.sv-mcp-card .sv-test--err .sv-btn .codicon {
-  color: inherit;
+.sv-integration__endpoint {
+  font-family: var(--sv-mono);
+  font-size: var(--sv-text-sm);
 }
 
 /* An on/off switch: role="switch" on a button, drawn with theme colours only. */
@@ -3795,45 +3910,10 @@ body.vscode-high-contrast-light .sv-starter-card {
   outline-offset: 2px;
 }
 
-.sv-mcp-tools {
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--sv-border);
-  margin: 0 calc(-1 * var(--sv-s3));
-  padding: 0 var(--sv-s3);
-}
-
-.sv-mcp-tools__toggle {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  padding: 6px 0 0;
-  border: 0;
-  background: none;
-  color: var(--sv-fg);
-  font-size: var(--sv-text-sm);
-  text-align: left;
-  cursor: pointer;
-}
-
-.sv-mcp-tools__toggle:hover > span:first-of-type {
-  text-decoration: underline;
-}
-
-.sv-mcp-tools__cost {
-  margin-left: auto;
-  padding-left: var(--sv-s2);
-  color: var(--sv-muted);
-  font-size: var(--sv-text-xs);
-  white-space: nowrap;
-}
-
 .sv-mcp-tools__list {
   display: flex;
   flex-direction: column;
-  margin: var(--sv-s2) 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -4032,6 +4112,8 @@ body.vscode-high-contrast-light .sv-switch[aria-checked='true'] {
 
 /* Tool groups stay within the sidebar; settings reuse VS Code typography and theme tokens. */
 .sv-tool-groups {
+  display: grid;
+  gap: var(--sv-s2);
   border: 0;
   padding: 0;
   margin: 0;
@@ -4042,26 +4124,45 @@ body.vscode-high-contrast-light .sv-switch[aria-checked='true'] {
   padding: 0;
   margin-bottom: 8px;
 }
-.sv-native-tools {
-  border-top: 1px solid var(--vscode-widget-border);
-  padding: 10px 0;
+.sv-tool-groups__label {
+  font-size: var(--sv-text-sm);
+  font-weight: 600;
 }
-.sv-native-tools summary,
-.sv-chat-tools summary {
-  cursor: pointer;
-}
+
 .sv-native-tool {
-  padding: 10px 0;
+  display: grid;
+  gap: var(--sv-s1);
+  padding: var(--sv-s1) 0;
   overflow-wrap: anywhere;
 }
-.sv-native-tool code {
-  margin-right: 8px;
+
+.sv-native-tool + .sv-native-tool {
+  border-top: 1px solid var(--sv-border);
 }
+
+.sv-native-tool p {
+  margin: 0;
+}
+
+.sv-native-tool__title,
+.sv-native-tool__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sv-s1) var(--sv-s3);
+}
+
+.sv-native-tool__title code {
+  font-family: var(--sv-mono);
+  font-weight: 600;
+}
+
 .sv-chat-tools {
   position: relative;
   flex-shrink: 0;
 }
 .sv-chat-tools summary {
+  cursor: pointer;
   font-size: 11px;
   padding: 4px;
 }
@@ -4079,7 +4180,4 @@ body.vscode-high-contrast-light .sv-switch[aria-checked='true'] {
   border-radius: 4px;
   box-shadow: 0 4px 12px var(--vscode-widget-shadow);
   z-index: 20;
-}
-.sv-chat-tools__menu .sv-checkrow {
-  margin: 8px 0;
 }

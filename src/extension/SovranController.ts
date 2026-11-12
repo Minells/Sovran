@@ -112,6 +112,7 @@ import {
   readTitleModel,
   writeConfigFileEnabled,
   writeDefaultModel,
+  writeNativeToolOverride,
   writePlanModel,
   writeProviders,
   writeSetting,
@@ -650,6 +651,8 @@ export class SovranController implements vscode.Disposable {
           return await this.discoverAndPick();
         case 'updateSetting':
           return await this.updateSetting(msg.setting);
+        case 'setNativeToolOverride':
+          return await writeNativeToolOverride(msg.key, msg.name, msg.included);
         case 'showLogs':
           return this.deps.logger.show();
         case 'attachFiles':
@@ -761,13 +764,13 @@ export class SovranController implements vscode.Disposable {
     return this.deps.mcp?.view() ?? { active: false, servers: [] };
   }
 
-  private toolsView(session: Session): Pick<AppState, 'toolGroups' | 'nativeTools'> {
+  private toolsView(session: Session): Pick<AppState, 'toolGroups' | 'nativeTools' | 'toolAvailability'> {
     const definitions = this.registry.all();
     const modelSelection = this.effectiveModel();
     const model = this.providers
       .find((provider) => provider.id === modelSelection?.providerId)
       ?.models?.find((item) => item.id === modelSelection?.modelId);
-    const toolsEnabled = model?.toolMode !== 'none';
+    const toolAvailability = !model ? 'no-model' : model.toolMode === 'none' ? 'model-disabled' : 'available';
     const selection = { ...this.settings.agent.policy, workspaceTrusted: this.deps.workspace.isTrusted() };
     const groups = new Map<string, NonNullable<AppState['toolGroups']>[number]>();
     const servers = this.deps.mcp?.view().servers ?? [];
@@ -791,13 +794,14 @@ export class SovranController implements vscode.Disposable {
         availableTools: 0,
         definitionTokens: 0,
       };
-      if (toolsEnabled && !this.registry.unavailable(tool, this.mode, selection)) {
+      if (toolAvailability === 'available' && !this.registry.unavailable(tool, this.mode, selection)) {
         group.availableTools++;
         group.definitionTokens += estimateTokens(JSON.stringify(this.registry.schema(tool)));
       }
       groups.set(id, group);
     }
     return {
+      toolAvailability,
       toolGroups: [...groups.values()],
       nativeTools: definitions
         .filter((tool) => tool.source?.kind !== 'mcp')
@@ -1735,6 +1739,7 @@ export class SovranController implements vscode.Disposable {
       this.patch({ selected: sel });
     }
     this.updateStatusBar();
+    this.refreshTools();
   }
 
   /** Adds discovered or typed models to a provider (onboarding), optionally selecting one as the Act model. */
@@ -1808,6 +1813,7 @@ export class SovranController implements vscode.Disposable {
       this.patch({ selected: sel });
     }
     this.updateStatusBar();
+    this.refreshTools();
   }
 
   async pickModel() {

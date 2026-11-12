@@ -7,7 +7,7 @@ import { MemoryCapabilityStore } from '../../src/core/providers/capabilities';
 import type { Session, ToolMessage } from '../../src/core/sessions/model';
 import { ToolRegistry } from '../../src/core/tools/registry';
 import { defineTool, type AnyTool } from '../../src/core/tools/types';
-import { settingUpdateSchema } from '../../src/shared/protocol';
+import { settingUpdateSchema, webviewMessageSchema } from '../../src/shared/protocol';
 import {
   FakeProcess,
   MemoryWorkspace,
@@ -343,5 +343,9 @@ describe('registry source boundaries', () => {
   it('validates native override settings at the host boundary', () => {
     expect(settingUpdateSchema.safeParse({ key: 'tools.disabled', value: ['read_file'] }).success).toBe(true);
     expect(settingUpdateSchema.safeParse({ key: 'tools.forceAsk', value: ['../oops'] }).success).toBe(false);
+    const edit = { type: 'setNativeToolOverride', key: 'tools.forceAsk', name: 'read_file', included: true };
+    expect(webviewMessageSchema.safeParse(edit).success).toBe(true);
+    expect(webviewMessageSchema.safeParse({ ...edit, name: '../oops' }).success).toBe(false);
+    expect(webviewMessageSchema.safeParse({ ...edit, key: 'approvals.mode' }).success).toBe(false);
   });
 });

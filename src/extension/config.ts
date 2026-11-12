@@ -6,7 +6,7 @@ import type { ApprovalMode } from '../core/permissions/policy';
 import type { Logger } from '../core/ports';
 import { DEFAULT_CONTEXT_WINDOW, DEFAULT_MAX_OUTPUT_TOKENS } from '../core/providers/limits';
 import type { ProviderConfig } from '../core/providers/types';
-import type { SettingKey, SettingUpdate, SettingsView } from '../shared/protocol';
+import type { NativeToolSetting, SettingKey, SettingUpdate, SettingsView } from '../shared/protocol';
 
 const SECTION = 'sovran';
 
@@ -227,6 +227,13 @@ export function readSettingsView(s: HostSettings = readSettings()): SettingsView
  * instead, so settings.json stays minimal and future changes to the defaults (e.g. new protected paths) still apply.
  */
 export async function writeSetting(update: SettingUpdate): Promise<void> {
+  if (update.key === 'tools.disabled' || update.key === 'tools.forceAsk') {
+    return queueNativeToolWrite(() => writeUserSetting(update));
+  }
+  return writeUserSetting(update);
+}
+
+async function writeUserSetting(update: SettingUpdate): Promise<void> {
   const config = vscode.workspace.getConfiguration(SECTION);
   const isDefault = JSON.stringify(config.inspect(update.key)?.defaultValue) === JSON.stringify(update.value);
   await config.update(update.key, isDefault ? undefined : update.value, vscode.ConfigurationTarget.Global);
@@ -234,6 +241,27 @@ export async function writeSetting(update: SettingUpdate): Promise<void> {
   if (update.key === 'approvals.mode' && config.inspect('approvals.fileEdits')?.globalValue !== undefined) {
     await config.update('approvals.fileEdits', undefined, vscode.ConfigurationTarget.Global);
   }
+}
+
+let nativeToolWrites = Promise.resolve();
+
+function queueNativeToolWrite(write: () => Promise<void>): Promise<void> {
+  const result = nativeToolWrites.then(write);
+  nativeToolWrites = result.catch(() => {});
+  return result;
+}
+
+/** Apply a single checkbox or list edit to the current user setting, including edits awaiting a webview patch. */
+export function writeNativeToolOverride(key: NativeToolSetting, name: string, included: boolean): Promise<void> {
+  return queueNativeToolWrite(async () => {
+    const current = readToolNames(key);
+    if (current.includes(name) === included) return;
+    if (included && current.length >= 200) throw new Error('A native tool override list can contain up to 200 names.');
+    await writeUserSetting({
+      key,
+      value: included ? [...current, name] : current.filter((item) => item !== name),
+    });
+  });
 }
 
 export async function addAllowedCommand(entry: string): Promise<void> {

@@ -305,7 +305,7 @@ generously, since the reasoning shares that budget.
 You can configure providers in the panel, in a YAML file, or both: the two stay in sync.
 
 - **In the panel:** the guided setup and **Settings → Models → Manage providers** (stored in `sovran.providers`).
-- **In a YAML file:** **Settings → Models → Create config.yaml** (or `Sovran: Open Model Config File`) creates
+- **In a YAML file:** **Settings → Models → Configuration file → Create config.yaml** (or `Sovran: Open Model Config File`) creates
   `~/.sovran/config.yaml` with the providers you already have, followed by commented examples.
 
 From then on, saving the file updates Settings (and Sovran connects to new or changed providers, asking for a key when
@@ -378,9 +378,10 @@ moment, the file wins and Sovran says so.
 
 ## MCP servers
 
-[MCP](https://modelcontextprotocol.io) servers give the agent tools from other programs and services. Add them in
-**Sovran Settings → Tools**: choose an optional integration, fill in the form, or paste the JSON snippet from the server's README
-(the Claude Desktop, Cursor, Cline and VS Code formats all work, and a token in it moves to Secret Storage).
+[MCP](https://modelcontextprotocol.io) servers give the agent tools from other programs and services. Open
+**Sovran Settings → Tools → Integrations**. Choose **Add integration** for the catalog or **Add custom server**
+to enter a command or URL. The custom server form can also import a JSON snippet in the Claude Desktop, Cursor,
+Cline or VS Code format and move its token to Secret Storage.
 
 - **Local servers** are commands Sovran starts, such as
   `npx -y @modelcontextprotocol/server-filesystem ${workspaceFolder}`. They talk MCP over stdin and stdout, start in
@@ -391,11 +392,11 @@ moment, the file wins and Sovran says so.
 - **Tokens** live in VS Code Secret Storage, never in settings: as `Authorization: Bearer`, in a header of your choice,
   or in an environment variable for local servers. `${workspaceFolder}`, `${userHome}` and `${env:NAME}` are expanded.
 
-Every tool of a connected server is listed with what the server says about it (*read-only*, *can change data*) and a
-choice: **Off** (never offered to the model), **Ask** (the default) or **Allow** (runs without asking; also from
-*Always allow* on the approval card). The approval card shows the tool, its server and the exact arguments. Tools are
-named `mcp__<server>__<tool>`, are offered only in Act mode, and cost context in every request: Settings shows an
-estimate per server, so you can turn off what you do not need on a small local model.
+Open **Tool permissions** on a connected server to see what the server says about each tool (*read-only*,
+*can change data*) and choose **Off** (excluded from model requests), **Ask** (the default) or **Allow**
+(runs without asking). You can also choose **Always allow** from the approval card, which shows the tool,
+its server and the exact arguments. MCP tools are named `mcp__<server>__<tool>` and offered only in Act mode.
+See **Tools for this chat** for the estimated context cost of the selected groups.
 
 The same list is the `sovran.mcp.servers` user setting:
 
@@ -422,9 +423,9 @@ output, including errors, is in **Show logs**.
 
 ### Optional managed integrations
 
-In **Settings → Tools**, selecting a catalog card only shows its setup. **Add integration** saves it disconnected,
-**Install dependencies** downloads the reviewed locked package with npm scripts disabled, and **Connect** asks before
-starting it. Existing custom servers and their policies remain available. No browser is bundled or downloaded.
+In **Settings → Tools → Integrations**, choose **Add integration** and select a catalog entry to see its setup.
+**Add to Sovran** saves it disconnected. **Install dependencies** downloads the reviewed locked package with npm
+scripts disabled, and **Connect** asks before starting it. Existing custom servers and their policies remain available.
 
 - **Playwright MCP** uses a separate system Chrome session by default. It offers navigation, snapshots and interactions.
   Call `browser_snapshot` for inline content after an action; action responses may link a snapshot file that Sovran
@@ -459,11 +460,12 @@ in the previous request. No model request is used to select tools and no tool is
 
 ## Settings
 
-In **Settings → Tools**, enable or always review individual built-in tools. Under **Advanced native overrides**, **Disabled native tools** removes the named tools from model requests and blocks their
-execution, including actions already awaiting approval. **Always review native tools** requires confirmation for
-those tools even for reads and in Auto mode. Use names such as `read_file`, `write_file` or `execute_terminal`.
+In **Settings → Tools → Built-in tools**, open a group to enable a tool or require confirmation with **Always ask**.
+In **Advanced native overrides**, **Disabled native tools** removes the named tools from model requests and blocks
+their execution, including actions already awaiting approval. **Always ask for native tools** requires confirmation
+even for reads and in Auto mode. Use names such as `read_file`, `write_file` or `execute_terminal`.
 These are user settings (`sovran.tools.disabled` and `sovran.tools.forceAsk`); repository settings cannot change them.
-MCP tools retain their separate Off / Ask / Allow controls in **Settings → Tools**.
+MCP tools have their own **Off / Ask / Allow** controls under **Integrations**.
 
 Tool availability, workspace trust and permissions are checked again after approval. If a definition or permission
 changes while the model responds or an approval is open, Sovran can refuse that pending call and ask the model to
@@ -493,10 +495,9 @@ request it again with the current tools. Plan mode remains read-only.
 | `sovran.diff.openOnProposal` | `true` | Open the diff editor automatically for proposed edits |
 | `sovran.approvals.fileEdits` | `ask` | *Deprecated*: use `sovran.approvals.mode`. `auto` here still starts windows in Auto-edit |
 
-All of these can be changed from **Sovran Settings** (the gear in the view title). Its areas, *Models*, *Approvals*,
-*Agent*, *Tools: Integrations*, *Context* and *Data*, stay at the top as tabs: pick one to see only its settings (arrow keys move
-between them). The VS Code Settings editor groups them under *Models*, *Approvals & Safety*, *Agent*, *Tools: Integrations*, *Context*
-and *Chats*.
+All of these can be changed from **Sovran Settings** (the gear in the view title). The tabs are **Models**,
+**Approvals**, **Agent**, **Tools**, **Context** and **Data**. Use the arrow keys to move between tabs and open a
+section to see its additional options. **All settings** opens the Sovran settings in the VS Code Settings editor.
 
 ## Security
 

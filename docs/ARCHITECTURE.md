@@ -311,7 +311,8 @@ All contracts are in `src/shared/protocol.ts`.
   `setMcpToken` (a native password box). `approval` takes `allowTool` for *Always allow* on an MCP call; the host takes
   the server and tool from the pending request, never from the webview
 - Settings and views: `updateSetting` (a discriminated union of the keys the Settings view may change, each with its
-  own value schema), `openSettings`, `showLogs`, `setView`
+  own value schema), `openSettings`, `showLogs`, `setView`. `setNativeToolOverride` adds or removes one name
+  from a native override list. The host serializes these edits and reads the latest user value before writing.
 
 **Host → webview** messages:
 - `state`: a full snapshot for one surface (its kind, its chat, run, approvals, screen and composer context, plus the
