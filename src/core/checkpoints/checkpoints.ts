@@ -30,12 +30,14 @@ export class CheckpointRecorder implements WorkspacePort {
   readonly readBytes: WorkspacePort['readBytes'];
   readonly isDirty: WorkspacePort['isDirty'];
   readonly diagnostics: WorkspacePort['diagnostics'];
+  readonly querySemantic: WorkspacePort['querySemantic'];
 
   constructor(private readonly inner: WorkspacePort) {
     this.searchText = inner.searchText?.bind(inner);
     this.readBytes = inner.readBytes?.bind(inner);
     this.isDirty = inner.isDirty?.bind(inner);
     this.diagnostics = inner.diagnostics?.bind(inner);
+    this.querySemantic = inner.querySemantic?.bind(inner);
   }
 
   private async snapshot(absPath: string): Promise<FileSnapshot> {

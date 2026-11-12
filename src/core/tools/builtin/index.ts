@@ -2,6 +2,7 @@ import { gitBranchesTool, gitDiffTool, gitLogTool, gitShowTool, gitStatusTool } 
 import { gitStageTool, gitUnstageTool, gitCommitTool } from './gitWriteTools';
 import { ToolRegistry } from '../registry';
 import { diagnosticsTool } from './diagnosticsTool';
+import { documentSymbolsTool, definitionTool, referencesTool } from './semanticTools';
 import { webFetchTool } from './webFetchTool';
 import { activeEditorTool, findFilesTool, listDirectoryTool, readFileTool, searchFilesTool, workspaceInfoTool } from './readTools';
 import { executeTerminalTool } from './terminalTool';
@@ -11,7 +12,7 @@ export function createBuiltinRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
   const groups = {
     files: [readFileTool, listDirectoryTool, findFilesTool, searchFilesTool],
-    context: [workspaceInfoTool, activeEditorTool, diagnosticsTool],
+    context: [workspaceInfoTool, activeEditorTool, diagnosticsTool, documentSymbolsTool, definitionTool, referencesTool],
     web: [webFetchTool],
     editing: [writeFileTool, editFileTool, applyDiffTool],
     terminal: [executeTerminalTool],

@@ -179,6 +179,9 @@ interface ToolResult { content: string; display?: ToolDisplay; isError?: boolean
 | `get_workspace_info` | read | Roots, OS, shell, git branch (from `.git/HEAD`), top-level entries |
 | `get_active_editor_context` | read | Active file, selection, open tabs, diagnostics of the active file |
 | `get_diagnostics` | read | Cached Problems for workspace/active file; literal file/folder, severity and count filters; protected and external paths omitted |
+| `list_document_symbols` | read | Document symbols from the VS Code language provider in a trusted workspace |
+| `go_to_definition` | read | Definition locations for a file, line and column in a trusted workspace |
+| `find_references` | read | Reference locations for a file, line and column in a trusted workspace |
 | `web_fetch` | read | One approved public URL in trusted Plan/Act; robots and same-origin redirects share the direct IP-bound transport; bounded HTML/robots worker |
 | `write_file` | write | Create or overwrite. The diff is computed in `prepare` |
 | `edit_file` | write | Exact `old_string` → `new_string`. Must be unique unless `replace_all` |
@@ -191,6 +194,12 @@ changed while it awaited approval. Writes go through `WorkspaceEdit` so they are
 (Ctrl+Z) and respect open editors.
 
 **Plan mode** registers only `read` tools with the model, *and* the runtime rejects any non-read call.
+
+**Semantic navigation.** The optional `WorkspacePort.querySemantic` capability passes through the checkpoint
+decorator to the VS Code adapter. The adapter opens the text document to use its current buffer and invokes the
+language provider on demand. The core checks lexical and canonical paths before querying and before returning
+locations, and bounds scanned candidates, result count and output size. The adapter stops waiting after ten
+seconds or on cancellation and discards late results. VS Code provider commands do not expose cancellation tokens.
 
 **Tool sources.** Besides the built-in tools, the registry asks its `ToolSource`s for tools on every request, so tools
 can come and go during a run (the next model round-trip sees the change). A source never shadows a built-in tool. A

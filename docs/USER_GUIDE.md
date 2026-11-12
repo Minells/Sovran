@@ -37,7 +37,7 @@ Most AI coding tools assume a specific vendor, a cloud account or a separate edi
 2. It proposes edits and runs commands.
 3. It reads the results and continues until the task is done, with a step limit, a loop guard and cancellation at any time.
 
-It works through ten built-in tools:
+Core workspace tools include:
 
 | Tool | What it does |
 |---|---|
@@ -51,6 +51,17 @@ It works through ten built-in tools:
 | `edit_file` | Replaces one exact piece of text in a file |
 | `apply_diff` | Applies several exact edits to one file at once |
 | `execute_terminal` | Runs a shell command after you approve it |
+
+**Semantic navigation.** In a trusted workspace, Plan and Act can list named symbols in a file with
+`list_document_symbols`, locate a definition with `go_to_definition`, and find usages with `find_references`.
+Pass a workspace file as `path` (use `rootName/path` in a multi-root workspace). Definition and reference calls
+also take `line` and `column`, both one-based. Columns count UTF-16 code units. Reference results may include
+the declaration. All three tools accept `max_results` from 1 to 200, defaulting to 50.
+
+Sovran uses the language provider already available in VS Code, including unsaved edits to an open file. Results
+contain locations and symbol names. Protected and outside-workspace files are excluded. If the provider is
+unavailable or still indexing, the agent can fall back to `search_files`. You can control these tools under
+**Settings → Tools → Built-in tools → Editor and diagnostics**.
 
 **Native Git inspection.** In trusted workspaces, Plan and Act can use `git_status`, `git_diff`, `git_log`,
 `git_show` and `git_branches` without an MCP server. They are read-only and never fetch. Select the repository root

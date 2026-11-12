@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { DirEntry, EditorContext, EditorDiagnostic, FileDiagnostics, FileStat, TextSearchOptions, TextSearchResult, WorkspacePort, WorkspaceRoot } from '../../core/ports';
 import type { RipgrepSearch } from './RipgrepSearch';
+import { querySemantic } from './VscodeSemanticNavigation';
 
 const DEFAULT_EXCLUDES = ['**/node_modules/**', '**/.git/**', '**/.hg/**', '**/.svn/**', '**/__pycache__/**', '**/.venv/**', '**/venv/**'];
 const SEVERITY: Record<vscode.DiagnosticSeverity, EditorDiagnostic['severity']> = {
@@ -24,6 +25,7 @@ function platformName(): string {
 
 /** WorkspacePort backed by the VS Code workspace: buffer-aware reads, undoable writes. */
 export class VscodeWorkspace implements WorkspacePort {
+  readonly querySemantic = querySemantic;
   readonly searchText?: (o: TextSearchOptions) => Promise<TextSearchResult>;
 
   constructor(ripgrep?: RipgrepSearch) {

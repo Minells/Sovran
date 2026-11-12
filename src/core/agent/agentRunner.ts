@@ -548,8 +548,7 @@ export class AgentRunner {
     const preparedUnavailable = unavailable();
     if (preparedUnavailable) return result('denied', preparedUnavailable, { summary: label });
 
-    const evaluate = () => {
-      const policy = o.policy?.() ?? o.settings.policy;
+    const evaluate = (policy = o.policy?.() ?? o.settings.policy) => {
       const mcp = tool.mcpPolicy?.() ?? prepared.mcp;
       const commandRisks =
         !mcp && prepared.command
@@ -633,11 +632,13 @@ export class AgentRunner {
       if (o.signal.aborted) throw new ToolError('Cancelled by the user.');
       const unavailableReason = unavailable();
       if (unavailableReason) throw new ToolError(unavailableReason);
-      const current = evaluate();
+      const policy = o.policy?.() ?? o.settings.policy;
+      const current = evaluate(policy);
       if (current.action === 'deny') throw new ToolError(current.reason);
       if (current.action === 'ask' && current.reason !== approvedReason) {
         throw new ToolError('Permissions changed before execution. Request this action again for approval.');
       }
+      ctx.settings.protectedPaths = policy.protectedPaths;
     };
     try {
       const r = await tool.execute(args, ctx, prepared);
