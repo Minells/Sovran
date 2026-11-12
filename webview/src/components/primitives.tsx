@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEventHandler, type ReactNode } from 'react';
 
 /** The Sovran symbol "[•]": brackets follow the theme's text colour; the dot is the brand accent. */
 export function Mark({ size = 16, title }: { size?: number; title?: string }) {
@@ -45,7 +45,7 @@ export function Button({
   title,
 }: {
   children: ReactNode;
-  onClick?: () => void;
+  onClick?: MouseEventHandler<HTMLButtonElement>;
   variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
   icon?: string;
   disabled?: boolean;

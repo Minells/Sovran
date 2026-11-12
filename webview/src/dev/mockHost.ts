@@ -7,6 +7,7 @@ import '../../../media/sovran.css';
 import type { AppState, HostMessage, McpServerView, SessionMessage } from '../../../src/shared/protocol';
 import { onPost, setUiState } from '../vscode';
 import { INTEGRATIONS } from '../../../src/core/mcp/catalog';
+import { TOOL_GROUP_LABELS } from '../../../src/core/tools/groups';
 
 const params = new URLSearchParams(location.search);
 const theme = params.get('theme') === 'light' ? 'light' : 'dark';
@@ -125,7 +126,7 @@ const providers: AppState['providers'] = [
     authType: 'none',
     hasKey: false,
     models: [
-      { id: 'qwen2.5-coder:14b', toolMode: 'auto' },
+      { id: 'qwen2.5-coder:14b', toolMode: params.get('tools') === 'none' ? 'none' : 'auto' },
       { id: 'devstral:24b', toolMode: 'auto', learnedToolMode: 'prompted' },
     ],
   },
@@ -570,18 +571,6 @@ function baseState(): AppState {
     (['ask', 'edits', 'auto'] as const).find((m) => m === params.get('approval')) ?? 'ask';
   return {
     surface,
-    toolGroups: [
-      {
-        id: 'files',
-        label: 'Read files and search',
-        selected: true,
-        availableTools: 4,
-        definitionTokens: 680,
-      },
-      { id: 'git', label: 'Git', selected: true, availableTools: 8, definitionTokens: 1500 },
-      { id: 'web', label: 'Web fetch', selected: false, availableTools: 1, definitionTokens: 240 },
-      { id: 'mcp:github', label: 'GitHub', selected: true, availableTools: 2, definitionTokens: 2140 },
-    ],
     nativeTools: [
       {
         name: 'read_file',
@@ -594,6 +583,12 @@ function baseState(): AppState {
         description: 'Read repository branch, staged and unstaged file status.',
         group: 'git',
         risk: 'read',
+      },
+      {
+        name: 'execute_terminal',
+        description: 'Run a shell command in the workspace.',
+        group: 'terminal',
+        risk: 'execute',
       },
       {
         name: 'web_fetch',
@@ -613,7 +608,7 @@ function baseState(): AppState {
     workspace: { name: 'acme-api', trusted: mcpParam !== 'restricted', hasFolder: true },
     providers: scenario === 'onboarding' ? [] : providers,
     selected: scenario === 'onboarding' ? null : { providerId: 'ollama', modelId: 'qwen2.5-coder:14b' },
-    mode: params.get('mode') === 'plan' ? 'plan' : 'act',
+    mode: mcpParam === 'restricted' || params.get('mode') === 'plan' ? 'plan' : 'act',
     approvalMode: scenario === 'auto' ? 'auto' : approvalParam,
     sessions: [
       {
@@ -841,11 +836,51 @@ function baseState(): AppState {
   };
 }
 
-let state = baseState();
+function mockTools(app: AppState): Pick<AppState, 'toolAvailability' | 'toolGroups'> {
+  const estimateTokens = (tool: unknown) => Math.ceil(JSON.stringify(tool).length / 3.5);
+  const selection = app.mode === 'plan' ? app.planModel ?? app.selected : app.selected;
+  const model = app.providers.find((p) => p.id === selection?.providerId)?.models.find((m) => m.id === selection?.modelId);
+  const toolAvailability = !model ? 'no-model' : model.toolMode === 'none' ? 'model-disabled' : 'available';
+  const groups = new Map<string, NonNullable<AppState['toolGroups']>[number]>();
+  const addGroup = (id: string, label: string) => ({
+    id,
+    label,
+    selected: app.toolGroups?.find((group) => group.id === id)?.selected ?? true,
+    availableTools: 0,
+    definitionTokens: 0,
+  });
+
+  for (const tool of app.nativeTools ?? []) {
+    const group = groups.get(tool.group) ?? addGroup(tool.group, TOOL_GROUP_LABELS[tool.group] ?? tool.group);
+    if (toolAvailability === 'available' && (app.mode === 'act' || tool.risk === 'read') && !app.settings.disabledTools.includes(tool.name)) {
+      group.availableTools++;
+      group.definitionTokens += estimateTokens(tool);
+    }
+    groups.set(tool.group, group);
+  }
+  for (const server of app.mcp.servers) {
+    const group = addGroup(`mcp:${server.id}`, server.name);
+    if (toolAvailability === 'available' && app.mode === 'act' && app.mcp.active && server.status === 'connected') {
+      const tools = server.tools.filter((tool) => tool.policy !== 'off');
+      group.availableTools = tools.length;
+      group.definitionTokens = tools.reduce((sum, tool) => sum + estimateTokens(tool), 0);
+    }
+    groups.set(group.id, group);
+  }
+  return { toolAvailability, toolGroups: [...groups.values()] };
+}
+
+const initial = baseState();
+let state = { ...initial, ...mockTools(initial) };
 const send = (m: HostMessage) => window.postMessage(m, '*');
+const patchTools = (patch: Partial<AppState>) => {
+  state = { ...state, ...patch };
+  const tools = mockTools(state);
+  state = { ...state, ...tools };
+  send({ type: 'patch', patch: { ...patch, ...tools } });
+};
 const patchMcp = (servers: McpServerView[]) => {
-  state = { ...state, mcp: { ...state.mcp, servers } };
-  send({ type: 'patch', patch: { mcp: state.mcp } });
+  patchTools({ mcp: { ...state.mcp, servers } });
 };
 const updateServer = (id: string, change: (s: McpServerView) => McpServerView) =>
   patchMcp(state.mcp.servers.map((s) => (s.id === id ? change(s) : s)));
@@ -940,8 +975,7 @@ onPost((m) => {
     case 'ready':
       return send({ type: 'state', state });
     case 'setMode':
-      state = { ...state, mode: m.mode };
-      return send({ type: 'patch', patch: { mode: m.mode } });
+      return patchTools({ mode: m.mode });
     case 'setToolGroup':
       state = {
         ...state,
@@ -953,6 +987,13 @@ onPost((m) => {
     case 'setApprovalMode':
       state = { ...state, approvalMode: m.mode };
       return send({ type: 'patch', patch: { approvalMode: m.mode } });
+    case 'setNativeToolOverride': {
+      const field = m.key === 'tools.disabled' ? 'disabledTools' : 'forceAskTools';
+      const names = new Set(state.settings[field]);
+      if (m.included) names.add(m.name);
+      else names.delete(m.name);
+      return patchTools({ settings: { ...state.settings, [field]: [...names] } });
+    }
     case 'updateSetting': {
       const key = m.setting.key;
       const field = (
@@ -985,10 +1026,7 @@ onPost((m) => {
           : m.role === 'title'
             ? { ...state, titleModel: sel }
             : { ...state, selected: sel ?? state.selected };
-      return send({
-        type: 'patch',
-        patch: { selected: state.selected, planModel: state.planModel, titleModel: state.titleModel },
-      });
+      return patchTools({ selected: state.selected, planModel: state.planModel, titleModel: state.titleModel });
     }
     case 'openConfigFile':
     case 'reloadConfigFile':

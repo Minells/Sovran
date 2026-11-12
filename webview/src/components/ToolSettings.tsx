@@ -1,9 +1,35 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { TOOL_GROUP_LABELS } from '../../../src/core/tools/groups';
-import type { SettingUpdate } from '../../../src/shared/protocol';
+import type { AppState, NativeToolSetting, NativeToolView } from '../../../src/shared/protocol';
 import { useStore } from '../state/store';
 import { post } from '../vscode';
 import { CheckRow } from './primitives';
+import { SettingsDisclosure } from './SettingsDisclosure';
+
+export function setNativeToolOverride(key: NativeToolSetting, name: string, included: boolean) {
+  post({ type: 'setNativeToolOverride', key, name, included });
+}
+
+function chatToolSummary(app: AppState) {
+  const groups = app.toolGroups ?? [];
+  const selected = groups.filter((group) => group.selected);
+  const available = selected.reduce((sum, group) => sum + group.availableTools, 0);
+  const excluded = groups.length - selected.length;
+  const tokens = selected.reduce((sum, group) => sum + group.definitionTokens, 0);
+  const mode = app.mode === 'plan' ? 'Plan' : 'Act';
+  const status = !app.session
+    ? 'No active chat'
+    : app.toolAvailability === 'no-model'
+      ? 'Choose a model to use tools'
+      : app.toolAvailability === 'model-disabled'
+        ? 'Tools are off for this model'
+        : !app.toolGroups
+          ? 'Availability unknown'
+          : available
+            ? `${available} available in ${mode}`
+            : 'No tools available for this chat';
+  return { status, excluded, tokens };
+}
 
 export function ChatToolMenu() {
   const ref = useRef<HTMLDetailsElement>(null);
@@ -17,7 +43,7 @@ export function ChatToolMenu() {
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, []);
-  if (!app?.toolGroups) return null;
+  if (!app?.session || !app.toolGroups) return null;
   return (
     <details
       ref={ref}
@@ -33,98 +59,137 @@ export function ChatToolMenu() {
     >
       <summary title="Choose tools for this chat">Tools</summary>
       <div className="sv-chat-tools__menu">
-        <ChatToolGroups />
+        <ChatToolGroups app={app} />
       </div>
     </details>
   );
 }
 
-export function ChatToolGroups() {
-  const {
-    state: { app },
-  } = useStore();
-  if (!app?.session || !app.toolGroups) return null;
-  const selected = app.toolGroups.filter((group) => group.selected);
-  const tokens = selected.reduce((sum, group) => sum + group.definitionTokens, 0);
+export function ChatToolSettings({ app }: { app: AppState }) {
+  const { status, excluded } = chatToolSummary(app);
+  return (
+    <SettingsDisclosure
+      title="Tools for this chat"
+      status={status}
+      description={excluded ? `${excluded} group${excluded === 1 ? '' : 's'} excluded` : undefined}
+    >
+      <ChatToolGroups app={app} inSettings />
+    </SettingsDisclosure>
+  );
+}
+
+function ChatToolGroups({ app, inSettings = false }: { app: AppState; inSettings?: boolean }) {
+  const sessionId = app.session?.id;
+  if (!sessionId || !app.toolGroups?.length) {
+    return <p className="sv-field__help">Tool groups appear here when available for the chat.</p>;
+  }
+  const { status, tokens } = chatToolSummary(app);
+  const servers = new Map(app.mcp.servers.map((server) => [`mcp:${server.id}`, server]));
+  const groups = app.toolGroups;
+  const renderGroup = (group: NonNullable<AppState['toolGroups']>[number]) => {
+    const server = servers.get(group.id);
+    let description = `${group.availableTools} available`;
+    if (group.definitionTokens) {
+      description += ` · ~${group.definitionTokens.toLocaleString()} tokens${group.selected ? '' : ' when selected'}`;
+    } else if (server) {
+      if (!app.mcp.active) description = 'Unavailable in Restricted Mode';
+      else if (server.status === 'starting') description = 'Connecting…';
+      else if (server.status !== 'connected') description = 'Disconnected';
+      else if (app.mode === 'plan') description = 'Available in Act mode';
+    }
+    return (
+      <CheckRow
+        key={group.id}
+        label={group.label}
+        checked={group.selected}
+        description={description}
+        onChange={(selected) => post({ type: 'setToolGroup', sessionId, group: group.id, selected })}
+      />
+    );
+  };
+  const builtIn = groups.filter((group) => !group.id.startsWith('mcp:'));
+  const integrations = groups.filter((group) => group.id.startsWith('mcp:'));
+
   return (
     <fieldset className="sv-tool-groups">
-      <legend>Tools for this chat</legend>
+      <legend className={inSettings ? 'sv-visually-hidden' : undefined}>Tools for this chat</legend>
+      {!inSettings ? <p className="sv-field__help">{status}</p> : null}
+      {tokens ? (
+        <p className="sv-field__help sv-tabular">
+          Estimated definition tokens per request: ~{tokens.toLocaleString()}
+        </p>
+      ) : null}
+      {integrations.length && builtIn.length ? (
+        <p className="sv-tool-groups__label">Built-in groups</p>
+      ) : null}
+      {builtIn.map(renderGroup)}
+      {integrations.length ? <p className="sv-tool-groups__label">Integration groups</p> : null}
+      {integrations.map(renderGroup)}
       <p className="sv-field__help">
-        {selected.reduce((sum, group) => sum + group.availableTools, 0)} tools available · ~
-        {tokens.toLocaleString()} definition tokens per request. Estimates depend on mode and connection.
-        Changes also block pending calls.
-      </p>
-      {app.toolGroups.map((group) => (
-        <CheckRow
-          key={group.id}
-          label={group.label}
-          checked={group.selected}
-          description={`${group.availableTools} available · ~${group.definitionTokens.toLocaleString()} tokens when selected`}
-          onChange={(value) =>
-            post({ type: 'setToolGroup', sessionId: app.session!.id, group: group.id, selected: value })
-          }
-        />
-      ))}
-      <p className="sv-field__help">
-        Saved with this chat. Global tool permissions still apply. Selecting a group does not install or
-        connect an integration.
+        Applies to this chat. Global permissions still apply. Excluding a group blocks its pending calls.
       </p>
     </fieldset>
   );
 }
 
-export function NativeToolSettings() {
-  const {
-    state: { app },
-  } = useStore();
-  if (!app?.nativeTools) return null;
-  const settings = app.settings;
-  const change = (
-    key: 'tools.disabled' | 'tools.forceAsk',
-    current: string[],
-    name: string,
-    included: boolean,
-  ) => {
-    const setting: SettingUpdate = {
-      key,
-      value: included ? [...new Set([...current, name])] : current.filter((item) => item !== name),
-    };
-    post({ type: 'updateSetting', setting });
-  };
+export function NativeToolSettings({ app }: { app: AppState }) {
+  const disabled = new Set(app.settings.disabledTools);
+  const forceAsk = new Set(app.settings.forceAskTools);
+  const groups = new Map<string, NativeToolView[]>();
+  for (const tool of app.nativeTools ?? []) {
+    const group = groups.get(tool.group);
+    if (group) group.push(tool);
+    else groups.set(tool.group, [tool]);
+  }
+  if (!groups.size) return null;
   return (
-    <section aria-label="Built-in tools">
-      <h3>Built-in tools</h3>
-      <p className="sv-field__help">
-        Applies to every chat. Always review adds approval; the default keeps the existing approval rules for
-        each tool.
-      </p>
-      {[...new Set(app.nativeTools.map((tool) => tool.group))].map((group) => (
-        <details key={group} className="sv-native-tools">
-          <summary>{TOOL_GROUP_LABELS[group] ?? group}</summary>
-          {app
-            .nativeTools!.filter((tool) => tool.group === group)
-            .map((tool) => (
-              <div className="sv-native-tool" key={tool.name}>
-                <code>{tool.name}</code>
-                <span className="sv-badge">{tool.risk}</span>
-                <p className="sv-field__help">{tool.description}</p>
-                <CheckRow
-                  label={`Enable ${tool.name}`}
-                  checked={!settings.disabledTools.includes(tool.name)}
-                  onChange={(enabled) =>
-                    change('tools.disabled', settings.disabledTools, tool.name, !enabled)
-                  }
-                />
-                <CheckRow
-                  label={`Always review ${tool.name}`}
-                  checked={settings.forceAskTools.includes(tool.name)}
-                  onChange={(ask) => change('tools.forceAsk', settings.forceAskTools, tool.name, ask)}
-                />
-                {tool.unavailable ? <p className="sv-field__help">{tool.unavailable}</p> : null}
-              </div>
+    <>
+      <p className="sv-field__help">Always ask requires approval even for reads and in Auto mode.</p>
+      {[...groups].map(([group, tools]) => {
+        const overrides = tools.filter((tool) => disabled.has(tool.name) || forceAsk.has(tool.name)).length;
+        return (
+          <SettingsDisclosure
+            key={group}
+            title={TOOL_GROUP_LABELS[group] ?? group}
+            status={overrides ? `${overrides} override${overrides === 1 ? '' : 's'}` : undefined}
+          >
+            {tools.map((tool) => (
+              <NativeTool
+                key={tool.name}
+                tool={tool}
+                disabled={disabled.has(tool.name)}
+                ask={forceAsk.has(tool.name)}
+              />
             ))}
-        </details>
-      ))}
-    </section>
+          </SettingsDisclosure>
+        );
+      })}
+    </>
+  );
+}
+
+function NativeTool({ tool, disabled, ask }: { tool: NativeToolView; disabled: boolean; ask: boolean }) {
+  const id = useId();
+  return (
+    <div className="sv-native-tool" role="group" aria-labelledby={id}>
+      <div className="sv-native-tool__title">
+        <code id={id}>{tool.name}</code>
+        <span className="sv-field__help">{tool.risk}</span>
+      </div>
+      <p className="sv-field__help">{tool.description}</p>
+      <div className="sv-native-tool__controls">
+        <CheckRow
+          label="Enabled"
+          checked={!disabled}
+          onChange={(enabled) => setNativeToolOverride('tools.disabled', tool.name, !enabled)}
+        />
+        <CheckRow
+          label="Always ask"
+          checked={ask}
+          onChange={(checked) => setNativeToolOverride('tools.forceAsk', tool.name, checked)}
+        />
+      </div>
+      {tool.unavailable && !disabled ? <p className="sv-field__note">{tool.unavailable}</p> : null}
+    </div>
   );
 }

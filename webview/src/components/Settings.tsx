@@ -1,5 +1,11 @@
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import type { ApprovalMode, SelectedModel, SettingKey, SettingUpdate } from '../../../src/shared/protocol';
+import type {
+  AppState,
+  ApprovalMode,
+  SelectedModel,
+  SettingKey,
+  SettingUpdate,
+} from '../../../src/shared/protocol';
 import { hasShellMetacharacters } from '../../../src/core/permissions/shell';
 import { sendsKeyInsecurely } from '../../../src/shared/endpoints';
 import { effectiveLimits, type LimitSource } from '../../../src/core/providers/limits';
@@ -7,7 +13,8 @@ import { APPROVAL_OPTIONS } from '../lib/approvals';
 import { useStore } from '../state/store';
 import { getUiState, post, setUiState } from '../vscode';
 import { McpArea } from './McpSettings';
-import { ChatToolGroups, NativeToolSettings } from './ToolSettings';
+import { ChatToolSettings, NativeToolSettings, setNativeToolOverride } from './ToolSettings';
+import { SettingsDisclosure } from './SettingsDisclosure';
 import { Button, CheckRow, Icon, IconButton } from './primitives';
 
 const update = (setting: SettingUpdate) => post({ type: 'updateSetting', setting });
@@ -17,7 +24,7 @@ const ref = (s: SelectedModel | null) => (s ? `${s.providerId}\u0000${s.modelId}
 
 export type SettingsArea = 'models' | 'approvals' | 'agent' | 'mcp' | 'context' | 'data';
 
-const AREAS: ReadonlyArray<{ id: SettingsArea; label: string; icon: string; description: string }> = [
+const AREAS: ReadonlyArray<{ id: SettingsArea; label: string; icon: string; description?: string }> = [
   {
     id: 'models',
     label: 'Models',
@@ -35,8 +42,6 @@ const AREAS: ReadonlyArray<{ id: SettingsArea; label: string; icon: string; desc
     id: 'mcp',
     label: 'Tools',
     icon: 'mcp',
-    description:
-      'Choose tools for this chat, set built-in tool permissions and connect optional integrations.',
   },
   {
     id: 'context',
@@ -108,7 +113,7 @@ function AreaPanel({ area, children }: { area: SettingsArea; children: ReactNode
       id={`sv-area-${area}`}
       aria-labelledby={`sv-tab-${area}`}
     >
-      <p className="sv-settings__intro">{a.description}</p>
+      {a.description ? <p className="sv-settings__intro">{a.description}</p> : null}
       <div className="sv-settings__body">{children}</div>
     </section>
   );
@@ -166,7 +171,7 @@ function ModelSelect({ role }: { role: 'act' | 'plan' | 'title' }) {
           ))}
       </select>
       <span className="sv-field__help">{MODEL_ROLE[role].help}</span>
-      {role !== 'title' ? <ModelLimits selection={value ?? (role === 'plan' ? app.selected : null)} /> : null}
+      {role === 'plan' && value ? <ModelLimits selection={value} /> : null}
     </div>
   );
 }
@@ -285,7 +290,6 @@ function ConfigFileField() {
   }[f.state];
   return (
     <div className="sv-field">
-      <span className="sv-field__label">Configuration file</span>
       <div className="sv-config-file" data-state={f.state}>
         <Icon name={icon} />
         <div className="sv-config-file__text">
@@ -399,7 +403,8 @@ function ListEditor({
   items,
   placeholder,
   validate,
-  onChange,
+  onAdd,
+  onRemove,
   onReset,
   mono = true,
 }: {
@@ -408,7 +413,8 @@ function ListEditor({
   items: string[];
   placeholder: string;
   validate?: (value: string) => string;
-  onChange: (next: string[]) => void;
+  onAdd: (item: string) => void;
+  onRemove: (item: string) => void;
   onReset?: () => void;
   mono?: boolean;
 }) {
@@ -420,7 +426,7 @@ function ListEditor({
     : '';
   const add = () => {
     if (!value || error) return;
-    onChange([...items, value]);
+    onAdd(value);
     setDraft('');
   };
   return (
@@ -431,11 +437,7 @@ function ListEditor({
           {items.map((item) => (
             <li key={item}>
               <code className={mono ? undefined : 'sv-plain'}>{item}</code>
-              <IconButton
-                icon="close"
-                label={`Remove ${item}`}
-                onClick={() => onChange(items.filter((x) => x !== item))}
-              />
+              <IconButton icon="close" label={`Remove ${item}`} onClick={() => onRemove(item)} />
             </li>
           ))}
         </ul>
@@ -526,6 +528,47 @@ function NumberSetting({
 
 // --------------------------------------------------------------------------------------------- view
 
+function ToolsSettings({ app }: { app: AppState }) {
+  const { disabledTools, forceAskTools } = app.settings;
+  const overrides = new Set([...disabledTools, ...forceAskTools]).size;
+  const validateName = (name: string) =>
+    /^[a-zA-Z0-9_-]{1,64}$/.test(name) ? '' : 'Use a tool name with letters, digits, underscores or hyphens.';
+
+  return (
+    <div className="sv-settings__sections">
+      <ChatToolSettings app={app} />
+      <SettingsDisclosure
+        title="Built-in tools"
+        status={overrides ? `${overrides} override${overrides === 1 ? '' : 's'}` : 'Default permissions'}
+        description="Applies to all chats in this VS Code profile"
+      >
+        <NativeToolSettings app={app} />
+        <SettingsDisclosure title="Advanced native overrides">
+          <ListEditor
+            label="Disabled native tools"
+            help="Tool names excluded from requests and blocked during execution, including pending approvals."
+            items={disabledTools}
+            placeholder="execute_terminal"
+            validate={validateName}
+            onAdd={(name) => setNativeToolOverride('tools.disabled', name, true)}
+            onRemove={(name) => setNativeToolOverride('tools.disabled', name, false)}
+          />
+          <ListEditor
+            label="Always ask for native tools"
+            help="These native tools ask before running, including reads and tools in Auto mode."
+            items={forceAskTools}
+            placeholder="read_file"
+            validate={validateName}
+            onAdd={(name) => setNativeToolOverride('tools.forceAsk', name, true)}
+            onRemove={(name) => setNativeToolOverride('tools.forceAsk', name, false)}
+          />
+        </SettingsDisclosure>
+      </SettingsDisclosure>
+      <McpArea />
+    </div>
+  );
+}
+
 export function SettingsView() {
   const { app } = useStore();
   const s = app.settings;
@@ -539,6 +582,15 @@ export function SettingsView() {
     setUiState({ settingsArea: next });
   };
   const note = (key: SettingKey) => (s.overriddenByWorkspace.includes(key) ? OVERRIDE_NOTE : undefined);
+  const configStatus = {
+    missing: 'Not created',
+    ok: 'In sync',
+    error: 'Needs attention',
+    ignored: 'Ignored',
+  }[app.configFile.state];
+  const planModel = app.providers
+    .find((provider) => provider.id === app.planModel?.providerId)
+    ?.models.find((model) => model.id === app.planModel?.modelId);
   type BooleanSetting = Extract<SettingUpdate, { value: boolean }>;
   // Safe by construction: every key in BooleanSetting takes a boolean value.
   const toggle = (key: BooleanSetting['key']) => (value: boolean) => update({ key, value } as BooleanSetting);
@@ -568,61 +620,85 @@ export function SettingsView() {
       {area === 'models' ? (
         <AreaPanel area="models">
           <ModelSelect role="act" />
-          <ModelSelect role="plan" />
-          <ChatTitles />
           <ProvidersSummary />
-          <ConfigFileField />
+          <div className="sv-settings__sections">
+            <SettingsDisclosure
+              title="Model options"
+              status={planModel ? `Plan uses ${planModel.name ?? planModel.id}` : undefined}
+            >
+              {app.selected ? (
+                <div className="sv-field">
+                  <span className="sv-field__label">Act model limits</span>
+                  <ModelLimits selection={app.selected} />
+                </div>
+              ) : null}
+              <ModelSelect role="plan" />
+              <ChatTitles />
+            </SettingsDisclosure>
+            <SettingsDisclosure
+              title="Configuration file"
+              status={configStatus}
+              warning={app.configFile.state === 'error'}
+            >
+              <ConfigFileField />
+            </SettingsDisclosure>
+          </div>
         </AreaPanel>
       ) : null}
 
       {area === 'approvals' ? (
         <AreaPanel area="approvals">
           <ApprovalModeChoice />
-          <DefaultApprovalMode />
-          <ListEditor
-            label="Allowed commands"
-            help='Commands that start with an entry run without asking, e.g. "npm test". Risky commands still ask.'
-            items={s.allowedCommands}
-            placeholder="npm test"
-            validate={(v) =>
-              hasShellMetacharacters(v) ? 'Shell operators such as ; | & $ > < cannot be allowed.' : ''
-            }
-            onChange={(value) => update({ key: 'approvals.allowedCommands', value })}
-          />
-          <ListEditor
-            label="Protected files"
-            help="Glob patterns Sovran never reads, changes or names in a command without asking, in every mode."
-            items={s.protectedPaths}
-            placeholder="**/secrets/**"
-            onChange={(value) => update({ key: 'security.protectedPaths', value })}
-            onReset={
-              s.defaultProtectedPaths.length && s.defaultProtectedPaths.join() !== s.protectedPaths.join()
-                ? () => update({ key: 'security.protectedPaths', value: s.defaultProtectedPaths })
-                : undefined
-            }
-          />
+          <SettingsDisclosure
+            title="Approval defaults and exceptions"
+            status={s.defaultApprovalMode === 'auto' ? 'New windows start in Auto' : undefined}
+            warning={s.defaultApprovalMode === 'auto'}
+          >
+            <DefaultApprovalMode />
+            <ListEditor
+              label="Allowed commands"
+              help='Commands that start with an entry run without asking, e.g. "npm test". Risky commands still ask.'
+              items={s.allowedCommands}
+              placeholder="npm test"
+              validate={(v) =>
+                hasShellMetacharacters(v) ? 'Shell operators such as ; | & $ > < cannot be allowed.' : ''
+              }
+              onAdd={(entry) =>
+                update({ key: 'approvals.allowedCommands', value: [...s.allowedCommands, entry] })
+              }
+              onRemove={(entry) =>
+                update({
+                  key: 'approvals.allowedCommands',
+                  value: s.allowedCommands.filter((item) => item !== entry),
+                })
+              }
+            />
+            <ListEditor
+              label="Protected files"
+              help="Glob patterns Sovran never reads, changes or names in a command without asking, in every mode."
+              items={s.protectedPaths}
+              placeholder="**/secrets/**"
+              onAdd={(entry) =>
+                update({ key: 'security.protectedPaths', value: [...s.protectedPaths, entry] })
+              }
+              onRemove={(entry) =>
+                update({
+                  key: 'security.protectedPaths',
+                  value: s.protectedPaths.filter((item) => item !== entry),
+                })
+              }
+              onReset={
+                s.defaultProtectedPaths.length && s.defaultProtectedPaths.join() !== s.protectedPaths.join()
+                  ? () => update({ key: 'security.protectedPaths', value: s.defaultProtectedPaths })
+                  : undefined
+              }
+            />
+          </SettingsDisclosure>
         </AreaPanel>
       ) : null}
 
       {area === 'agent' ? (
         <AreaPanel area="agent">
-          <NumberSetting
-            label="Maximum steps per request"
-            help="Model round-trips before Sovran stops and asks you to continue."
-            value={s.maxIterations}
-            min={1}
-            max={200}
-            note={note('agent.maxIterations')}
-            onCommit={(value) => update({ key: 'agent.maxIterations', value })}
-          />
-          <NumberSetting
-            label="Command timeout (seconds)"
-            help="Commands that run longer are stopped."
-            value={s.terminalTimeoutSeconds}
-            min={5}
-            max={3600}
-            onCommit={(value) => update({ key: 'terminal.timeoutSeconds', value })}
-          />
           <CheckRow
             checked={s.mirrorToTerminal}
             onChange={toggle('terminal.mirrorToTerminal')}
@@ -636,41 +712,35 @@ export function SettingsView() {
             description="Opens VS Code's diff editor when a change waits for your approval."
             note={note('diff.openOnProposal')}
           />
+          <SettingsDisclosure
+            title="Execution limits"
+            status={note('agent.maxIterations') ? 'Workspace override' : undefined}
+            warning={!!note('agent.maxIterations')}
+          >
+            <NumberSetting
+              label="Maximum steps per request"
+              help="Model round-trips before Sovran stops and asks you to continue."
+              value={s.maxIterations}
+              min={1}
+              max={200}
+              note={note('agent.maxIterations')}
+              onCommit={(value) => update({ key: 'agent.maxIterations', value })}
+            />
+            <NumberSetting
+              label="Command timeout (seconds)"
+              help="Commands that run longer are stopped."
+              value={s.terminalTimeoutSeconds}
+              min={5}
+              max={3600}
+              onCommit={(value) => update({ key: 'terminal.timeoutSeconds', value })}
+            />
+          </SettingsDisclosure>
         </AreaPanel>
       ) : null}
 
       {area === 'mcp' ? (
         <AreaPanel area="mcp">
-          <ChatToolGroups />
-          <NativeToolSettings />
-          <details>
-            <summary>Advanced native overrides</summary>
-            <ListEditor
-              label="Disabled native tools"
-              help="Tool names excluded from requests and blocked during execution, including pending approvals."
-              items={s.disabledTools}
-              placeholder="execute_terminal"
-              validate={(v) =>
-                /^[a-zA-Z0-9_-]{1,64}$/.test(v)
-                  ? ''
-                  : 'Use a tool name with letters, digits, underscores or hyphens.'
-              }
-              onChange={(value) => update({ key: 'tools.disabled', value })}
-            />
-            <ListEditor
-              label="Always review native tools"
-              help="These native tools ask before running, including reads and tools in Auto mode. Integration permissions are set below."
-              items={s.forceAskTools}
-              placeholder="read_file"
-              validate={(v) =>
-                /^[a-zA-Z0-9_-]{1,64}$/.test(v)
-                  ? ''
-                  : 'Use a tool name with letters, digits, underscores or hyphens.'
-              }
-              onChange={(value) => update({ key: 'tools.forceAsk', value })}
-            />
-          </details>
-          <McpArea />
+          <ToolsSettings app={app} />
         </AreaPanel>
       ) : null}
 
@@ -684,27 +754,37 @@ export function SettingsView() {
             note={note('context.includeActiveEditor')}
           />
           <CheckRow
-            checked={s.autoCompact}
-            onChange={toggle('context.autoCompact')}
-            label="Summarize older messages when the context is full"
-            note={note('context.autoCompact')}
-          />
-          <CheckRow
             checked={s.projectInstructions}
             onChange={toggle('context.projectInstructions')}
             label="Follow AGENTS.md project instructions"
             description="Only in trusted workspaces."
             note={note('context.projectInstructions')}
           />
-          <NumberSetting
-            label="Maximum characters per tool result"
-            help="Longer file contents and command output are shortened in the middle."
-            value={s.maxToolResultChars}
-            min={2000}
-            max={200_000}
-            note={note('context.maxToolResultChars')}
-            onCommit={(value) => update({ key: 'context.maxToolResultChars', value })}
-          />
+          <SettingsDisclosure
+            title="Context limits"
+            status={
+              note('context.autoCompact') || note('context.maxToolResultChars')
+                ? 'Workspace override'
+                : undefined
+            }
+            warning={!!(note('context.autoCompact') || note('context.maxToolResultChars'))}
+          >
+            <CheckRow
+              checked={s.autoCompact}
+              onChange={toggle('context.autoCompact')}
+              label="Summarize older messages when the context is full"
+              note={note('context.autoCompact')}
+            />
+            <NumberSetting
+              label="Maximum characters per tool result"
+              help="Longer file contents and command output are shortened in the middle."
+              value={s.maxToolResultChars}
+              min={2000}
+              max={200_000}
+              note={note('context.maxToolResultChars')}
+              onCommit={(value) => update({ key: 'context.maxToolResultChars', value })}
+            />
+          </SettingsDisclosure>
         </AreaPanel>
       ) : null}
 

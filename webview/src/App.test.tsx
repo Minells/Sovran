@@ -84,6 +84,10 @@ function mount(state: AppState) {
   return utils;
 }
 
+function clickButton(name: RegExp) {
+  return userEvent.click(screen.getByRole('button', { name }));
+}
+
 describe('App', () => {
   it('handshakes with the host and renders the start page with starters', async () => {
     mount(baseState());
@@ -1279,7 +1283,7 @@ describe('settings view', () => {
     expect(tab('Approvals')).toHaveAttribute('aria-selected', 'true');
     expect(tab('Models')).toHaveAttribute('aria-selected', 'false');
     expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
-    expect(screen.getByLabelText('Allowed commands')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Allowed commands')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Act model')).not.toBeInTheDocument();
     // The areas never scroll away or disappear: all six are still there.
     expect(screen.getAllByRole('tab')).toHaveLength(6);
@@ -1314,6 +1318,7 @@ describe('settings view', () => {
   it('configures the Act and Plan models', async () => {
     mount(settingsState());
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    await clickButton(/^Model options/);
     const plan = screen.getByLabelText('Plan model');
     await userEvent.selectOptions(plan, within(plan).getByRole('option', { name: 'thinker' }));
     expect(sent).toContainEqual({ type: 'setModel', role: 'plan', providerId: 'local', modelId: 'thinker' });
@@ -1327,6 +1332,7 @@ describe('settings view', () => {
 
   it('turns model-generated chat titles on and picks the model that writes them', async () => {
     const view = mount(settingsState({ settings: { ...baseState().settings, generateTitles: false } }));
+    await clickButton(/^Model options/);
     expect(screen.queryByLabelText('Title model')).not.toBeInTheDocument();
     await userEvent.click(screen.getByLabelText(/Name chats with the model/));
     expect(sent).toContainEqual({
@@ -1350,6 +1356,7 @@ describe('settings view', () => {
 
   it('offers to create the configuration file from the providers in Settings', async () => {
     mount(settingsState());
+    await clickButton(/^Configuration file/);
     expect(screen.getByText('~/.sovran/config.yaml')).toBeInTheDocument();
     expect(screen.getByText('Not created. Providers live in Settings only.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Stop using/ })).not.toBeInTheDocument();
@@ -1363,6 +1370,7 @@ describe('settings view', () => {
         configFile: { path: '~/.sovran/config.yaml', state: 'ok', providers: 2, problems: [] },
       }),
     );
+    await clickButton(/^Configuration file/);
     expect(screen.getByText('In sync with Settings · 2 providers')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(sent).toContainEqual({ type: 'reloadConfigFile' });
@@ -1381,6 +1389,7 @@ describe('settings view', () => {
         },
       }),
     );
+    await clickButton(/^Configuration file/);
     expect(screen.getByText(/Settings keep the last valid version \(1 provider\)/)).toBeInTheDocument();
     expect(
       within(screen.getByRole('list', { name: 'Problems in the configuration file' })).getByText(
@@ -1396,6 +1405,7 @@ describe('settings view', () => {
         configFile: { path: '~/.sovran/config.yaml', state: 'ignored', providers: 0, problems: [] },
       }),
     );
+    await clickButton(/^Configuration file/);
     expect(screen.getByText('Ignored · Settings are used alone')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Stop using/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Use config.yaml again' }));
@@ -1407,6 +1417,7 @@ describe('settings view', () => {
     await openArea('Approvals');
     await userEvent.click(screen.getByRole('radio', { name: /Auto-edit/ }));
     expect(sent).toContainEqual({ type: 'setApprovalMode', mode: 'edits' });
+    await clickButton(/^Approval defaults and exceptions/);
     await userEvent.selectOptions(screen.getByLabelText('When a window opens, start in'), 'auto');
     expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'approvals.mode', value: 'auto' } });
   });
@@ -1414,6 +1425,7 @@ describe('settings view', () => {
   it('edits the allowed commands and rejects shell operators', async () => {
     mount(settingsState());
     await openArea('Approvals');
+    await clickButton(/^Approval defaults and exceptions/);
     const input = screen.getByLabelText('Allowed commands');
     await userEvent.type(input, 'npm test && curl x');
     expect(screen.getByText(/Shell operators such as/)).toBeInTheDocument();
@@ -1433,14 +1445,14 @@ describe('settings view', () => {
   it('edits native tool controls and rejects invalid tool names', async () => {
     mount(settingsState());
     await openArea('Tools');
-    await userEvent.click(screen.getByText('Advanced native overrides'));
+    await clickButton(/^Built-in tools/);
+    await clickButton(/^Advanced native overrides/);
     const disabled = screen.getByLabelText('Disabled native tools');
     await userEvent.type(disabled, 'execute_terminal{Enter}');
     expect(sent).toContainEqual({
-      type: 'updateSetting',
-      setting: { key: 'tools.disabled', value: ['execute_terminal'] },
+      type: 'setNativeToolOverride', key: 'tools.disabled', name: 'execute_terminal', included: true,
     });
-    const review = screen.getByLabelText('Always review native tools');
+    const review = screen.getByLabelText('Always ask for native tools');
     await userEvent.type(review, '../read_file');
     expect(
       screen.getByText('Use a tool name with letters, digits, underscores or hyphens.'),
@@ -1448,8 +1460,7 @@ describe('settings view', () => {
     await userEvent.clear(review);
     await userEvent.type(review, 'read_file{Enter}');
     expect(sent).toContainEqual({
-      type: 'updateSetting',
-      setting: { key: 'tools.forceAsk', value: ['read_file'] },
+      type: 'setNativeToolOverride', key: 'tools.forceAsk', name: 'read_file', included: true,
     });
   });
 
@@ -1462,6 +1473,7 @@ describe('settings view', () => {
       setting: { key: 'context.includeActiveEditor', value: false },
     });
     await openArea('Agent');
+    await clickButton(/^Execution limits/);
     const steps = screen.getByLabelText('Maximum steps per request');
     await userEvent.clear(steps);
     await userEvent.type(steps, '500');
@@ -1473,6 +1485,7 @@ describe('settings view', () => {
       setting: { key: 'agent.maxIterations', value: 40 },
     });
     await openArea('Approvals');
+    await clickButton(/^Approval defaults and exceptions/);
     await userEvent.click(screen.getByRole('button', { name: 'Restore defaults' }));
     expect(sent).toContainEqual({
       type: 'updateSetting',
@@ -1488,25 +1501,57 @@ describe('settings view', () => {
       }),
     );
     await openArea('Tools');
+    await clickButton(/^Tools for this chat/);
     expect(screen.getByText('8 available · ~1,200 tokens when selected')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('checkbox', { name: /^Git/ }));
     expect(sent).toContainEqual({ type: 'setToolGroup', sessionId: 's', group: 'git', selected: true });
-    await userEvent.click(within(screen.getByRole('region', { name: 'Built-in tools' })).getByText('Git'));
-    await userEvent.click(screen.getByLabelText('Enable git_status'));
+    await clickButton(/^Built-in tools/);
+    await clickButton(/^Git$/);
+    const gitStatus = within(screen.getByRole('group', { name: 'git_status' }));
+    await userEvent.click(gitStatus.getByLabelText('Enabled'));
     expect(sent).toContainEqual({
-      type: 'updateSetting',
-      setting: { key: 'tools.disabled', value: ['git_status'] },
+      type: 'setNativeToolOverride', key: 'tools.disabled', name: 'git_status', included: true,
     });
-    await userEvent.click(screen.getByLabelText('Always review git_status'));
+    await userEvent.click(gitStatus.getByLabelText('Always ask'));
     expect(sent).toContainEqual({
-      type: 'updateSetting',
-      setting: { key: 'tools.forceAsk', value: ['git_status'] },
+      type: 'setNativeToolOverride', key: 'tools.forceAsk', name: 'git_status', included: true,
     });
     expect(
       sent.some(
         (message) => message.type === 'installMcpIntegration' || message.type === 'setMcpServerEnabled',
       ),
     ).toBe(false);
+  });
+
+  it('summarizes Tools without opening advanced controls or writing settings', async () => {
+    const group = { id: 'git', label: 'Git', selected: true, availableTools: 1, definitionTokens: 120 };
+    mount(settingsState({
+      toolAvailability: 'available',
+      toolGroups: [group, { ...group, id: 'web', label: 'Web', selected: false }],
+      settings: {
+        ...baseState().settings,
+        disabledTools: ['old_tool'],
+        forceAskTools: ['old_tool'],
+      },
+    }));
+    await openArea('Tools');
+    const panel = within(screen.getByRole('tabpanel', { name: 'Tools' }));
+    const summaries = panel.getAllByRole('button');
+    expect(summaries.map((button) => button.getAttribute('aria-expanded'))).toEqual(['false', 'false', 'false']);
+    expect(summaries[0]).toHaveAccessibleName('Tools for this chat 1 available in Act');
+    expect(summaries[0]).toHaveAccessibleDescription('1 group excluded');
+    expect(summaries[1]).toHaveAccessibleName(/Built-in tools 1 override/);
+    expect(summaries[2]).toHaveAccessibleName('Integrations None configured');
+
+    host({ type: 'patch', patch: {
+      toolAvailability: 'model-disabled',
+      toolGroups: [{ ...group, availableTools: 0, definitionTokens: 0 }],
+    } });
+    expect(summaries[0]).toHaveAccessibleName('Tools for this chat Tools are off for this model');
+    summaries[0]!.focus();
+    await userEvent.keyboard('{Enter}');
+    expect(panel.getByRole('checkbox', { name: /^Git/ })).toBeChecked();
+    expect(sent.every((message) => message.type === 'ready' || message.type === 'focused')).toBe(true);
   });
 
   it('notes settings overridden by the workspace', async () => {
@@ -1516,6 +1561,7 @@ describe('settings view', () => {
       }),
     );
     await openArea('Agent');
+    await clickButton(/^Execution limits/);
     expect(screen.getAllByText(/This workspace overrides this setting/)).toHaveLength(1);
   });
 });
@@ -1585,11 +1631,12 @@ describe('model limits', () => {
     expect(screen.getByLabelText('Max output tokens for small')).toHaveAttribute('placeholder', '2048');
   });
 
-  it('tells in Settings which limits the selected model uses and where they come from', () => {
+  it('tells in Settings which limits the selected model uses and where they come from', async () => {
     mount({
       ...withLimits([{ id: 'glm-5.3-flash', toolMode: 'auto', serverLimits: { contextWindow: 131072 } }]),
       view: 'settings',
     });
+    await clickButton(/^Model options/);
     expect(screen.getAllByTestId('model-limits')[0]).toHaveTextContent(
       'Context 131,072 tokens (reported by the server) · 4,096 kept for the reply (default)',
     );
@@ -2252,19 +2299,23 @@ describe('MCP servers', () => {
     toolTokens: 0,
     tools: [],
   };
-  const open = (servers: McpServerView[], over: Partial<AppState> = {}) => {
+  const open = async (servers: McpServerView[], over: Partial<AppState> = {}) => {
     setUiState({ draft: '', settingsArea: 'mcp' });
-    return mount(baseState({ view: 'settings', mcp: { active: true, servers }, ...over }));
+    const view = mount(baseState({ view: 'settings', mcp: { active: true, servers }, ...over }));
+    await clickButton(/^Integrations/);
+    return view;
   };
 
   it('shows each server, how it is doing and what to do when it is not connected', async () => {
-    open([github, jira]);
+    await open([github, jira]);
     const card = screen.getByRole('region', { name: 'GitHub' });
-    expect(within(card).getByText('https://api.githubcopilot.com/mcp/')).toBeInTheDocument();
-    expect(within(card).getByRole('status')).toHaveTextContent('Connected · github-mcp-server 1.4.2');
-    expect(within(card).getByText('Token stored')).toBeInTheDocument();
+    expect(within(card).getByRole('status')).toHaveTextContent('Connected');
+    await userEvent.click(within(card).getByRole('button', { name: 'Server settings' }));
+    expect(within(card).getByText('https://api.githubcopilot.com/mcp/')).toBeVisible();
+    expect(within(card).getByText(/github-mcp-server 1.4.2/)).toBeVisible();
+    expect(within(card).getByRole('button', { name: 'Replace token' })).toBeVisible();
     const broken = screen.getByRole('region', { name: 'Jira' });
-    expect(within(broken).getByText('uvx mcp-atlassian "--read-only mode"')).toBeInTheDocument();
+    expect(within(broken).queryByText('uvx mcp-atlassian "--read-only mode"')).not.toBeInTheDocument();
     expect(within(broken).getByRole('alert')).toHaveTextContent('No token is stored for Jira');
     await userEvent.click(within(broken).getByRole('button', { name: 'Try again' }));
     expect(sent).toContainEqual({ type: 'restartMcpServer', id: 'jira' });
@@ -2277,12 +2328,9 @@ describe('MCP servers', () => {
   });
 
   it('lists the tools with what the server says about them and lets the user choose what each may do', async () => {
-    open([github]);
-    expect(screen.getByText('~2.1k tokens')).toHaveAttribute(
-      'title',
-      'Estimated tokens the offered tools add to every request',
-    );
-    await userEvent.click(screen.getByRole('button', { name: /2 tools · 1 offered · 1 allowed/ }));
+    await open([github]);
+    expect(screen.queryByText(/tokens/)).not.toBeInTheDocument();
+    await clickButton(/^Tool permissions/);
     const tools = screen.getByRole('list', { name: 'Tools of GitHub' });
     expect(within(tools).getByText('read-only')).toBeInTheDocument();
     expect(within(tools).getByText('can change data')).toBeInTheDocument();
@@ -2307,11 +2355,12 @@ describe('MCP servers', () => {
   });
 
   it('uses native Git instead of the basic preset and preserves saved Git MCP servers', async () => {
-    const { unmount } = open([]);
+    const { unmount } = await open([]);
+    await clickButton(/^Add integration$/);
     const presets = screen.getByRole('list', { name: 'Integration catalog' });
     expect(within(presets).queryByRole('button', { name: /^Git\b/ })).not.toBeInTheDocument();
     unmount();
-    open([
+    await open([
       {
         ...jira,
         id: 'legacygit',
@@ -2323,7 +2372,8 @@ describe('MCP servers', () => {
       },
     ]);
     const saved = screen.getByRole('region', { name: 'Git' });
-    expect(within(saved).getByText(/mcp-server-git/)).toBeInTheDocument();
+    await userEvent.click(within(saved).getByRole('button', { name: 'Server settings' }));
+    expect(within(saved).getByText(/mcp-server-git/)).toBeVisible();
     expect(
       sent.some((message) => message.type === 'deleteMcpServer' || message.type === 'saveMcpServer'),
     ).toBe(false);
@@ -2334,7 +2384,8 @@ describe('MCP servers', () => {
   });
 
   it('selects catalog metadata without installing, launching or saving anything', async () => {
-    open([]);
+    await open([]);
+    await clickButton(/^Add integration$/);
     await userEvent.click(screen.getByRole('button', { name: 'Playwright MCP' }));
     expect(screen.getByRole('region', { name: 'Playwright MCP setup' })).toBeInTheDocument();
     expect(screen.getByText(/Node.js 20/)).toBeInTheDocument();
@@ -2345,7 +2396,7 @@ describe('MCP servers', () => {
         ),
       ),
     ).toBe(false);
-    await userEvent.click(screen.getByRole('button', { name: 'Add integration' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add to Sovran' }));
     expect(sent).toContainEqual({
       type: 'addMcpIntegration',
       integration: 'playwright',
@@ -2359,8 +2410,8 @@ describe('MCP servers', () => {
   });
 
   it('keeps custom local commands and field validation available', async () => {
-    open([]);
-    await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
+    await open([]);
+    await clickButton(/^Add custom server$/);
     await userEvent.type(screen.getByLabelText('Name'), 'My files');
     await userEvent.type(screen.getByLabelText('Environment'), 'bad name=1');
     await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
@@ -2385,17 +2436,35 @@ describe('MCP servers', () => {
     });
   });
 
+  it('preserves the custom server draft when collapsed and returns focus after cancel', async () => {
+    await open([]);
+    const add = screen.getByRole('button', { name: 'Add custom server' });
+    await userEvent.click(add);
+    const name = screen.getByLabelText('Name');
+    expect(name).toHaveFocus();
+    await userEvent.type(name, 'Draft server');
+    await clickButton(/^Integrations/);
+    expect(name).not.toBeVisible();
+    await clickButton(/^Integrations/);
+    expect(name).toHaveValue('Draft server');
+    await clickButton(/^Cancel$/);
+    expect(add).toHaveFocus();
+    expect(sent.some((message) => message.type === 'saveMcpServer')).toBe(false);
+  });
+
   it('makes existing-profile browser access and GitHub writes explicit choices', async () => {
-    open([]);
+    await open([]);
+    await clickButton(/^Add integration$/);
     await userEvent.click(screen.getByRole('button', { name: 'Playwright MCP' }));
     await userEvent.selectOptions(screen.getByLabelText('Browser or access mode'), 'extension');
     expect(screen.getByText(/Approved tabs can expose signed-in accounts/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Add integration' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add to Sovran' }));
     expect(sent).toContainEqual({
       type: 'addMcpIntegration',
       integration: 'playwright',
       profile: 'extension',
     });
+    await clickButton(/^Add integration$/);
     await userEvent.click(screen.getByRole('button', { name: 'GitHub MCP' }));
     expect(screen.getByLabelText('Browser or access mode')).toHaveValue('readonly');
     await userEvent.selectOptions(screen.getByLabelText('Browser or access mode'), 'collaboration');
@@ -2403,8 +2472,8 @@ describe('MCP servers', () => {
   });
 
   it('fills the form from a README snippet and moves its token to Secret Storage', async () => {
-    open([github]);
-    await userEvent.click(screen.getByRole('button', { name: 'Add server' }));
+    await open([github]);
+    await clickButton(/^Add custom server$/);
     await userEvent.click(screen.getByText("Paste the JSON from the server's README"));
     const snippet =
       '{ "mcpServers": { "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"], "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_123456789" } } } }';
@@ -2432,7 +2501,8 @@ describe('MCP servers', () => {
   });
 
   it('edits a remote server without showing its token, and warns about plain http', async () => {
-    open([github]);
+    await open([github]);
+    await clickButton(/^Server settings/);
     await userEvent.click(screen.getByRole('button', { name: 'Edit GitHub' }));
     expect(screen.queryByText("Paste the JSON from the server's README")).not.toBeInTheDocument();
     expect(screen.getByLabelText('Token')).toHaveValue('');
@@ -2458,8 +2528,8 @@ describe('MCP servers', () => {
     });
   });
 
-  it('explains Restricted Mode', () => {
-    open([jira], {
+  it('explains Restricted Mode', async () => {
+    await open([jira], {
       workspace: { name: 'w', trusted: false, hasFolder: true },
       mcp: { active: false, servers: [jira] },
     });

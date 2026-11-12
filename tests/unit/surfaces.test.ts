@@ -24,6 +24,7 @@ vi.mock('vscode', async () => {
   const event = () => () => ({ dispose() {} });
   return {
     Uri,
+    ConfigurationTarget: { Global: 1 },
     ViewColumn: { Active: -1, Beside: -2, One: 1, Two: 2 },
     workspace: {
       name: 'ws',
@@ -38,6 +39,9 @@ vi.mock('vscode', async () => {
         get: <T>(key: string, fallback?: T) =>
           `${section}.${key}` in h.config ? (h.config[`${section}.${key}`] as T) : fallback,
         inspect: (key: string) => ({ globalValue: h.config[`${section}.${key}`] }),
+        update: async (key: string, value: unknown) => {
+          h.config[`${section}.${key}`] = value;
+        },
       }),
       onDidGrantWorkspaceTrust: event(),
       onDidChangeWorkspaceFolders: event(),
@@ -146,7 +150,7 @@ beforeEach(async () => {
         name: 'Mock',
         baseUrl: server.baseUrl,
         auth: { type: 'none' },
-        models: [{ id: 'm', toolMode: 'native' }],
+        models: [{ id: 'm', toolMode: 'native' }, { id: 'text-only', toolMode: 'none' }],
       },
     ],
     'sovran.defaultModel': 'mock/m',
@@ -218,6 +222,22 @@ it('keeps tool groups local to each chat and rejects a stale session intent', as
     'tab1',
   );
   expect(controller.snapshot().toolGroups?.find((group) => group.id === 'git')?.selected).toBe(true);
+});
+
+it('projects tool availability for the effective model and preserves exclusions when switching mode', async () => {
+  const sessionId = sessionOf(sidebar)!;
+  await controller.handle({ type: 'setToolGroup', sessionId, group: 'editing', selected: false });
+  await controller.handle({ type: 'setModel', role: 'plan', providerId: 'mock', modelId: 'text-only' });
+  expect(latest(sidebar, 'toolAvailability')).toBe('available');
+  expect(latest(sidebar, 'toolGroups')?.some((group) => group.availableTools > 0)).toBe(true);
+
+  controller.setMode('plan');
+  expect(latest(sidebar, 'toolAvailability')).toBe('model-disabled');
+  expect(latest(sidebar, 'toolGroups')?.every((group) => !group.availableTools && !group.definitionTokens)).toBe(true);
+
+  controller.setMode('act');
+  expect(latest(sidebar, 'toolAvailability')).toBe('available');
+  expect(latest(sidebar, 'toolGroups')?.find((group) => group.id === 'editing')?.selected).toBe(false);
 });
 
 it('blocks an approved edit after the host excludes its group and persists the choice', async () => {

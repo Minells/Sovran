@@ -277,6 +277,8 @@ export interface McpView {
 export interface AppState {
   toolGroups?: ToolGroupView[];
   nativeTools?: NativeToolView[];
+  /** Whether the effective model can receive tool definitions. Groups reflect mode, trust and tool policy. */
+  toolAvailability?: 'available' | 'no-model' | 'model-disabled';
   /** The webview this state is for. A chat in an editor tab only shows chats; lists and settings live in the view. */
   surface: SurfaceKind;
   view: View;
@@ -440,6 +442,8 @@ const allowEntry = z
     'Allowed commands cannot contain shell operators such as ; | & $ > <',
   );
 
+const nativeToolName = z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/);
+
 /**
  * The settings the Settings view may change, each with its own value schema. Anything else (providers, headers,
  * models) goes through dedicated messages, so the webview can never write an arbitrary key.
@@ -447,11 +451,11 @@ const allowEntry = z
 export const settingUpdateSchema = z.discriminatedUnion('key', [
   z.object({
     key: z.literal('tools.disabled'),
-    value: z.array(z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/)).max(200),
+    value: z.array(nativeToolName).max(200),
   }),
   z.object({
     key: z.literal('tools.forceAsk'),
-    value: z.array(z.string().regex(/^[a-zA-Z0-9_-]{1,64}$/)).max(200),
+    value: z.array(nativeToolName).max(200),
   }),
   z.object({ key: z.literal('approvals.mode'), value: approvalModeSchema }),
   z.object({ key: z.literal('approvals.allowedCommands'), value: z.array(allowEntry).max(200) }),
@@ -472,6 +476,7 @@ export const settingUpdateSchema = z.discriminatedUnion('key', [
 ]);
 export type SettingUpdate = z.infer<typeof settingUpdateSchema>;
 export type SettingKey = SettingUpdate['key'];
+export type NativeToolSetting = Extract<SettingKey, 'tools.disabled' | 'tools.forceAsk'>;
 
 export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('ready') }),
@@ -523,6 +528,12 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('discoverModels') }),
   z.object({ type: z.literal('updateSetting'), setting: settingUpdateSchema }),
+  z.object({
+    type: z.literal('setNativeToolOverride'),
+    key: z.enum(['tools.disabled', 'tools.forceAsk']),
+    name: nativeToolName,
+    included: z.boolean(),
+  }),
   z.object({ type: z.literal('showLogs') }),
   z.object({ type: z.literal('attachFiles') }),
   z.object({ type: z.literal('removeAttachment'), id }),
