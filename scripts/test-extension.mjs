@@ -43,6 +43,7 @@ try {
   });
   const vscodeExecutablePath = await downloadAndUnzipVSCode({
     version: process.env.SOVRAN_TEST_VSCODE_VERSION ?? 'stable',
+    timeout: 60_000,
   });
   let extensionDevelopmentPath = root;
   const profileArgs = [`--user-data-dir=${userData}`, `--extensions-dir=${extensions}`];

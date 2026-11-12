@@ -1541,7 +1541,7 @@ describe('settings view', () => {
     expect(summaries[0]).toHaveAccessibleName('Tools for this chat 1 available in Act');
     expect(summaries[0]).toHaveAccessibleDescription('1 group excluded');
     expect(summaries[1]).toHaveAccessibleName(/Built-in tools 1 override/);
-    expect(summaries[2]).toHaveAccessibleName('Integrations None configured');
+    expect(summaries[2]).toHaveAccessibleName('MCP integrations None configured');
 
     host({ type: 'patch', patch: {
       toolAvailability: 'model-disabled',
@@ -2302,7 +2302,7 @@ describe('MCP servers', () => {
   const open = async (servers: McpServerView[], over: Partial<AppState> = {}) => {
     setUiState({ draft: '', settingsArea: 'mcp' });
     const view = mount(baseState({ view: 'settings', mcp: { active: true, servers }, ...over }));
-    await clickButton(/^Integrations/);
+    await clickButton(/^MCP integrations/);
     return view;
   };
 
@@ -2387,9 +2387,14 @@ describe('MCP servers', () => {
     await open([]);
     await clickButton(/^Browse Catalog$/);
     const catalog = screen.getByRole('list', { name: 'Integration catalog' });
-    expect(within(catalog).getAllByRole('listitem')).toHaveLength(5);
-    expect(within(catalog).getByRole('button', { name: 'Configure Context7 MCP' })).toBeInTheDocument();
-    expect(within(catalog).getByRole('button', { name: 'Configure GitLab MCP' })).toBeInTheDocument();
+    const entries = within(catalog).getAllByRole('listitem');
+    expect(entries.map((entry) => entry.getAttribute('aria-label'))).toEqual([
+      'GitLab MCP',
+      'GitHub MCP',
+      'Playwright MCP',
+      'Context7 MCP',
+      'Chrome DevTools MCP',
+    ]);
     expect(within(catalog).getAllByText('Remote · Not configured')).toHaveLength(3);
     expect(within(catalog).getByText(/Node\.js 20\+ with npm/)).toBeInTheDocument();
     expect(
@@ -2480,9 +2485,9 @@ describe('MCP servers', () => {
     const name = screen.getByLabelText('Name');
     expect(name).toHaveFocus();
     await userEvent.type(name, 'Draft server');
-    await clickButton(/^Integrations/);
+    await clickButton(/^MCP integrations/);
     expect(name).not.toBeVisible();
-    await clickButton(/^Integrations/);
+    await clickButton(/^MCP integrations/);
     expect(name).toHaveValue('Draft server');
     await clickButton(/^Cancel$/);
     expect(add).toHaveFocus();

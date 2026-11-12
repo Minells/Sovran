@@ -37,7 +37,7 @@ const result = (stdout = ''): FileProcessResult => ({
 
 describe('optional integration catalog contracts', () => {
   it('contains the reviewed integrations and exact package candidates', () => {
-    expect(INTEGRATIONS.map((i) => i.id)).toEqual(['playwright', 'devtools', 'github', 'context7', 'gitlab']);
+    expect(INTEGRATIONS.map((i) => i.id)).toEqual(['gitlab', 'github', 'playwright', 'context7', 'devtools']);
     expect(integration('playwright').version).toBe('0.0.84');
     expect(integration('devtools').version).toBe('1.12.0');
     expect(INTEGRATIONS.some((item) => /latest/.test(item.version))).toBe(false);

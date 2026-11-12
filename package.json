@@ -585,7 +585,7 @@
       },
       {
         "id": "sovran-mcp",
-        "title": "Tools: Integrations",
+        "title": "Tools: MCP integrations",
         "order": 4,
         "properties": {
           "sovran.mcp.servers": {

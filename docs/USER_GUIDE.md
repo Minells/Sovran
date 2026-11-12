@@ -405,7 +405,7 @@ moment, the file wins and Sovran says so.
 ## MCP servers
 
 [MCP](https://modelcontextprotocol.io) servers give the agent tools from other programs and services. Open
-**Sovran Settings → Tools → Integrations**. Choose **Browse Catalog** for a preset or **Custom MCP Server**
+**Sovran Settings → Tools → MCP integrations**. Choose **Browse Catalog** for a preset or **Custom MCP Server**
 to enter a command or URL. The custom server form can also import a JSON snippet in the Claude Desktop, Cursor,
 Cline or VS Code format and move its token to Secret Storage. Save the server, then choose **Connect**.
 Sovran shows the command before launching a custom local server. Environment, working folder, plain HTTP headers,
@@ -522,7 +522,7 @@ In **Advanced native overrides**, **Disabled native tools** removes the named to
 their execution, including actions already awaiting approval. **Always ask for native tools** requires confirmation
 even for reads and in Auto mode. Use names such as `read_file`, `write_file` or `execute_terminal`.
 These are user settings (`sovran.tools.disabled` and `sovran.tools.forceAsk`); repository settings cannot change them.
-MCP tools have their own **Off / Ask / Allow** controls under **Integrations**.
+MCP tools have their own **Off / Ask / Allow** controls under **MCP integrations**.
 
 Tool availability, workspace trust and permissions are checked again after approval. If a definition or permission
 changes while the model responds or an approval is open, Sovran can refuse that pending call and ask the model to
