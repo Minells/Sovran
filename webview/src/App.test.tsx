@@ -2387,9 +2387,10 @@ describe('MCP servers', () => {
     await open([]);
     await clickButton(/^Browse Catalog$/);
     const catalog = screen.getByRole('list', { name: 'Integration catalog' });
-    expect(within(catalog).getAllByRole('listitem')).toHaveLength(4);
+    expect(within(catalog).getAllByRole('listitem')).toHaveLength(5);
     expect(within(catalog).getByRole('button', { name: 'Configure Context7 MCP' })).toBeInTheDocument();
-    expect(within(catalog).getAllByText('Remote · Not configured')).toHaveLength(2);
+    expect(within(catalog).getByRole('button', { name: 'Configure GitLab MCP' })).toBeInTheDocument();
+    expect(within(catalog).getAllByText('Remote · Not configured')).toHaveLength(3);
     expect(within(catalog).getByText(/Node\.js 20\+ with npm/)).toBeInTheDocument();
     expect(
       sent.some((message) =>

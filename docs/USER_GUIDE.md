@@ -84,9 +84,8 @@ mirrored raw to a terminal. Git runs on the extension host in Remote environment
 
 **Controlled Git changes.** In Act mode, `git_stage` and `git_unstage` accept an explicit `repository` and a `paths`
 array of individual files. `git_commit` accepts `repository` and a non-empty `message`, including multiple lines.
-It commits staged changes without automatically staging files. The native surface does not offer stage-all, amend,
-force, checkout, history rewrite or remote Git operations. Paths use forward slashes; edge whitespace and backslash
-filenames are refused rather than silently normalized.
+It commits only staged changes. Paths use forward slashes; edge whitespace and backslash filenames are refused rather
+than silently normalized.
 
 Every operation shows a repository/branch/file preview and asks for one-time approval, even in Auto or with a chat
 edit grant. For commits, the full message appears with the change preview in the transcript. Use **Review files and
@@ -102,6 +101,22 @@ signing-agent/key-store location variables without disabling configured signing.
 can change files/index or contact services, so inspect the warnings and verify the resulting status/log. Previews use
 read-only settings with filters disabled and can be shortened. Git changes are not covered by checkpoint undo. After
 failure, timeout or cancellation, inspect status/log before retrying: a commit may already exist. No rollback is implied.
+
+**Synchronize a branch.** In trusted Act mode, these operations each show the affected refs and ask for one-time approval.
+
+- `git_fetch` takes `repository` and `remote`. It updates that remote’s branch-tracking refs.
+- `git_push` takes `repository`, `remote` and the short destination `branch`. Set `set_upstream` to `true` to track
+  that branch. Pushes are limited to a single branch and fast-forward updates.
+- `git_pull` fetches the checked-out branch’s configured upstream, then advances the branch only if a fast-forward is
+  possible. Save your open editors and start with a clean worktree and index.
+- `git_rebase` takes `repository` and a local `upstream` ref or commit ID, for example `origin/main` after fetching.
+  Start with a clean worktree and index. If Git stops for conflicts, resolve them and use Git’s `rebase --continue`
+  or `rebase --abort` from the terminal or Source Control.
+
+Remote Git operations accept a configured HTTPS or SSH remote or an absolute local destination in the workspace.
+Authentication uses Git’s SSH agent or HTTPS credential helper on the extension host. The PAT saved for GitHub or
+GitLab MCP is used by the corresponding MCP connection. After push, ask the connected MCP to create a pull request
+or merge request using the published branch and the intended base branch.
 
 The old basic Git MCP shortcut is removed; saved Git MCP servers, custom/import routes and their policies remain.
 Existing MCP servers and the terminal retain their own policies. Native Git settings use the same disabled/always-review
@@ -450,8 +465,14 @@ after MCP initialization and tool discovery complete.
 - **Chrome DevTools MCP** uses separate system Chrome for console, network and performance inspection. The managed
   profile disables usage statistics, CrUX, update checks, JavaScript evaluation and file navigation.
 - **GitHub MCP** uses the hosted service and a PAT stored in Secret Storage. The default exposes a small read-only
-  set for issues and PRs; collaboration adds issue writes/comments and PR creation on Ask. Restrict token permissions
-  and repository access.
+  set for issues and PRs. Collaboration adds issue writes/comments and PR creation on Ask. **Repositories, reviews
+  and Actions** adds PR updates, review, merge, repository discovery, Actions status and release lookup. Each write
+  in this profile requires approval. Restrict token permissions and repository access.
+- **GitLab MCP** uses the official server on GitLab.com or a Self-Managed/Dedicated instance with MCP enabled. Choose
+  **Configure**, enter the instance’s base HTTPS URL, then use **Set token** and **Connect**. In GitLab, create a
+  fine-grained PAT with **User → MCP tool → Execute**. Sovran derives `/api/v4/mcp`, keeps a distinct token for each
+  connection and endpoint, and requires approval for each collaboration write. The extension host must be able to
+  resolve the instance and trust its HTTPS certificate. [GitLab MCP configuration](https://docs.gitlab.com/user/model_context_protocol/mcp_server/)
 - **Context7 MCP** looks up documentation and examples in the hosted Context7 index. You can try it without a key.
   If the service requires authentication or you hit the anonymous limit, choose **Set API key (optional)**. The free
   keyed plan covers public libraries and has a monthly quota. Keep credentials and private code out of lookup queries.

@@ -8,10 +8,12 @@ import {
   integrationArguments,
   integrationCallProblem,
   integrationHeaders,
+  integrationEndpoint,
   integrationToolAllowed,
+  normalizeGitLabInstance,
   supportedNode,
 } from '../../src/core/mcp/catalog';
-import { fromEntry, parseMcpServers, toEntry, mergeMcpEntries } from '../../src/core/mcp/config';
+import { fromEntry, parseMcpServers, toEntry, mergeMcpEntries, toolPolicy } from '../../src/core/mcp/config';
 import { webviewMessageSchema } from '../../src/shared/protocol';
 import { ManagedMcpPackages } from '../../src/extension/adapters/ManagedMcpPackages';
 import type { FileProcessResult } from '../../src/core/ports';
@@ -35,7 +37,7 @@ const result = (stdout = ''): FileProcessResult => ({
 
 describe('optional integration catalog contracts', () => {
   it('contains the reviewed integrations and exact package candidates', () => {
-    expect(INTEGRATIONS.map((i) => i.id)).toEqual(['playwright', 'devtools', 'github', 'context7']);
+    expect(INTEGRATIONS.map((i) => i.id)).toEqual(['playwright', 'devtools', 'github', 'context7', 'gitlab']);
     expect(integration('playwright').version).toBe('0.0.84');
     expect(integration('devtools').version).toBe('1.12.0');
     expect(INTEGRATIONS.some((item) => /latest/.test(item.version))).toBe(false);
@@ -76,6 +78,50 @@ describe('optional integration catalog contracts', () => {
       enabled: false,
       managed: managed.managed,
     });
+  });
+
+  it('validates a GitLab instance URL and preserves its port and prefix', () => {
+    const instanceUrl = normalizeGitLabInstance('https://GITLAB.example.test:8443/team/gitlab/');
+    const managed = { id: 'gitlab', profile: 'collaboration', version: 'hosted-v1', instanceUrl } as const;
+    expect(integrationEndpoint(managed)).toBe('https://gitlab.example.test:8443/team/gitlab/api/v4/mcp');
+    for (const invalid of [
+      'http://gitlab.example.test',
+      'https://user:password@gitlab.example.test',
+      'https://gitlab.example.test/?token=abc',
+      'https://gitlab.example.test/#',
+      'https://gitlab.example.test/api/v4/mcp',
+      'https://gitlab.example.test/workspace/../gitlab',
+      'https://gitlab.example.test/${env:HOST}',
+    ])
+      expect(() => normalizeGitLabInstance(invalid)).toThrow(/HTTPS GitLab instance/);
+    expect(integrationToolAllowed(managed, 'save_merge_request')).toBe(true);
+    expect(integrationToolAllowed({ ...managed, profile: 'readonly' }, 'save_merge_request')).toBe(false);
+    expect(integrationToolAllowed(managed, 'execute_graphql')).toBe(false);
+    expect(
+      toolPolicy(
+        { managed, allowedTools: ['accept_merge_request'], disabledTools: [] },
+        'accept_merge_request',
+      ),
+    ).toBe('ask');
+    expect(
+      toolPolicy(
+        { managed, allowedTools: [], disabledTools: ['accept_merge_request'] },
+        'accept_merge_request',
+      ),
+    ).toBe('off');
+  });
+
+  it('keeps GitHub collaboration headers compatible and constrains the new developer profile', () => {
+    const managed = { id: 'github', profile: 'developer', version: 'hosted-v1' } as const;
+    expect(integrationHeaders('collaboration')['X-MCP-Tools']).toBe(
+      'get_me,issue_read,pull_request_read,search_issues,search_pull_requests,issue_write,add_issue_comment,create_pull_request',
+    );
+    expect(integrationToolAllowed(managed, 'actions_get')).toBe(true);
+    expect(integrationToolAllowed(managed, 'push_files')).toBe(false);
+    expect(integrationCallProblem(managed, 'merge_pull_request', {})).toContain('expectedHeadSha');
+    expect(
+      integrationCallProblem(managed, 'merge_pull_request', { expectedHeadSha: 'f'.repeat(40) }),
+    ).toBeUndefined();
   });
 });
 
@@ -236,6 +282,30 @@ describe('managed package installation lifecycle', () => {
     );
     await expect(f.manager.launch({ ...config, auth: { type: 'none' } })).rejects.toThrow(/authentication/);
     expect(f.manager.states()).toContainEqual({ id: 'context7', status: 'remote' });
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it('validates a managed GitLab launch before it can request a token or contact a server', async () => {
+    const f = await fixture();
+    const managed = {
+      id: 'gitlab',
+      profile: 'readonly',
+      version: 'hosted-v1',
+      instanceUrl: 'https://gitlab.example.test:8443/team',
+    } as const;
+    const config = fromEntry({
+      id: 'gitlab',
+      url: integrationEndpoint(managed),
+      auth: { type: 'bearer' },
+      headers: integration('gitlab').remote!.headers!(managed.profile),
+      managed,
+    });
+    expect(await f.manager.launch(config)).toBe(config);
+    await expect(
+      f.manager.launch({ ...config, url: 'https://elsewhere.example.test/api/v4/mcp' }),
+    ).rejects.toThrow(/endpoint/);
+    await expect(f.manager.launch({ ...config, headers: { Authorization: 'other' } })).rejects.toThrow(
+      /filters/,
+    );
     expect(f.run).not.toHaveBeenCalled();
   });
   it('rejects a managed local preset redirected to a URL or custom environment before spawning', async () => {

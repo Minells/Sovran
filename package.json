@@ -705,7 +705,9 @@
                       "enum": [
                         "playwright",
                         "devtools",
-                        "github"
+                        "github",
+                        "context7",
+                        "gitlab"
                       ]
                     },
                     "profile": {
@@ -714,13 +716,18 @@
                         "isolated",
                         "extension",
                         "readonly",
-                        "collaboration"
+                        "collaboration",
+                        "developer"
                       ]
                     },
                     "version": {
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 40
+                    },
+                    "instanceUrl": {
+                      "type": "string",
+                      "description": "Base HTTPS URL for the managed GitLab instance, including any relative root."
                     },
                     "browserProfile": {
                       "type": "string",

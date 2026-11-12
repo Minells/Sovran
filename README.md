@@ -42,12 +42,13 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
   `/review`, `/doc`, `/compact`, and `/new`. Add custom Markdown prompts under `.sovran/commands/`.
 - **Attachments:** extract text locally from PDF, modern Office, and OpenDocument files; list ZIP contents. Paste or
   attach images for vision-capable models.
-- **Native Git:** inspect status, diffs, history and branches in trusted Plan/Act workspaces; stage/unstage selected files and commit with mandatory review in Act.
+- **Native Git:** inspect status, diffs, history and branches in trusted Plan/Act workspaces. In Act, review and
+  approve staging, commits, fetch, push, fast-forward pull and rebase.
 - **Workspace diagnostics:** read cached editor Problems for active or unopened files, filtered by file/folder, severity and result count. Protected and external paths are omitted; the tool does not run checks or start language servers.
 - **Semantic navigation:** list file symbols, locate definitions and find references using the active VS Code language providers in trusted workspaces.
 - **Public Web reads:** `web_fetch` reads one approved public URL as structured text with source links. Available in trusted Plan/Act, with approval for each URL even in Auto. No account, search service, browser or crawler installation.
 - **Tools:** built-in permissions and per-chat group selection with definition cost estimates. Optional Playwright,
-  Chrome DevTools, GitHub and Context7 integrations, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
+  Chrome DevTools, GitHub, GitLab and Context7 integrations, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
 - **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
   history that can persist across restarts.
 

@@ -56,9 +56,21 @@ export function approvalCopy(approval: ApprovalView) {
   }
   if (d.kind === 'command') return { title: 'Run this command?', verb: 'Run', icon: 'terminal' };
   if (d.kind === 'git') {
-    const verb = { stage: 'Stage', unstage: 'Unstage', commit: 'Commit' }[d.operation];
+    const verb = {
+      stage: 'Stage',
+      unstage: 'Unstage',
+      commit: 'Commit',
+      fetch: 'Fetch',
+      push: 'Push',
+      pull: 'Pull',
+      rebase: 'Rebase',
+    }[d.operation];
     return {
-      title: d.operation === 'commit' ? 'Commit these staged changes?' : `${verb} these files?`,
+      title: d.target
+        ? `${verb} this Git repository?`
+        : d.operation === 'commit'
+          ? 'Commit these staged changes?'
+          : `${verb} these files?`,
       verb,
       icon: 'git-commit',
     };
@@ -239,8 +251,17 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
       ) : d.kind === 'git' ? (
         <>
           <button type="button" className="sv-link-btn" onClick={showDetail}>
-            Review {d.files.length} file(s){d.message !== undefined ? ' and commit message' : ''}
+            {d.target
+              ? 'Review refs'
+              : `Review ${d.files.length} file(s)${d.message !== undefined ? ' and commit message' : ''}`}
           </button>
+          {d.target ? (
+            <pre className="sv-approval__command">
+              {revealHidden(d.target.destination)}
+              {'\n'}
+              {d.target.refs.map(revealHidden).join('\n')}
+            </pre>
+          ) : null}
           <ul className="sv-approval__warnings">
             {d.warnings.map((warning) => (
               <li key={warning}>{warning}</li>
@@ -300,7 +321,7 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
               Always allow…
             </button>
           ) : null}
-          {d.kind === 'mcp' ? (
+          {d.kind === 'mcp' && !d.requiresApproval ? (
             <button
               type="button"
               className="sv-link-btn"
@@ -403,13 +424,21 @@ export function ApprovalDetail({ approval }: { approval: ApprovalView }) {
           <div className="sv-approval__meta">
             <code>{revealHidden(d.repository)}</code> · {revealHidden(d.branch)}
           </div>
-          <ul className="sv-list" aria-label="Files included in the Git action">
-            {d.files.map((file) => (
-              <li key={file}>
-                <code>{revealHidden(JSON.stringify(file))}</code>
-              </li>
-            ))}
-          </ul>
+          {d.target ? (
+            <pre className="sv-approval__command">
+              {revealHidden(d.target.destination)}
+              {'\n'}
+              {d.target.refs.map(revealHidden).join('\n')}
+            </pre>
+          ) : (
+            <ul className="sv-list" aria-label="Files included in the Git action">
+              {d.files.map((file) => (
+                <li key={file}>
+                  <code>{revealHidden(JSON.stringify(file))}</code>
+                </li>
+              ))}
+            </ul>
+          )}
           {d.message !== undefined ? (
             <pre className="sv-approval__command" aria-label="Commit message">
               {revealHidden(d.message)}

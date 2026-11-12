@@ -12,7 +12,7 @@ const MAX_INDEX_BYTES = 16 * 1024 * 1024;
 const oidPattern = /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/;
 const hash = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
 
-type Operation = GitApprovalDetail['operation'];
+type Operation = Extract<GitApprovalDetail['operation'], 'stage' | 'unstage' | 'commit'>;
 interface Snapshot {
   indexPath: string;
   indexHash: string | null;
@@ -37,7 +37,7 @@ function fields(output: string): string[] {
   return output.slice(0, -1).split('\0');
 }
 
-async function snapshot(git: GitReader, ctx: ToolContext): Promise<Snapshot> {
+export async function gitWriteSnapshot(git: GitReader, ctx: ToolContext): Promise<Snapshot> {
   if (!ctx.workspace.readBytes) throw new ToolError('This host cannot safely read the raw Git index.');
   const location = (
     await git.call(['rev-parse', '--path-format=absolute', '--git-path', 'index'])
@@ -80,6 +80,20 @@ async function snapshot(git: GitReader, ctx: ToolContext): Promise<Snapshot> {
   // Raw configuration is hashed in memory only. It never enters approval details, logs or model results.
   const configHash = hash((await git.call(['config', '--null', '--list'])).stdout);
   return { indexPath: location, indexHash, commonDirectory, head, branch, configHash };
+}
+
+/** Sovran mutations in linked worktrees share refs and therefore share a lock. */
+export async function withGitWriteLock<T>(commonDirectory: string, action: () => Promise<T>): Promise<T> {
+  if (activeRepositories.has(commonDirectory))
+    throw new ToolError(
+      'Another Sovran Git write is running for this repository. Inspect status and request this action again.',
+    );
+  activeRepositories.add(commonDirectory);
+  try {
+    return await action();
+  } finally {
+    activeRepositories.delete(commonDirectory);
+  }
 }
 
 async function stagedFiles(git: GitReader): Promise<string[]> {
@@ -146,7 +160,7 @@ export async function prepareGitWrite(
 ): Promise<PreparedAction> {
   const initial = await prepareGit(request, ctx);
   let git = await GitReader.open(request, ctx, initial);
-  const initialSnapshot = await snapshot(git, ctx);
+  const initialSnapshot = await gitWriteSnapshot(git, ctx);
   let files = operation === 'commit' ? await stagedFiles(git) : await git.paths(request.paths);
   files = [...new Set(files)];
   if (!files.length || files.length > 100)
@@ -161,7 +175,7 @@ export async function prepareGitWrite(
   // Include every exact staged path in the approval's permission context, protected files included.
   const prepared = await prepareGit({ repository: request.repository, paths: files }, ctx);
   git = await GitReader.open(request, ctx, prepared);
-  const before = await snapshot(git, ctx);
+  const before = await gitWriteSnapshot(git, ctx);
   if (!same(initialSnapshot, before))
     throw new ToolError('Git state changed while selecting the preview. Request the action again.');
   const saved =
@@ -199,7 +213,7 @@ export async function prepareGitWrite(
           .map((file) => saved.previews[file] ?? '')
           .join('\n')
       : '';
-  if (!same(before, await snapshot(git, ctx)))
+  if (!same(before, await gitWriteSnapshot(git, ctx)))
     throw new ToolError('Git state changed while preparing the preview. Request the action again.');
   if (operation === 'stage' && !same(saved.snapshots, (await savedFiles(git, files, ctx)).snapshots))
     throw new ToolError('Saved files changed while preparing the preview. Request the action again.');
@@ -252,14 +266,8 @@ export async function executeGitWrite(
   )
     throw new ToolError('Request a fresh Git approval.');
   const git = await GitReader.open(request, ctx, prepared);
-  const key = state.realRepository;
-  if (activeRepositories.has(key))
-    throw new ToolError(
-      'Another Sovran Git write is running for this repository. Inspect status and request this action again.',
-    );
-  activeRepositories.add(key);
-  try {
-    if (!same(state.snapshot, await snapshot(git, ctx)))
+  return withGitWriteLock(state.snapshot.commonDirectory, async () => {
+    if (!same(state.snapshot, await gitWriteSnapshot(git, ctx)))
       throw new ToolError(
         'The Git index, branch, HEAD or configuration changed while awaiting approval. Review a fresh preview.',
       );
@@ -363,7 +371,5 @@ export async function executeGitWrite(
       }),
       summary: `${state.operation} · ${state.files.length} file(s)`,
     };
-  } finally {
-    activeRepositories.delete(key);
-  }
+  });
 }

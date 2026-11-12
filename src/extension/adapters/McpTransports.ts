@@ -20,7 +20,7 @@ export interface McpTransportDeps {
   /** Read for every connection: the open folder and the environment may change. */
   variables: () => McpVariables;
   /** The server's token from Secret Storage. */
-  token: (serverId: string) => Promise<string | undefined>;
+  token: (server: McpServerConfig) => Promise<string | undefined>;
 }
 
 export class NodeMcpTransports implements McpTransportFactory {
@@ -31,7 +31,7 @@ export class NodeMcpTransports implements McpTransportFactory {
       if (!this.deps.managedLaunch) throw new McpConfigError('Managed integrations are unavailable in this host.');
       server = await this.deps.managedLaunch(server);
     }
-    const token = server.auth.type === 'none' ? undefined : await this.deps.token(server.id);
+    const token = server.auth.type === 'none' ? undefined : await this.deps.token(server);
     const launch = resolveLaunch(server, this.deps.variables(), token);
     if (launch.kind === 'http') {
       // The SDK follows a redirect only within the same origin, so headers and tokens never reach another host

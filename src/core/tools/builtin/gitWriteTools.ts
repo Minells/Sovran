@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { executeGitWrite, prepareGitWrite } from '../../git/write';
+import { executeGitWorkflow, prepareGitWorkflow } from '../../git/workflows';
+import { validRevision } from '../../git/read';
 import { defineTool } from '../types';
 
 const repository = z
@@ -60,4 +62,70 @@ export const gitCommitTool = defineTool({
   label: (a) => `Commit · ${a.repository}`,
   prepare: (a, ctx) => prepareGitWrite('commit', a, ctx),
   execute: (a, ctx, prepared) => executeGitWrite(a, ctx, prepared),
+});
+
+const remote = z.string().min(1).max(100).describe('Name of a configured Git remote, e.g. origin.');
+
+export const gitFetchTool = defineTool({
+  ...metadata,
+  name: 'git_fetch',
+  description:
+    'Fetch configured branch refs into remote-tracking refs after approval. Leaves the checked-out branch and files alone. Uses Git credentials on the extension host.',
+  schema: z.object({ repository, remote }).strict(),
+  label: (a) => `Fetch · ${a.remote}`,
+  prepare: (a, ctx) => prepareGitWorkflow(a, { operation: 'fetch', remote: a.remote }, ctx),
+  execute: (a, ctx, prepared) => executeGitWorkflow(a, ctx, prepared),
+});
+
+export const gitPushTool = defineTool({
+  ...metadata,
+  name: 'git_push',
+  description:
+    'Push the checked-out branch to one named branch on a configured remote after approval. Fast-forward updates only. Can set its upstream. Uses Git credentials on the extension host.',
+  schema: z
+    .object({
+      repository,
+      remote,
+      branch: z.string().min(1).max(250).describe('Short destination branch name, e.g. feature/my-change.'),
+      set_upstream: z.boolean().default(false),
+    })
+    .strict(),
+  label: (a) => `Push · ${a.remote}/${a.branch}`,
+  prepare: (a, ctx) =>
+    prepareGitWorkflow(
+      a,
+      { operation: 'push', remote: a.remote, branch: a.branch, setUpstream: a.set_upstream },
+      ctx,
+    ),
+  execute: (a, ctx, prepared) => executeGitWorkflow(a, ctx, prepared),
+});
+
+export const gitPullTool = defineTool({
+  ...metadata,
+  name: 'git_pull',
+  description:
+    'Fetch the checked-out branch’s configured upstream and fast-forward to it after approval. Requires a clean working tree. Refuses to merge or rebase divergent history.',
+  schema: z.object({ repository }).strict(),
+  label: (a) => `Pull · ${a.repository}`,
+  prepare: (a, ctx) => prepareGitWorkflow(a, { operation: 'pull' }, ctx),
+  execute: (a, ctx, prepared) => executeGitWorkflow(a, ctx, prepared),
+});
+
+export const gitRebaseTool = defineTool({
+  ...metadata,
+  name: 'git_rebase',
+  description:
+    'Rebase the checked-out branch onto a commit already in the clone, after approval. Requires a clean working tree. This can rewrite commits and may stop with conflicts.',
+  schema: z
+    .object({
+      repository,
+      upstream: z
+        .string()
+        .refine(validRevision)
+        .describe('Local commit ID or ref, e.g. origin/main after fetching.'),
+    })
+    .strict(),
+  label: (a) => `Rebase · ${a.repository}`,
+  prepare: (a, ctx) => prepareGitWorkflow(a, { operation: 'rebase', upstream: a.upstream }, ctx),
+  execute: (a, ctx, prepared) => executeGitWorkflow(a, ctx, prepared),
 });

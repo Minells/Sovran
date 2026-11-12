@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import {
   integration,
   integrationArguments,
+  integrationEndpoint,
   supportedNode,
   INTEGRATIONS,
   type IntegrationId,
@@ -227,7 +228,7 @@ export class ManagedMcpPackages {
       const headers = item.remote.headers?.(managed.profile) ?? {};
       if (
         server.command ||
-        server.url !== item.remote.url ||
+        server.url !== integrationEndpoint(managed) ||
         server.auth.type !== 'bearer' ||
         Object.keys(server.headers ?? {}).length !== Object.keys(headers).length ||
         Object.entries(headers).some(([key, value]) => server.headers?.[key] !== value)

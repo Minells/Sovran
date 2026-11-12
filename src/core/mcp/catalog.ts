@@ -1,12 +1,20 @@
 /** Reviewed optional integrations. This metadata never starts or installs a server. */
-export const INTEGRATION_IDS = ['playwright', 'devtools', 'github', 'context7'] as const;
+export const INTEGRATION_IDS = ['playwright', 'devtools', 'github', 'context7', 'gitlab'] as const;
 export type IntegrationId = (typeof INTEGRATION_IDS)[number];
-export type IntegrationProfile = 'isolated' | 'extension' | 'readonly' | 'collaboration';
+export const INTEGRATION_PROFILES = [
+  'isolated',
+  'extension',
+  'readonly',
+  'collaboration',
+  'developer',
+] as const;
+export type IntegrationProfile = (typeof INTEGRATION_PROFILES)[number];
 export interface ManagedIntegration {
   id: IntegrationId;
   profile: IntegrationProfile;
   version: string;
   browserProfile?: string;
+  instanceUrl?: string;
 }
 export interface IntegrationDefinition {
   id: IntegrationId;
@@ -20,6 +28,7 @@ export interface IntegrationDefinition {
   requirements: string;
   remote?: {
     url: string;
+    configurableInstance?: boolean;
     token: 'required' | 'optional';
     headers?: (profile: IntegrationProfile) => Record<string, string>;
   };
@@ -70,7 +79,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
       headers: integrationHeaders,
     },
     defaultProfile: 'readonly',
-    profiles: ['readonly', 'collaboration'],
+    profiles: ['readonly', 'collaboration', 'developer'],
   },
   {
     id: 'context7',
@@ -84,6 +93,24 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     security: 'Documentation queries go to Context7. Keep credentials and private code out of queries.',
     defaultProfile: 'readonly',
     profiles: ['readonly'],
+  },
+  {
+    id: 'gitlab',
+    name: 'GitLab MCP',
+    description: 'Work with projects, merge requests, issues and pipelines on your GitLab instance.',
+    icon: 'repo',
+    version: 'hosted-v1',
+    documentation: 'https://docs.gitlab.com/user/model_context_protocol/mcp_server/',
+    requirements:
+      'MCP enabled on the instance and a fine-grained personal access token with MCP tool → Execute.',
+    remote: {
+      url: 'https://gitlab.com/api/v4/mcp',
+      configurableInstance: true,
+      token: 'required',
+      headers: (profile) => ({ 'X-Gitlab-Enabled-Mcp-Server-Tools': gitlabTools(profile).join(',') }),
+    },
+    defaultProfile: 'readonly',
+    profiles: ['readonly', 'collaboration'],
   },
 ];
 export function integration(id: IntegrationId): IntegrationDefinition {
@@ -104,6 +131,12 @@ export function integrationArguments(managed: ManagedIntegration): string[] {
     throw new Error(
       'This integration version or profile is unavailable. Add the current catalog entry instead.',
     );
+  if (managed.id === 'gitlab') {
+    if (!managed.instanceUrl || normalizeGitLabInstance(managed.instanceUrl) !== managed.instanceUrl)
+      throw new Error('Enter a valid HTTPS GitLab instance URL.');
+  } else if (managed.instanceUrl !== undefined) {
+    throw new Error('This integration has a fixed endpoint.');
+  }
   if (managed.id === 'playwright') {
     if (managed.profile === 'extension' && !/^[a-zA-Z0-9 _-]{1,80}$/.test(managed.browserProfile ?? ''))
       throw new Error('Choose an explicit local Chrome profile before using the browser extension.');
@@ -143,11 +176,33 @@ export function integrationArguments(managed: ManagedIntegration): string[] {
     ];
   return [];
 }
+
+/** Base URL only, including an optional relative root. Reject characters that could change the request target. */
+export function normalizeGitLabInstance(input: string): string {
+  const value = input.trim();
+  const problem = 'Enter an HTTPS GitLab instance URL, for example https://gitlab.example.com/gitlab.';
+  if (
+    value.length > 1900 ||
+    !/^https:\/\/[a-z0-9.:[\]-]+(?:\/[a-z0-9._~-]+)*\/?$/i.test(value) ||
+    value.split('/').some((segment) => segment === '.' || segment === '..') ||
+    /\/api\/v4(?:\/|$)/i.test(value)
+  )
+    throw new Error(problem);
+  try {
+    return new URL(value).href.replace(/\/$/, '');
+  } catch {
+    throw new Error(problem);
+  }
+}
+
+export function integrationEndpoint(managed: ManagedIntegration): string | undefined {
+  if (managed.id === 'gitlab') return `${normalizeGitLabInstance(managed.instanceUrl ?? '')}/api/v4/mcp`;
+  return integration(managed.id).remote?.url;
+}
+
 export function integrationHeaders(profile: IntegrationProfile = 'readonly'): Record<string, string> {
   return {
-    'X-MCP-Tools': [...GITHUB_READ_TOOLS, ...(profile === 'collaboration' ? GITHUB_WRITE_TOOLS : [])].join(
-      ',',
-    ),
+    'X-MCP-Tools': githubTools(profile).join(','),
     ...(profile === 'readonly' ? { 'X-MCP-Readonly': 'true' } : {}),
   };
 }
@@ -159,6 +214,70 @@ const GITHUB_READ_TOOLS = [
   'search_pull_requests',
 ];
 const GITHUB_WRITE_TOOLS = ['issue_write', 'add_issue_comment', 'create_pull_request'];
+const GITHUB_DEVELOPER_READ = [
+  'list_pull_requests',
+  'search_repositories',
+  'list_branches',
+  'list_commits',
+  'list_issues',
+  'actions_list',
+  'actions_get',
+  'list_releases',
+  'get_latest_release',
+];
+const GITHUB_DEVELOPER_WRITE = [
+  'update_pull_request',
+  'pull_request_review_write',
+  'add_comment_to_pending_review',
+  'merge_pull_request',
+];
+const githubTools = (profile: IntegrationProfile) => [
+  ...GITHUB_READ_TOOLS,
+  ...(profile === 'collaboration' || profile === 'developer' ? GITHUB_WRITE_TOOLS : []),
+  ...(profile === 'developer' ? [...GITHUB_DEVELOPER_READ, ...GITHUB_DEVELOPER_WRITE] : []),
+];
+const GITLAB_READ_TOOLS = [
+  'get_mcp_server_version',
+  'get_project',
+  'list_projects',
+  'list_groups',
+  'get_merge_request',
+  'list_merge_requests',
+  'get_work_item',
+  'list_work_items',
+  'get_issue',
+  'list_branches',
+  'list_commits',
+  'get_pipeline',
+  'list_pipelines',
+  'get_job',
+];
+const GITLAB_WRITE_TOOLS = [
+  'save_merge_request',
+  'create_merge_request',
+  'update_merge_request',
+  'save_merge_request_review',
+  'accept_merge_request',
+  'save_work_item',
+  'create_issue',
+  'save_note',
+];
+const gitlabTools = (profile: IntegrationProfile) => [
+  ...GITLAB_READ_TOOLS,
+  ...(profile === 'collaboration' ? GITLAB_WRITE_TOOLS : []),
+];
+
+export function integrationToolRequiresApproval(
+  managed: ManagedIntegration | undefined,
+  tool: string,
+): boolean {
+  return (
+    (managed?.id === 'gitlab' && GITLAB_WRITE_TOOLS.includes(tool)) ||
+    (managed?.id === 'github' &&
+      managed.profile === 'developer' &&
+      [...GITHUB_WRITE_TOOLS, ...GITHUB_DEVELOPER_WRITE].includes(tool))
+  );
+}
 const CONTEXT7_TOOLS: Readonly<Record<string, string>> = {
   'resolve-library-id': 'Find the Context7 ID for a library or framework. Send a public documentation query.',
   'query-docs':
@@ -205,15 +324,18 @@ export function integrationToolAllowed(managed: ManagedIntegration | undefined, 
   } catch {
     return false;
   }
-  const allowed =
-    managed.id === 'playwright'
-      ? PLAYWRIGHT_TOOLS
-      : managed.id === 'devtools'
-        ? DEVTOOLS_TOOLS
-        : managed.id === 'context7'
-          ? Object.keys(CONTEXT7_TOOLS)
-          : [...GITHUB_READ_TOOLS, ...(managed.profile === 'collaboration' ? GITHUB_WRITE_TOOLS : [])];
-  return allowed.includes(tool);
+  switch (managed.id) {
+    case 'playwright':
+      return PLAYWRIGHT_TOOLS.includes(tool);
+    case 'devtools':
+      return DEVTOOLS_TOOLS.includes(tool);
+    case 'context7':
+      return Object.hasOwn(CONTEXT7_TOOLS, tool);
+    case 'github':
+      return githubTools(managed.profile).includes(tool);
+    case 'gitlab':
+      return gitlabTools(managed.profile).includes(tool);
+  }
 }
 
 export function reviewedToolDescription(
@@ -228,6 +350,13 @@ export function integrationCallProblem(
   tool: string,
   args: Record<string, unknown>,
 ): string | undefined {
+  if (
+    managed?.id === 'github' &&
+    managed.profile === 'developer' &&
+    tool === 'merge_pull_request' &&
+    (typeof args.expectedHeadSha !== 'string' || !/^[0-9a-f]{40}$/i.test(args.expectedHeadSha))
+  )
+    return 'Read the pull request first and provide its full head commit SHA as expectedHeadSha.';
   if (!managed || integration(managed.id).remote) return;
   if (['filename', 'filePath'].some((key) => args[key] !== undefined))
     return 'Managed browser tools cannot save results to a caller-selected path. Request an inline result instead.';
@@ -246,7 +375,16 @@ export const PROFILE_LABELS: Record<IntegrationProfile, string> = {
   extension: 'Existing Chrome profile (advanced)',
   readonly: 'Read issues and pull requests',
   collaboration: 'Issues and pull requests with optional writes',
+  developer: 'Repositories, reviews and Actions',
 };
+
+export function integrationProfileLabel(id: IntegrationId, profile: IntegrationProfile): string {
+  if (id === 'gitlab')
+    return profile === 'collaboration'
+      ? 'Merge requests and issues with writes'
+      : 'Read projects, merge requests and pipelines';
+  return PROFILE_LABELS[profile];
+}
 export interface InstallationState {
   id: IntegrationId;
   status: 'missing' | 'installing' | 'ready' | 'remote' | 'error';

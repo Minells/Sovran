@@ -6,7 +6,13 @@
  * maps onto it field by field. Tokens never live here: `auth` only says where the token stored in Secret Storage goes.
  */
 import { z } from 'zod';
-import { integration, INTEGRATION_IDS, type ManagedIntegration } from './catalog';
+import {
+  integration,
+  INTEGRATION_IDS,
+  INTEGRATION_PROFILES,
+  integrationToolRequiresApproval,
+  type ManagedIntegration,
+} from './catalog';
 import {
   ENV_NAME_PATTERN,
   HEADER_NAME_PATTERN,
@@ -62,10 +68,11 @@ export const connectionKey = (s: McpServerConfig) =>
   JSON.stringify([s.command, s.args, s.env, s.cwd, s.url, s.headers, s.auth, s.managed]);
 
 export function toolPolicy(
-  server: Pick<McpServerConfig, 'allowedTools' | 'disabledTools'>,
+  server: Pick<McpServerConfig, 'allowedTools' | 'disabledTools' | 'managed'>,
   tool: string,
 ): McpToolPolicy {
   if (server.disabledTools.includes(tool)) return 'off';
+  if (integrationToolRequiresApproval(server.managed, tool)) return 'ask';
   return server.allowedTools.includes(tool) ? 'allow' : 'ask';
 }
 
@@ -105,12 +112,13 @@ export const mcpServerEntrySchema = z
     managed: z
       .object({
         id: z.enum(INTEGRATION_IDS),
-        profile: z.enum(['isolated', 'extension', 'readonly', 'collaboration']),
+        profile: z.enum(INTEGRATION_PROFILES),
         version: z.string().min(1).max(40),
         browserProfile: z
           .string()
           .regex(/^[a-zA-Z0-9 _-]{1,80}$/)
           .optional(),
+        instanceUrl: mcpHttpUrl.optional(),
       })
       .strict()
       .optional(),
