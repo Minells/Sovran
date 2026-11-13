@@ -2,14 +2,18 @@ import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { DiffPresenter } from './adapters/DiffPresenter';
 import { FsCheckpointRepository } from './adapters/FsCheckpointRepository';
-import { FsSessionRepository, MemorySessionRepository } from './adapters/FsSessionRepository';
+import {
+  FsSessionRepository,
+  MemorySessionRepository,
+  SwitchingSessionRepository,
+} from './adapters/FsSessionRepository';
 import { NodeProcessRunner, TerminalMirror } from './adapters/NodeProcessRunner';
 import { RipgrepSearch } from './adapters/RipgrepSearch';
 import { VscodeWorkspace } from './adapters/VscodeWorkspace';
 import { WorkerDocumentConverter } from './adapters/WorkerDocumentConverter';
 import { NativeWebFetcher } from './adapters/NativeWebFetcher';
 import { WorkerHtmlExtractor } from './adapters/WorkerHtmlExtractor';
-import { FsImageStore, MemoryImageStore } from './adapters/FsImageStore';
+import { FsImageStore, MemoryImageStore, SwitchingImageStore } from './adapters/FsImageStore';
 import { CommandLoader, FileIndex } from './workspaceServices';
 import { readSettings } from './config';
 import { ConfigFileHost } from './configFileHost';
@@ -34,11 +38,14 @@ export async function activate(context: vscode.ExtensionContext) {
   const diff = new DiffPresenter();
   const mirror = new TerminalMirror();
   const statusBar = new SovranStatusBar();
-  const settings = readSettings();
   const storage = (context.storageUri ?? context.globalStorageUri).fsPath;
-  const repo = settings.persistSessions
-    ? new FsSessionRepository(path.join(storage, 'sessions'))
-    : new MemorySessionRepository();
+  // Both are read for every save, so turning `sovran.sessions.persist` off stops writing chats at once.
+  const persistSessions = () => readSettings().persistSessions;
+  const repo = new SwitchingSessionRepository(
+    new FsSessionRepository(path.join(storage, 'sessions')),
+    new MemorySessionRepository(),
+    persistSessions,
+  );
 
   const ripgrep = RipgrepSearch.locate(vscode.env.appRoot);
   logger.info(ripgrep ? 'Using VS Code ripgrep for search.' : 'ripgrep not found; using built-in search.');
@@ -90,9 +97,7 @@ export async function activate(context: vscode.ExtensionContext) {
     // Bundled next to extension.js by scripts/build-host.mjs; parsers never load in the extension host itself.
     documents: new WorkerDocumentConverter(path.join(context.extensionPath, 'dist', 'documentWorker.js')),
     // Images follow the chats: on disk next to them, or only in memory when chats are not persisted.
-    images: settings.persistSessions
-      ? new FsImageStore(path.join(storage, 'images'))
-      : new MemoryImageStore(),
+    images: new SwitchingImageStore(new FsImageStore(path.join(storage, 'images')), new MemoryImageStore(), persistSessions),
     mcp,
     reveal,
     openPanel: async (sessionId, title) => ref.panels?.open(sessionId, title),

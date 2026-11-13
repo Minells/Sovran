@@ -416,7 +416,10 @@ export class SovranController implements vscode.Disposable {
         this.titleModel = this.parseModelRef(readTitleModel());
         this.updateStatusBar();
         this.updateEditorContext();
+        // `sovran.sessions.persist` decides where chats are kept, so the history may now be another list.
+        this.sessions = await this.deps.repo.list().catch(() => this.sessions);
         this.patch({
+          sessions: this.sessions,
           providers: this.providerViews(),
           selected: this.selected,
           planModel: this.planModel,

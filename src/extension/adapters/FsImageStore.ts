@@ -65,3 +65,21 @@ export class MemoryImageStore implements ImageStorePort {
     for (const key of [...this.images.keys()]) if (key.startsWith(`${sessionId}/`)) this.images.delete(key);
   }
 }
+
+/** The images follow the chats (see `SwitchingSessionRepository`): on disk while chats are persisted, else in memory. */
+export class SwitchingImageStore implements ImageStorePort {
+  constructor(
+    private readonly persistent: ImageStorePort,
+    private readonly memory: ImageStorePort,
+    private readonly persist: () => boolean,
+  ) {}
+  save(sessionId: string, id: string, mime: ImageMime, data: Uint8Array) {
+    return (this.persist() ? this.persistent : this.memory).save(sessionId, id, mime, data);
+  }
+  async load(sessionId: string, id: string, mime: ImageMime) {
+    return (await this.memory.load(sessionId, id, mime)) ?? (await this.persistent.load(sessionId, id, mime));
+  }
+  async deleteForSession(sessionId: string) {
+    await Promise.all([this.persistent.deleteForSession(sessionId), this.memory.deleteForSession(sessionId)]);
+  }
+}
