@@ -26,6 +26,15 @@ export class ProviderError extends Error {
   ) {
     super(message);
   }
+  /** How long the server asked to wait before another request (`Retry-After`), when it said so. */
+  retryAfterMs?: number;
+}
+
+/** Records a `Retry-After` header given in seconds; dates and anything else are ignored. */
+export function withRetryAfter(error: ProviderError, header: string | null): ProviderError {
+  const seconds = header && /^\d{1,6}$/.test(header.trim()) ? Number(header.trim()) : undefined;
+  if (seconds !== undefined) error.retryAfterMs = seconds * 1000;
+  return error;
 }
 
 /** How a request carried the API key, so an authentication error can say what the server actually received. */

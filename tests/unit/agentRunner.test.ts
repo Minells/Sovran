@@ -16,7 +16,7 @@ const settings: AgentSettings = {
   defaultMaxOutputTokens: 4096,
 };
 
-function setup(turns: ConstructorParameters<typeof ScriptedProvider>[0], opts: { files?: Record<string, string>; approvals?: ScriptedApprovals } = {}) {
+function setup(turns: ConstructorParameters<typeof ScriptedProvider>[0], opts: { files?: Record<string, string>; approvals?: ScriptedApprovals; waits?: number[] } = {}) {
   const provider = new ScriptedProvider(turns);
   const workspace = new MemoryWorkspace(opts.files ?? { 'src/a.ts': 'const a = 1;\n' });
   const approvals = opts.approvals ?? new ScriptedApprovals();
@@ -33,6 +33,7 @@ function setup(turns: ConstructorParameters<typeof ScriptedProvider>[0], opts: {
     logger: nullLogger,
     newId: () => `id${++n}`,
     now: () => 1_700_000_000_000,
+    sleep: async (ms) => void opts.waits?.push(ms),
   });
   const session: Session = { id: 's', title: 't', createdAt: 0, updatedAt: 0, mode: 'act', messages: [{ role: 'user', id: 'u1', content: 'go', createdAt: 0 }] };
   const events: AgentEvent[] = [];
@@ -158,6 +159,29 @@ describe('AgentRunner', () => {
     const a = t.session.messages.find((m) => m.role === 'assistant');
     expect(a && a.role === 'assistant' && a.reasoning).toBe('pondering');
     expect(a && a.content).toBe('Answer');
+  });
+
+  it('asks a busy server again before reporting the error, and honours Retry-After', async () => {
+    const busy = (status: number, retryAfterMs?: number) =>
+      Object.assign(new ProviderError(status === 429 ? 'rate_limit' : 'server', `HTTP ${status}: busy`, undefined, status), { retryAfterMs });
+    const waits: number[] = [];
+    const recovered = setup([busy(503), busy(429, 7000), [text('ok')]], { waits });
+    expect((await recovered.run()).reason).toBe('completed');
+    expect(waits).toEqual([1000, 7000]);
+    expect(recovered.session.messages.filter((m) => m.role === 'assistant')).toMatchObject([{ content: 'ok' }]);
+    expect(recovered.events.filter((e) => e.type === 'notice')).toHaveLength(2);
+
+    // Two retries, then the error is the user's to see.
+    const down = setup([busy(503), busy(503), busy(503), [text('never')]], { waits: [] });
+    expect(await down.run()).toMatchObject({ reason: 'error', error: { kind: 'server' } });
+    expect(down.provider.requests).toHaveLength(3);
+
+    // Not retried: other errors, and a server that asks for a long wait.
+    for (const error of [new ProviderError('auth', 'HTTP 401', undefined, 401), new ProviderError('server', 'HTTP 500', undefined, 500), busy(429, 120_000)]) {
+      const t = setup([error, [text('never')]], { waits: [] });
+      expect((await t.run()).reason).toBe('error');
+      expect(t.provider.requests).toHaveLength(1);
+    }
   });
 
   it('says when a reply was cut at the output limit', async () => {
