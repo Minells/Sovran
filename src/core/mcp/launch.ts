@@ -162,3 +162,31 @@ export function commandCandidates(command: string, o: CommandLookup): string[] {
     .filter(Boolean);
   return (windows ? [o.cwd, ...folders] : folders).flatMap((d) => variants(p.join(d, command)));
 }
+
+/** A command given as a name only (`npx`), which the system looks up, rather than as a path. */
+export function isBareCommand(command: string, platform: NodeJS.Platform): boolean {
+  const p = platform === 'win32' ? path.win32 : path.posix;
+  return !p.isAbsolute(command) && !command.includes('/') && !(platform === 'win32' && command.includes('\\'));
+}
+
+/**
+ * The candidates that are not inside an open workspace folder. On Windows a bare name is looked up in the working
+ * folder first, and a server's working folder is the workspace by default: a repository that ships `npx.cmd` would
+ * run in place of the real one every time the server starts. A file there runs only when the command names its path.
+ */
+export function outsideWorkspace(
+  candidates: readonly string[],
+  roots: readonly string[],
+  platform: NodeJS.Platform,
+): string[] {
+  const p = platform === 'win32' ? path.win32 : path.posix;
+  const inside = (root: string, file: string) => {
+    const rel = p.relative(root, file);
+    return rel === '' || (rel !== '..' && !rel.startsWith(`..${p.sep}`) && !p.isAbsolute(rel));
+  };
+  return candidates.filter((file) => !roots.some((root) => inside(root, file)));
+}
+
+/** What the user reads when a bare command exists only inside the workspace. */
+export const commandInWorkspace = (command: string) =>
+  `"${command}" was found only inside the workspace, where a repository could replace it. Install it on this computer, or give its full path if you mean the one in the workspace.`;

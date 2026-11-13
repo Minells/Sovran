@@ -6,6 +6,11 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- **A busy server is asked again.** HTTP 429, 502, 503 and 504 no longer end the run at once: Sovran retries after
+  1 s and 3 s, or after the server's `Retry-After` when it is at most 30 s, and says so in the chat. It retries only
+  when nothing of the reply has arrived, and stopping the run stops the wait.
+- `sovran.terminal.hideSecretVariables` (off by default, user settings only) removes environment variables whose
+  name looks like a credential from the commands the agent runs.
 - **Tools load when needed** (`sovran.tools.loading`, on by default). Requests carry the file, editing, terminal and
   editor-context tools; Git, diagnostics, symbols, Web fetch and each MCP server join a chat when it needs them. They
   load all at once when every definition fits a tenth of the model's input budget, from the tools a chat already used,
@@ -78,6 +83,12 @@ pre-releases and even minor versions are stable releases.
 - The status bar shows `auto-edit` or `auto` when Act mode runs unattended.
 
 ### Fixed
+- **Native Git works with the Git of current LTS distributions.** A host Git without `--no-lazy-fetch` (Ubuntu 24.04
+  ships 2.43) made every Git tool refuse. Such a Git is now used for ordinary repositories; only partial clones, the
+  one case where a read could fetch, are still refused there.
+- **Undo changes survives a crash.** The checkpoint of a run is saved as soon as a file changes instead of when the
+  run ends, so a window closed or a crash mid-run leaves the changes undoable.
+- Turning `sovran.sessions.persist` off stops writing chats and images to disk at once, without reloading the window.
 - **The model reads files as they are.** Tool results were masked by credential *shape*, which rewrote ordinary code
   (`token: string` reached the model as `token: ••••`) and made edits fail or write the mask into the file. Results
   now mask only the secrets Sovran holds (provider keys and MCP tokens); logs and error messages still mask by shape.
@@ -100,6 +111,9 @@ pre-releases and even minor versions are stable releases.
 - A removed line that starts with `-- ` (an SQL or Lua comment) was hidden from diffs in the chat.
 
 ### Security
+- On Windows a local MCP server given by name (`npx`, `uvx`) is started by its full path outside the workspace: a
+  file of the same name in the repository can no longer run in its place. Name the path to use one in the workspace.
+- Workflow actions are pinned to commit SHAs.
 - Protected paths are checked where a path really leads: a symbolic link to `.env`, or a linked folder that is
   `.git/hooks`, asks before it is read or written, in every approval mode. `AGENTS.md` is not sent when it is a link
   out of the workspace or to a protected file, and `list_directory` does not enter folders linked out of the workspace.

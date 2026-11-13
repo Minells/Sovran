@@ -145,8 +145,19 @@ export function parseChanges(output: string): Change[] {
   return changes;
 }
 
+/** Whether the host Git knows `--no-lazy-fetch`, per process port: the executable does not change while Sovran runs. */
+const lazyFetchOption = new WeakMap<object, boolean>();
+
+const PARTIAL_CLONE = '^(extensions\\.partialclone|remote\\..*\\.(promisor|partialclonefilter))$';
+
 /** A per-call deadline, fixed argv construction and protected-content checks around the existing process port. */
 export class GitReader {
+  /**
+   * The global option that forbids fetching missing objects, or nothing when the host Git predates it (as on current
+   * LTS distributions). Without the option a repository is used only after checking that it is not a partial clone:
+   * only a promisor remote can make a read fetch.
+   */
+  noLazyFetch: readonly string[] = ['--no-lazy-fetch'];
   private readonly deadline: number;
   private readonly config = [...SAFE_CONFIG];
   private constructor(
@@ -166,6 +177,18 @@ export class GitReader {
     )
       throw new ToolError('The selected repository changed. Request this action again.');
     const reader = new GitReader(repository, ctx, new Set(prepared.paths));
+    if (!(await reader.supportsNoLazyFetch())) {
+      reader.noLazyFetch = [];
+      const partial = await reader.call(
+        ['config', '--null', '--name-only', '--get-regexp', PARTIAL_CLONE],
+        METADATA_CHARS,
+        [0, 1],
+      );
+      if (terminatedFields(partial.stdout).length)
+        throw new ToolError(
+          'This repository is a partial clone, and the host Git cannot be told not to fetch missing objects. Update host Git to a version that supports --no-lazy-fetch.',
+        );
+    }
     // Status/diff can run clean/process filters even when textconv and external diff are disabled. Neutralize every
     // effective configured filter, including user includes. Never accept a model-supplied -c option.
     const keys = await reader.call(
@@ -189,6 +212,28 @@ export class GitReader {
     return reader;
   }
 
+  private async supportsNoLazyFetch(): Promise<boolean> {
+    const known = lazyFetchOption.get(this.ctx.process);
+    if (known !== undefined) return known;
+    this.checkActive();
+    const probe = await this.ctx.process.runFile('git', ['--no-lazy-fetch', '--version'], {
+      cwd: this.repository.absolute,
+      timeoutMs: Math.max(1, this.deadline - Date.now()),
+      signal: this.ctx.signal,
+      maxOutputChars: 1000,
+      disallowedExecutableRoots: this.ctx.workspace.roots().map((root) => root.path),
+      env: { LC_ALL: 'C', LANG: 'C' },
+      beforeSpawn: () => {
+        this.ctx.revalidate?.();
+        this.checkActive();
+      },
+    });
+    const unknown = probe.exitCode !== 0 && /unknown option.*no-lazy-fetch/i.test(probe.stderr);
+    // Only a definite answer is remembered: a missing Git or a timeout is reported by the call that follows.
+    if (probe.exitCode === 0 || unknown) lazyFetchOption.set(this.ctx.process, !unknown);
+    return !unknown;
+  }
+
   async call(
     args: readonly string[],
     maxOutputChars = METADATA_CHARS,
@@ -200,7 +245,7 @@ export class GitReader {
     const argv = [
       '--no-pager',
       '--no-optional-locks',
-      '--no-lazy-fetch',
+      ...this.noLazyFetch,
       '--no-replace-objects',
       '--literal-pathspecs',
       `--git-dir=${path.join(this.repository.absolute, '.git')}`,
@@ -234,8 +279,6 @@ export class GitReader {
     if (result.cancelled || this.ctx.signal.aborted) throw new ToolError('Git inspection was cancelled.');
     if (result.timedOut) throw new ToolError('Git inspection timed out and was terminated.');
     if (!accepted.includes(result.exitCode ?? -1)) {
-      if (/unknown option.*no-lazy-fetch/i.test(result.stderr))
-        throw new ToolError('Update host Git: native inspection requires --no-lazy-fetch support.');
       throw new ToolError(
         `Git inspection failed: ${truncateMiddle(result.stderr.trim() || result.output || 'Git is unavailable.', 1000)}`,
       );

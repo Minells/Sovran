@@ -119,6 +119,13 @@ describe('OpenAICompatibleProvider — compatibility scenarios', () => {
     expect(err.message).not.toContain('sk-secret-123456');
   });
 
+  it('reports how long the server asked to wait, when it says so in seconds', async () => {
+    server.handler = (_r, res) => res.writeHead(429, { 'Retry-After': '7' }).end('{}');
+    expect((await expectError(collect(provider().streamChat(req, new AbortController().signal)))).retryAfterMs).toBe(7000);
+    server.handler = (_r, res) => res.writeHead(503, { 'Retry-After': 'Wed, 21 Oct 2026 07:28:00 GMT' }).end('{}');
+    expect((await expectError(collect(provider().streamChat(req, new AbortController().signal)))).retryAfterMs).toBeUndefined();
+  });
+
   it('detects context-length errors', async () => {
     server.handler = (_r, res) => res.writeHead(400).end(JSON.stringify({ error: { message: "This model's maximum context length is 8192 tokens" } }));
     const err = await expectError(collect(provider().streamChat(req, new AbortController().signal)));

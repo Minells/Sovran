@@ -416,7 +416,10 @@ export class SovranController implements vscode.Disposable {
         this.titleModel = this.parseModelRef(readTitleModel());
         this.updateStatusBar();
         this.updateEditorContext();
+        // `sovran.sessions.persist` decides where chats are kept, so the history may now be another list.
+        this.sessions = await this.deps.repo.list().catch(() => this.sessions);
         this.patch({
+          sessions: this.sessions,
           providers: this.providerViews(),
           selected: this.selected,
           planModel: this.planModel,
@@ -2652,7 +2655,15 @@ export class SovranController implements vscode.Disposable {
     const secret = await this.deps.secrets.get(provider.id);
     this.deps.logger.addSecret(secret);
     // Every write in this run goes through the recorder, so the run can be undone as a unit.
-    const recorder = new CheckpointRecorder(this.deps.workspace);
+    // The checkpoint is saved as files change, not only when the run ends: after a crash or a window closed
+    // mid-run the changes are still on disk, and "Undo changes" must still be there. Saves run one at a time.
+    const checkpointId = mergeInto?.id ?? randomUUID();
+    let checkpointSaves: Promise<void> = Promise.resolve();
+    const saveCheckpoint = () =>
+      this.saveCheckpoint(session, user, recorder.changedFiles(), checkpointId, mergeInto);
+    const recorder: CheckpointRecorder = new CheckpointRecorder(this.deps.workspace, () => {
+      checkpointSaves = checkpointSaves.then(saveCheckpoint).then(() => this.schedulePersist(session));
+    });
     const runner = this.createRunner(provider, recorder, session.id);
     this.deps.logger.info(`Run started · ${provider.id}/${model.id} · ${mode} mode`);
     try {
@@ -2685,7 +2696,8 @@ export class SovranController implements vscode.Disposable {
       this.flush();
       this.dropApprovals(session.id);
       this.endRun(session);
-      await this.saveCheckpoint(session, user, recorder.changedFiles(), mergeInto);
+      await checkpointSaves;
+      await saveCheckpoint();
       session.updatedAt = Date.now();
       this.cancelPersist(session.id);
       await this.persist(session);
@@ -2734,12 +2746,20 @@ export class SovranController implements vscode.Disposable {
     session: Session,
     user: UserMessage,
     files: FileSnapshot[],
+    id: string,
     mergeInto?: Checkpoint,
   ) {
     const merged = mergeInto ? mergeSnapshots(mergeInto.files, files) : files;
-    if (merged.length === 0) return;
+    if (merged.length === 0) {
+      // Every file is back as it was (an edit the same run reverted): nothing is left to undo.
+      if (user.checkpoint?.id === id) {
+        delete user.checkpoint;
+        this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: user });
+      }
+      return;
+    }
     const checkpoint: Checkpoint = {
-      id: mergeInto?.id ?? randomUUID(),
+      id,
       sessionId: session.id,
       userMessageId: user.id,
       createdAt: Date.now(),

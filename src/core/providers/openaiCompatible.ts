@@ -1,5 +1,5 @@
 import { parseSSE } from './sse';
-import { ProviderError, errorFromException, errorFromResponse, isRedirect, redirectError, type AuthSent } from './errors';
+import { ProviderError, errorFromException, errorFromResponse, isRedirect, redirectError, withRetryAfter, type AuthSent } from './errors';
 import { limitsFromLiteLlmInfo, limitsFromModelEntry, type ModelInfo, type ServerLimits } from './limits';
 import { carriesImages, type ChatProvider, type ChatRequest, type ProviderConfig, type ProviderEvent } from './types';
 
@@ -162,7 +162,10 @@ export class OpenAICompatibleProvider implements ChatProvider {
         redirect: 'manual',
       });
       if (isRedirect(res.status)) throw redirectError(res.status, res.headers.get('location'), url);
-      if (!res.ok) throw errorFromResponse(res.status, await res.text(), { url, toolsSent, imagesSent, secrets: [secret], auth: h.auth });
+      if (!res.ok) {
+        const error = errorFromResponse(res.status, await res.text(), { url, toolsSent, imagesSent, secrets: [secret], auth: h.auth });
+        throw withRetryAfter(error, res.headers.get('retry-after'));
+      }
       watchdog.reset();
 
       const contentType = res.headers.get('content-type') ?? '';

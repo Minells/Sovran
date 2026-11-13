@@ -73,7 +73,7 @@ textconv and effective clean/process filters. The executable is resolved outside
 processes inherit a minimal host environment without ambient Git redirection, credentials or runtime preloads.
 Bulk patches omit protected paths and detected protected rename sources; explicit protected-file inspection uses
 approval. Paths and revisions have separate contracts, metadata must be complete before parsing, and raw process
-output is never streamed to chat or mirrored before filtering. Git must support the required protective flags.
+output is never streamed to chat or mirrored before filtering. A host Git without `--no-lazy-fetch` is used only for repositories that are not partial clones (no promisor remote or `extensions.partialClone`), checked before every operation; partial clones are refused there.
 
 
 Native Git index changes and commits are separate execute-risk tools that require one-time approval in Act even in
@@ -123,7 +123,8 @@ with reviewed descriptions. Server schemas and returned documentation still cont
   acts outside Sovran's guardrails and checkpoints. Install servers only from sources you trust, and keep tools that
   change data on *Ask*.
 - SOVRAN does **not** sandbox commands. An approved command, or a command that runs in Auto mode, runs with your user's
-  privileges and inherits the editor's environment variables.
+  privileges and inherits the editor's environment variables. Turn on `sovran.terminal.hideSecretVariables` to remove
+  the variables whose name looks like a credential; it matches names, so a secret under another name still passes.
 - Auto-mode guardrails are heuristics over the command text, not a shell interpreter. They catch the common dangerous
   shapes; they cannot see what a script, a build step or a package's install hooks do once they run. Dependency
   installs (`npm install`, `pip install`) and project scripts run in Auto mode. Use Auto only in repositories you trust.

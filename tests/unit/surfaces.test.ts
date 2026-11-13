@@ -139,6 +139,8 @@ const chatsIn = (messages: HostMessage[]) =>
   new Set(messages.flatMap((m) => ('sessionId' in m ? [m.sessionId] : [])));
 
 let repo: InstanceType<typeof MemorySessionRepository>;
+/** Every checkpoint the controller saved, in order. */
+let savedCheckpoints: Array<{ id: string; files: Array<{ absolutePath: string; before: string }> }>;
 
 beforeEach(async () => {
   h.info = [];
@@ -159,6 +161,7 @@ beforeEach(async () => {
     'sovran.terminal.mirrorToTerminal': false,
   };
   workspace = new MemoryWorkspace({ 'a.txt': 'one\n', 'b.txt': 'one\n' });
+  savedCheckpoints = [];
   sidebar = [];
   tabs = {};
   opened = [];
@@ -176,7 +179,9 @@ beforeEach(async () => {
     statusBar: { update() {} },
     repo: (repo = new MemorySessionRepository()),
     checkpoints: {
-      save: async () => undefined,
+      save: async (checkpoint: (typeof savedCheckpoints)[number]) => {
+        savedCheckpoints.push(structuredClone(checkpoint));
+      },
       load: async () => undefined,
       deleteForSession: async () => undefined,
     },
@@ -337,6 +342,40 @@ describe('surfaces', () => {
     expect(latest(sidebar, 'liveSessions')).toEqual([
       { id: tabChat, inEditor: true, running: false, needsApproval: false },
     ]);
+  });
+
+  it('saves the checkpoint as soon as a file changes, while the run is still going', async () => {
+    const answer = server.handler;
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    // The model's reply to the tool result is held back: the run stays open after the edit was applied.
+    server.handler = (req, res) => {
+      const messages = (req.body?.messages ?? []) as Array<{ role: string }>;
+      if (messages[messages.length - 1]?.role === 'tool') return void held.then(() => answer(req, res));
+      return answer(req, res);
+    };
+    try {
+      const running = controller.handle({ type: 'send', text: 'edit a' });
+      await vi.waitFor(() => expect(approvalsOf(sidebar)).toHaveLength(1));
+      await controller.handle({ type: 'approval', id: approvalsOf(sidebar)[0]!.id, approved: true });
+      await vi.waitFor(() => expect(savedCheckpoints).toHaveLength(1));
+      expect(latest(sidebar, 'run')).not.toBeNull();
+      expect(savedCheckpoints[0]!.files).toMatchObject([{ absolutePath: workspace.abs('a.txt'), before: 'one\n' }]);
+      // The chat's message already carries it, so a chat saved now still offers "Undo changes" after a crash.
+      await vi.waitFor(() =>
+        expect(sidebar.findLast((m) => m.type === 'messageUpsert' && m.message.role === 'user')).toMatchObject({
+          message: { checkpoint: { id: savedCheckpoints[0]!.id, files: ['a.txt'] } },
+        }),
+      );
+
+      release();
+      await running;
+      // The save at the end of the run replaces the same checkpoint instead of adding another.
+      expect(new Set(savedCheckpoints.map((c) => c.id)).size).toBe(1);
+    } finally {
+      release();
+      server.handler = answer;
+    }
   });
 
   it('refuses a second message in a chat that is still working', async () => {

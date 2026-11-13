@@ -105,3 +105,32 @@ export class MemorySessionRepository implements SessionRepository {
     this.map.delete(id);
   }
 }
+
+/**
+ * Follows `sovran.sessions.persist` while the window is open: chats are saved on disk while it is on and only in
+ * memory from the moment it is turned off, without waiting for a reload. The history lists the chats of the current
+ * place; deleting a chat removes it from both.
+ */
+export class SwitchingSessionRepository implements SessionRepository {
+  constructor(
+    private readonly persistent: SessionRepository,
+    private readonly memory: SessionRepository,
+    private readonly persist: () => boolean,
+  ) {}
+  private get current() {
+    return this.persist() ? this.persistent : this.memory;
+  }
+  list() {
+    return this.current.list();
+  }
+  async load(id: string) {
+    const [first, second] = this.persist() ? [this.persistent, this.memory] : [this.memory, this.persistent];
+    return (await first.load(id)) ?? (await second.load(id));
+  }
+  save(session: Session) {
+    return this.current.save(session);
+  }
+  async delete(id: string) {
+    await Promise.all([this.persistent.delete(id), this.memory.delete(id)]);
+  }
+}

@@ -81,6 +81,8 @@ export interface AgentDeps {
   web?: WebFetchPort;
   newId?: () => string;
   now?: () => number;
+  /** Waits between retries of a busy server; tests replace it. */
+  sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 }
 
 export interface RunOptions {
@@ -123,6 +125,26 @@ interface TurnResult {
 
 const LOOP_GUARD_LIMIT = 3;
 
+/** A busy or restarting server (rate limit, gateway errors) is asked again after these waits, then reported. */
+const RETRY_DELAYS_MS = [1000, 3000];
+const RETRY_STATUS = new Set([429, 502, 503, 504]);
+/** A server that asks to wait longer than this is reported instead: the user decides whether to wait. */
+const MAX_RETRY_AFTER_MS = 30_000;
+
+/** Resolves after `ms`, or at once when the run is cancelled. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) return resolve();
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener('abort', done, { once: true });
+  });
+}
+
 /**
  * The agent loop: context → model → tool calls → validation → policy → approval → execution → repeat.
  * Pure orchestration over ports; owns no I/O of its own.
@@ -143,6 +165,7 @@ export class AgentRunner {
     let visionRefused = false;
     let compactedThisRun = false;
     let iteration = 0;
+    let retries = 0;
 
     const latest = [...o.session.messages].reverse().find((m) => m.role === 'user');
     if (
@@ -253,6 +276,29 @@ export class AgentRunner {
           iteration--;
           continue;
         }
+        // Only when nothing of the reply arrived: a retry must not repeat text the user already saw.
+        const wait = err.retryAfterMs ?? RETRY_DELAYS_MS[retries];
+        if (
+          err.status !== undefined &&
+          RETRY_STATUS.has(err.status) &&
+          wait !== undefined &&
+          retries < RETRY_DELAYS_MS.length &&
+          wait <= MAX_RETRY_AFTER_MS &&
+          !assistant.content &&
+          !assistant.reasoning &&
+          !o.signal.aborted
+        ) {
+          retries++;
+          this.removeMessage(o, assistant.id);
+          o.emit({
+            type: 'notice',
+            level: 'info',
+            message: `${o.model.name ?? o.model.id} is busy (HTTP ${err.status}). Retrying in ${Math.ceil(wait / 1000)} s (attempt ${retries} of ${RETRY_DELAYS_MS.length}).`,
+          });
+          await (this.deps.sleep ?? sleep)(wait, o.signal);
+          iteration--;
+          continue;
+        }
         assistant.streaming = undefined;
         if (err.kind === 'cancelled' || o.signal.aborted) {
           this.commitOrDrop(o, assistant);
@@ -269,6 +315,7 @@ export class AgentRunner {
         return { reason: 'error', error: info };
       }
 
+      retries = 0;
       assistant.streaming = undefined;
       assistant.content = turn.text;
       if (turn.reasoning) assistant.reasoning = turn.reasoning;

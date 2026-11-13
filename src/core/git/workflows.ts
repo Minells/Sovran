@@ -415,7 +415,7 @@ export async function executeGitWorkflow(
         'git',
         [
           '--no-pager',
-          '--no-lazy-fetch',
+          ...git.noLazyFetch,
           '--no-replace-objects',
           `--git-dir=${path.join(git.repository.absolute, '.git')}`,
           `--work-tree=${git.repository.absolute}`,

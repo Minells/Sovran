@@ -14,6 +14,8 @@ import {
 import { McpHub, tellingLine } from '../../src/core/mcp/hub';
 import {
   commandCandidates,
+  isBareCommand,
+  outsideWorkspace,
   commandNotFound,
   expandVariables,
   inheritedEnvironment,
@@ -284,6 +286,19 @@ describe('MCP commands', () => {
       'C:\\nodejs\\node.CMD',
     ]);
     expect(commandCandidates('tools\\server.cmd', win)).toEqual(['C:\\ws\\tools\\server.cmd']);
+    // A bare name is never taken from an open workspace folder: only its path can name a file there.
+    expect(isBareCommand('npx', 'win32')).toBe(true);
+    expect(['tools\\server.cmd', 'C:\\nodejs\\node', './x'].map((c) => isBareCommand(c, 'win32'))).toEqual([false, false, false]);
+    expect(outsideWorkspace(commandCandidates('npx', win), ['c:\\WS'], 'win32')).toEqual([
+      'C:\\Program Files\\nodejs\\npx.COM',
+      'C:\\Program Files\\nodejs\\npx.EXE',
+      'C:\\Program Files\\nodejs\\npx.CMD',
+      'C:\\Tools\\npx.COM',
+      'C:\\Tools\\npx.EXE',
+      'C:\\Tools\\npx.CMD',
+    ]);
+    expect(outsideWorkspace(['C:\\wsx\\npx.cmd'], ['C:\\ws'], 'win32')).toEqual(['C:\\wsx\\npx.cmd']);
+    expect(outsideWorkspace(['/ws/bin/npx', '/usr/bin/npx'], ['/ws'], 'linux')).toEqual(['/usr/bin/npx']);
     expect(commandNotFound('uvx')).toBe(
       'Could not start "uvx": it was not found. Install it, or use its full path.',
     );

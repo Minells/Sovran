@@ -9,6 +9,9 @@ import { listDirectoryTool, readFileTool, searchFilesTool } from '../../src/core
 import { editFileTool, writeFileTool } from '../../src/core/tools/builtin/writeTools';
 import type { ToolContext } from '../../src/core/tools/types';
 import { agentCommandEnv } from '../../src/extension/adapters/commandEnv';
+import { MemoryImageStore, SwitchingImageStore } from '../../src/extension/adapters/FsImageStore';
+import { MemorySessionRepository, SwitchingSessionRepository } from '../../src/extension/adapters/FsSessionRepository';
+import type { Session } from '../../src/core/sessions/model';
 import { FakeProcess, MemoryWorkspace } from '../fixtures/fakes';
 
 const PROTECTED = ['**/.env', '**/.git/**'];
@@ -171,6 +174,50 @@ describe('command environment', () => {
     expect(env).toMatchObject({ PATH: '/bin', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', CI: '1' });
   });
 
+  it('keeps credential-like variables unless the user chose to hide them', () => {
+    const base = { PATH: '/bin', GITHUB_TOKEN: 't', AWS_SECRET_ACCESS_KEY: 's', npm_config_api_key: 'k', SSH_AUTH_SOCK: '/s', HOME: '/h' };
+    expect(agentCommandEnv(base)).toMatchObject(base);
+    const hidden = agentCommandEnv(base, true);
+    expect(hidden).toMatchObject({ PATH: '/bin', SSH_AUTH_SOCK: '/s', HOME: '/h', GIT_TERMINAL_PROMPT: '0' });
+    expect(Object.keys(hidden).filter((k) => /TOKEN|SECRET|api_key/i.test(k))).toEqual([]);
+  });
+
+});
+
+describe('sovran.sessions.persist while the window is open', () => {
+  const chat = (id: string): Session => ({ id, title: id, createdAt: 0, updatedAt: 0, mode: 'act', messages: [{ role: 'user', id: 'u', content: 'hi', createdAt: 0 }] });
+
+  it('stops writing chats to the persistent store as soon as it is turned off', async () => {
+    let persist = true;
+    const disk = new MemorySessionRepository();
+    const repo = new SwitchingSessionRepository(disk, new MemorySessionRepository(), () => persist);
+    await repo.save(chat('a'));
+    persist = false;
+    await repo.save(chat('b'));
+    expect((await disk.list()).map((s) => s.id)).toEqual(['a']);
+    expect((await repo.list()).map((s) => s.id)).toEqual(['b']);
+    // A chat that is open stays readable, and deleting removes it wherever it is.
+    expect((await repo.load('a'))?.id).toBe('a');
+    await repo.delete('a');
+    expect(await disk.load('a')).toBeUndefined();
+    persist = true;
+    expect((await repo.load('b'))?.id).toBe('b');
+  });
+
+  it('keeps images where the chats are', async () => {
+    let persist = false;
+    const disk = new MemoryImageStore();
+    const images = new SwitchingImageStore(disk, new MemoryImageStore(), () => persist);
+    await images.save('s', 'x', 'image/png', Uint8Array.of(1));
+    expect(await disk.load('s', 'x')).toBeUndefined();
+    expect(await images.load('s', 'x', 'image/png')).toEqual(Uint8Array.of(1));
+    persist = true;
+    await images.save('s', 'y', 'image/png', Uint8Array.of(2));
+    expect(await disk.load('s', 'y')).toEqual(Uint8Array.of(2));
+    await images.deleteForSession('s');
+    expect(await images.load('s', 'x', 'image/png')).toBeUndefined();
+    expect(await images.load('s', 'y', 'image/png')).toBeUndefined();
+  });
 });
 
 describe('pasted images from the webview', () => {
