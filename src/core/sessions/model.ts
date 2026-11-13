@@ -152,6 +152,8 @@ export interface Session {
    * on-demand loading; it then starts from the units of the tool calls in its history.
    */
   toolUnits?: string[];
+  /** Model and compaction the units were chosen for; when either changes they are chosen afresh. */
+  toolUnitsBasis?: string;
   usage?: ContextUsage;
   compaction?: CompactionState;
 }

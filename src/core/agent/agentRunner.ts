@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { planCompaction, renderForSummary, summarize } from '../context/compaction';
 import type { DocumentReader } from '../documents/reader';
-import { buildContext, estimateTokens } from '../context/contextManager';
+import { buildContext, CHARS_PER_TOKEN, estimateTokens } from '../context/contextManager';
 import { commandPathRisks } from '../permissions/commands';
 import { decide, type AgentMode, type PolicySettings, type SessionGrants } from '../permissions/policy';
 import type { ApprovalPort, Logger, ProcessPort, WorkspacePort } from '../ports';
@@ -48,6 +48,10 @@ import { parseJsonLenient, parseToolCallBlock, renderToolInstructions } from './
 import { buildSystemPrompt } from './systemPrompt';
 import type { WebFetchPort } from '../web/types';
 import { TaggedStreamParser } from './taggedStream';
+
+/** Share of the input budget a single tool result may take: small windows get shorter results and smaller pages. */
+const RESULT_BUDGET_SHARE = 0.15;
+const MIN_RESULT_CHARS = 2000;
 
 const defaultsOf = (s: Pick<AgentSettings, 'defaultContextWindow' | 'defaultMaxOutputTokens'>) => ({
   contextWindow: s.defaultContextWindow,
@@ -179,7 +183,11 @@ export class AgentRunner {
         let built = this.buildRequest(o, toolMode, vision);
         if (built.droppedTurns > 0 && o.autoCompact && !compactedThisRun) {
           compactedThisRun = true;
-          if (await this.compact(o)) built = this.buildRequest(o, toolMode, vision);
+          if (await this.compact(o)) {
+            // The prompt changed from the start: a good moment to drop tools the conversation no longer uses.
+            this.prepareToolUnits(o);
+            built = this.buildRequest(o, toolMode, vision);
+          }
           if (o.signal.aborted) return { reason: 'cancelled' };
         }
         if (built.droppedTurns > 0) {
@@ -346,7 +354,7 @@ export class AgentRunner {
       toolMode,
       budgetTokens,
       toolSchemaTokens: schemaTokens,
-      maxToolResultChars: o.settings.tools.maxToolResultChars,
+      maxToolResultChars: this.toolSettings(o).maxToolResultChars,
       summary: o.session.compaction?.summary,
       images: o.images,
       vision,
@@ -386,6 +394,16 @@ export class AgentRunner {
     return estimateTokens(JSON.stringify(this.deps.registry.schema(tool)));
   }
 
+  /**
+   * Tool settings for this model. The result limit is the user's, lowered for small windows so that one result
+   * cannot take more than `RESULT_BUDGET_SHARE` of the input budget; tools then page at that size.
+   */
+  private toolSettings(o: Pick<RunOptions, 'model' | 'settings'>): ToolSettings {
+    const cap = Math.floor(this.inputBudget(o).budgetTokens * RESULT_BUDGET_SHARE * CHARS_PER_TOKEN);
+    const maxToolResultChars = Math.min(o.settings.tools.maxToolResultChars, Math.max(MIN_RESULT_CHARS, cap));
+    return { ...o.settings.tools, maxToolResultChars };
+  }
+
   /** The model's context window and the part of it left for the request once the reply is reserved. */
   private inputBudget(o: Pick<RunOptions, 'model' | 'settings'>) {
     const { contextWindow, reserveTokens } = effectiveLimits(o.model, o.model.serverLimits, defaultsOf(o.settings));
@@ -393,64 +411,77 @@ export class AgentRunner {
   }
 
   /**
-   * With on-demand loading, the units a run starts with: the first time, those of the tool calls already in the chat;
-   * then whatever fits the budget for this model, and what the user's message asks for. A chat only ever adds units,
-   * so its prompt prefix stays stable.
+   * With on-demand loading, the units a run starts with: those the chat has used, whatever fits the budget for this
+   * model, and what the user's message asks for. Within a chat units only accumulate, so the prompt prefix stays
+   * stable. They are chosen afresh only when the server's prompt cache is gone anyway: for another model, or after a
+   * compaction. Units the visible conversation used or loaded stay; the others go.
    */
   private prepareToolUnits(o: RunOptions) {
     if (o.settings.toolLoading !== 'auto') return;
     const toolMode = resolveToolMode(o.model.toolMode, this.deps.capabilities.get(capabilityKey(o.providerId, o.model.id)));
     if (toolMode === 'none') return;
-    if (o.session.toolUnits === undefined) {
+    const basis = `${o.providerId}/${o.model.id}#${o.session.compaction?.firstKeptId ?? ''}`;
+    const previous = o.session.toolUnits;
+    // Units the chat already had are not reported again when they are chosen afresh.
+    const known = new Set(previous ?? []);
+    if (previous === undefined || o.session.toolUnitsBasis !== basis) {
       o.session.toolUnits = [];
-      this.loadUnits(o, this.unitsInHistory(o), 'history');
+      o.session.toolUnitsBasis = basis;
+      this.loadUnits(o, this.unitsInHistory(o), 'history', undefined, known);
     }
     const available = this.availableTools(o);
     const coreTokens = available
       .filter((tool) => unitOf(tool) === CORE_UNIT)
       .reduce((sum, tool) => sum + this.tokensOf(tool), 0);
     const units = loadableUnits(available, (tool) => this.tokensOf(tool));
-    this.loadUnits(o, unitsWithinBudget(coreTokens, units, this.inputBudget(o).budgetTokens), 'budget');
+    this.loadUnits(o, unitsWithinBudget(coreTokens, units, this.inputBudget(o).budgetTokens), 'budget', undefined, known);
     const latest = o.session.messages.findLast((m) => m.role === 'user');
-    if (latest?.role !== 'user') return;
-    const routed = routeToolUnits(
-      latest.content,
-      units.map((unit) => unit.id),
-      o.routing,
-    );
-    this.loadUnits(
-      o,
-      routed.map((r) => r.unit),
-      'router',
-      new Map(routed.map((r) => [r.unit, r.reason])),
-    );
+    if (latest?.role === 'user') {
+      const routed = routeToolUnits(
+        latest.content,
+        units.map((unit) => unit.id),
+        o.routing,
+      );
+      const why = new Map(routed.map((r) => [r.unit, r.reason]));
+      this.loadUnits(o, routed.map((r) => r.unit), 'router', why, known);
+    }
+    const dropped = (previous ?? []).filter((unit) => !o.session.toolUnits?.includes(unit));
+    if (dropped.length) o.emit({ type: 'tools_unloaded', units: dropped });
   }
 
-  /** Units of the tools the chat has already called, in the order they were first called. */
+  /** Units of the tools the visible conversation called or loaded, in order of first appearance. */
   private unitsInHistory(o: RunOptions): string[] {
     const used: string[] = [];
+    const use = (unit: string | undefined) => {
+      if (unit && unit !== CORE_UNIT && !used.includes(unit)) used.push(unit);
+    };
     for (const message of messagesForModel(o.session)) {
+      if (message.role === 'tool') for (const unit of message.loaded ?? []) use(unit);
       if (message.role !== 'assistant') continue;
       for (const c of message.toolCalls ?? []) {
         const tool = this.deps.registry.get(c.name);
-        const unit = tool && unitOf(tool);
-        if (unit && unit !== CORE_UNIT && !used.includes(unit)) used.push(unit);
+        use(tool && unitOf(tool));
       }
     }
     return used;
   }
 
-  /** Adds units to the chat. Their tools are offered from the next model request. */
+  /**
+   * Adds units to the chat. Their tools are offered from the next model request. Units in `known` were loaded before
+   * and are not reported as news.
+   */
   private loadUnits(
     o: RunOptions,
     units: readonly string[],
     reason: ToolLoadReason,
     why?: ReadonlyMap<string, string>,
+    known?: ReadonlySet<string>,
   ): string[] {
     const added = addUnits((o.session.toolUnits ??= []), units);
-    if (!added.length) return added;
-    const detail = why && added.map((unit) => `${unit}: ${why.get(unit) ?? 'needed by another unit'}`);
-    o.emit({ type: 'tools_loaded', units: added, reason, ...(detail ? { detail } : {}) });
+    const news = known ? added.filter((unit) => !known.has(unit)) : added;
+    if (!news.length) return added;
+    const detail = why && news.map((unit) => `${unit}: ${why.get(unit) ?? 'needed by another unit'}`);
+    o.emit({ type: 'tools_loaded', units: news, reason, ...(detail ? { detail } : {}) });
     return added;
   }
 
@@ -590,7 +621,7 @@ export class AgentRunner {
       id: this.newId(),
       toolCallId: call.id,
       toolName: call.name,
-      content: truncateMiddle(redact(content, o.secrets ?? []), o.settings.tools.maxToolResultChars),
+      content: truncateMiddle(redact(content, o.secrets ?? []), this.toolSettings(o).maxToolResultChars),
       status,
       durationMs: this.now() - started,
       createdAt: this.now(),
@@ -665,7 +696,7 @@ export class AgentRunner {
       workspace: this.deps.workspace,
       process: this.deps.process,
       signal: o.signal,
-      settings: { ...o.settings.tools, protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths },
+      settings: { ...this.toolSettings(o), protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths },
       onOutput: (chunk) => o.emit({ type: 'tool_output', callId: call.id, chunk }),
       ...(this.deps.documents ? { documents: this.deps.documents } : {}),
       ...(this.deps.web ? { web: this.deps.web } : {}),

@@ -528,13 +528,13 @@ in the previous request. No model request is used to select tools.
 ### Tools loaded when needed
 
 Every tool definition a request carries takes room in the model's context window: Sovran's 27 native tools take about
-4,800 tokens, and MCP servers often take more. With **Settings → Tools → Load tools when needed** (on by default,
+4,500 tokens, and MCP servers often take more. With **Settings → Tools → Load tools when needed** (on by default,
 `sovran.tools.loading: auto`), each request carries the file, editing, terminal and editor-context tools, and the other
 tools join a chat when it needs them:
 
 - **When everything fits.** If all tool definitions take less than a tenth of the model's input budget, every tool is
   sent, as with the setting off. A model with a large window works as before; a 32k local model starts with about
-  1,500 tokens of tools instead of 4,800.
+  1,400 tokens of tools instead of 4,500.
 - **From your message.** Before the first request, Sovran reads what you typed, in English or Italian, and loads what it
   asks for: commit or push wording loads the Git tools, a public URL loads Web fetch, a `localhost` URL the browser
   integration, compile errors the diagnostics, usages and renames the symbol tools, and the name or topic of a
@@ -544,8 +544,9 @@ tools join a chat when it needs them:
   is not loaded yet, Sovran loads it and asks the model to call it again: that call does not run, because the model had
   not seen the tool's definition.
 
-Loaded tools stay for the rest of the chat. Keeping the start of each request the same lets local servers (Ollama, LM
-Studio, vLLM and others) reuse their prompt cache. Loading appears as *loaded Git* in the **Explored** row of the chat,
+Loaded tools stay for the chat. Keeping the start of each request the same lets local servers (Ollama, LM Studio, vLLM
+and others) reuse their prompt cache. When that cache is gone anyway, after a compaction or when you switch models,
+Sovran keeps only the tools the visible conversation used or loaded and lets the others load again when needed. Loading appears as *loaded Git* in the **Explored** row of the chat,
 the context meter's tooltip shows how the last request split into instructions, tools and conversation, and **Tools
 for this chat** shows which groups are loaded and what the others would add. The Sovran output channel logs what
 loaded each group and why.
@@ -583,7 +584,7 @@ request it again with the current tools. Plan mode remains read-only.
 | `sovran.terminal.timeoutSeconds` | `120` | Command timeout |
 | `sovran.terminal.mirrorToTerminal` | `true` | Show command output in a Sovran terminal |
 | `sovran.context.includeActiveEditor` | `true` | Attach the active file or selection by default |
-| `sovran.context.maxToolResultChars` | `20000` | Size cap for each tool result sent to the model |
+| `sovran.context.maxToolResultChars` | `20000` | Size cap for each tool result sent to the model. Small windows get less: at most about 15% of the model's input budget, so tools page sooner |
 | `sovran.context.autoCompact` | `true` | Summarize older messages when the context window is full |
 | `sovran.context.projectInstructions` | `true` | Use `AGENTS.md` from the workspace root (trusted workspaces only) |
 | `sovran.sessions.persist` | `true` | Save chats in VS Code workspace storage |

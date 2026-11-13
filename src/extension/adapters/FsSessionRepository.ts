@@ -62,6 +62,8 @@ export class FsSessionRepository implements SessionRepository {
       if (s?.excludedToolGroups !== undefined)
         s.excludedToolGroups = normalizeExcludedGroups(s.excludedToolGroups);
       if (s?.toolUnits !== undefined) s.toolUnits = normalizeToolUnits(s.toolUnits);
+      if (s?.toolUnitsBasis !== undefined && (typeof s.toolUnitsBasis !== 'string' || s.toolUnitsBasis.length > 400))
+        delete s.toolUnitsBasis;
       return s && s.id === id && Array.isArray(s.messages) ? s : undefined;
     } catch {
       return undefined;

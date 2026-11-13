@@ -29,6 +29,8 @@ export type AgentEvent =
   | { type: 'usage'; promptTokens?: number; completionTokens?: number }
   /** `detail` explains individual units, e.g. `git.changes: "committa"`. */
   | { type: 'tools_loaded'; units: string[]; reason: ToolLoadReason; detail?: string[] }
+  /** Units dropped when the chat's units were chosen afresh (another model, or after a compaction). */
+  | { type: 'tools_unloaded'; units: string[] }
   | { type: 'compaction_started' }
   | { type: 'compacted'; compaction: CompactionState };
 

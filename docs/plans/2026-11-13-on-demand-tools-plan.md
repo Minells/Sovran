@@ -3,6 +3,9 @@
 Piano di implementazione basato su `main` al commit `e272af7`. Le etichette dell'interfaccia restano in inglese, come
 nel resto dell'estensione.
 
+> **Stato:** implementato sul branch `feat/on-demand-tools`. Evidenze, scostamenti e verifica manuale in
+> [2026-11-13-on-demand-tools-status.md](2026-11-13-on-demand-tools-status.md).
+
 ## Obiettivo
 
 Sovran deve mandare al modello solo i tool che servono alla richiesta in corso. Gli altri si aggiungono quando

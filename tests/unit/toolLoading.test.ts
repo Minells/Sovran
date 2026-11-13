@@ -21,7 +21,7 @@ import {
   unitsWithinBudget,
   withImplied,
 } from '../../src/core/tools/loading';
-import { ToolRegistry } from '../../src/core/tools/registry';
+import { leanSchema, ToolRegistry } from '../../src/core/tools/registry';
 import { defineTool, type AnyTool } from '../../src/core/tools/types';
 import { FakeProcess, MemoryWorkspace, ScriptedApprovals, ScriptedProvider, call, text } from '../fixtures/fakes';
 
@@ -380,7 +380,11 @@ describe('on-demand loading in the agent loop', () => {
 
   it('reports a unit that is already loaded', async () => {
     const { registry } = fakeRegistry();
-    const t = setup(registry, [[call(0, LOAD_TOOLS, { units: 'git' })], [text('done')]], newSession({ toolUnits: ['git'] }));
+    const t = setup(
+      registry,
+      [[call(0, LOAD_TOOLS, { units: 'git' })], [text('done')]],
+      newSession({ toolUnits: ['git'], toolUnitsBasis: 'p/m#' }),
+    );
     await t.run();
     expect(tools(t.session)[0]).toMatchObject({ status: 'success', content: 'Already loaded: git (git_read).' });
     expect(t.events.some((e) => e.type === 'tools_loaded')).toBe(false);
@@ -479,5 +483,128 @@ describe('on-demand loading in the agent loop', () => {
     await t.run({ model: { ...small, toolMode: 'none' } });
     expect(t.session.toolUnits).toBeUndefined();
     expect(t.provider.requests[0]?.tools).toBeUndefined();
+  });
+});
+
+describe('leaner tool context', () => {
+  const history = (extra: Partial<Session> = {}) =>
+    newSession({
+      messages: [
+        { role: 'user', id: 'u1', content: 'status?', createdAt: 0 },
+        { role: 'assistant', id: 'a1', content: '', toolCalls: [{ id: 'x', name: 'git_read', arguments: '{}' }], createdAt: 0 },
+        { role: 'tool', id: 't1', toolCallId: 'x', toolName: 'git_read', content: 'ok', status: 'success', createdAt: 0 },
+        { role: 'assistant', id: 'a2', content: 'Clean.', createdAt: 0 },
+        { role: 'user', id: 'u2', content: 'search the docs', createdAt: 0 },
+        { role: 'assistant', id: 'a3', content: '', toolCalls: [{ id: 'y', name: LOAD_TOOLS, arguments: '{"units":["mcp:docs"]}' }], createdAt: 0 },
+        { role: 'tool', id: 't2', toolCallId: 'y', toolName: LOAD_TOOLS, content: 'Loaded', status: 'success', loaded: ['mcp:docs'], createdAt: 0 },
+        { role: 'assistant', id: 'a4', content: 'Nothing found.', createdAt: 0 },
+        { role: 'user', id: 'u3', content: 'thanks', createdAt: 0 },
+      ],
+      toolUnits: ['git', 'git.changes', 'mcp:docs'],
+      ...extra,
+    });
+
+  it('keeps a chat\'s units while model and compaction stay the same', async () => {
+    const session = history({ toolUnitsBasis: 'p/m#' });
+    const t = setup(fakeRegistry().registry, [[text('done')]], session);
+    await t.run();
+    expect(session.toolUnits).toEqual(['git', 'git.changes', 'mcp:docs']);
+    expect(t.events.some((e) => e.type === 'tools_unloaded' || e.type === 'tools_loaded')).toBe(false);
+  });
+
+  it('keeps only the units the conversation used or loaded when the model changes', async () => {
+    const session = history({ toolUnitsBasis: 'p/other#' });
+    const t = setup(fakeRegistry().registry, [[text('done')]], session);
+    await t.run();
+    expect(session.toolUnits).toEqual(['git', 'mcp:docs']);
+    expect(session.toolUnitsBasis).toBe('p/m#');
+    expect(t.events.filter((e) => e.type === 'tools_unloaded' || e.type === 'tools_loaded')).toEqual([
+      { type: 'tools_unloaded', units: ['git.changes'] },
+    ]);
+  });
+
+  it('drops units that only summarized turns used after a compaction', async () => {
+    const session = history({
+      toolUnitsBasis: 'p/m#',
+      compaction: { summary: 'Checked the status.', firstKeptId: 'u2', summarizedCount: 4, createdAt: 0 },
+    });
+    const t = setup(fakeRegistry().registry, [[text('done')]], session);
+    await t.run();
+    expect(session.toolUnits).toEqual(['mcp:docs']);
+    expect(t.events).toContainEqual({ type: 'tools_unloaded', units: ['git', 'git.changes'] });
+    expect(names(t.provider.requests[0])).toEqual(['probe', 'write_probe', LOAD_TOOLS, 'mcp__docs__search']);
+  });
+
+  it('chooses units afresh when a run compacts the conversation', async () => {
+    const long = 'Long message that fills the small window. '.repeat(60);
+    const session = newSession({
+      messages: [
+        { role: 'user', id: 'u1', content: long, createdAt: 0 },
+        { role: 'assistant', id: 'a1', content: '', toolCalls: [{ id: 'x', name: 'git_read', arguments: '{}' }], createdAt: 0 },
+        { role: 'tool', id: 't1', toolCallId: 'x', toolName: 'git_read', content: long, status: 'success', createdAt: 0 },
+        { role: 'assistant', id: 'a2', content: long, createdAt: 0 },
+        { role: 'user', id: 'u2', content: long, createdAt: 0 },
+        { role: 'assistant', id: 'a3', content: long, createdAt: 0 },
+        { role: 'user', id: 'u3', content: 'and now?', createdAt: 0 },
+      ],
+      toolUnits: ['git'],
+      toolUnitsBasis: 'p/m#',
+    });
+    const t = setup(fakeRegistry().registry, [[text('The user checked Git status.')], [text('done')]], session);
+    await t.run({ model: { id: 'm', contextWindow: 4096 }, autoCompact: true });
+    expect(session.compaction?.firstKeptId).toBe('u2');
+    expect(session.toolUnits).toEqual([]);
+    expect(t.events).toContainEqual({ type: 'tools_unloaded', units: ['git'] });
+    expect(names(t.provider.requests.at(-1))).not.toContain('git_read');
+  });
+
+  it('lowers the result limit for small windows so tools page at that size', async () => {
+    const big = 'x'.repeat(30_000);
+    const reader = fake('probe', {
+      unit: CORE_UNIT,
+      execute: vi.fn(async (_args, ctx) => ({ content: `${ctx.settings.maxToolResultChars}:${big}` })),
+    });
+    const registry = new ToolRegistry().register(reader);
+    const wide = { ...settings, tools: { ...settings.tools, maxToolResultChars: 20_000 } };
+
+    const small8k = setup(registry, [[call(0, 'probe', {})], [text('done')]]);
+    await small8k.run({ settings: wide, model: { id: 'm', contextWindow: 8192 } });
+    // (8192 − 2048 reserved) × 15% × 3.5 characters per token
+    const cap = Math.floor(6144 * 0.15 * 3.5);
+    expect(tools(small8k.session)[0]!.content.startsWith(`${cap}:`)).toBe(true);
+    expect(tools(small8k.session)[0]!.content.length).toBeLessThanOrEqual(cap + 200);
+
+    const roomy = setup(registry, [[call(0, 'probe', {})], [text('done')]]);
+    await roomy.run({ settings: wide, model: { id: 'm', contextWindow: 200_000 } });
+    expect(tools(roomy.session)[0]!.content.startsWith('20000:')).toBe(true);
+  });
+
+  it('sends schemas without constraints that tell the model nothing, and still validates them', async () => {
+    const registry = createBuiltinRegistry();
+    const json = JSON.stringify(registry.schemas(registry.all()));
+    expect(json).not.toMatch(/"minLength":1[,}]/);
+    expect(json).not.toContain('"maxLength":4096');
+    expect(json).not.toContain(String(Number.MAX_SAFE_INTEGER));
+    expect(json).toContain('"maximum":50');
+    expect(registry.get('git_diff')!.schema.safeParse({ repository: 'x'.repeat(5000) }).success).toBe(false);
+    expect(
+      leanSchema({
+        type: 'object',
+        properties: {
+          a: { type: 'string', minLength: 1, maxLength: 4096 },
+          b: { type: 'string', minLength: 2, maxLength: 72 },
+          n: { type: 'integer', minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER },
+          items: { type: 'array', items: { type: 'string', minLength: 1 }, maxItems: 50 },
+        },
+      }),
+    ).toEqual({
+      type: 'object',
+      properties: {
+        a: { type: 'string' },
+        b: { type: 'string', minLength: 2, maxLength: 72 },
+        n: { type: 'integer' },
+        items: { type: 'array', items: { type: 'string' }, maxItems: 50 },
+      },
+    });
   });
 });

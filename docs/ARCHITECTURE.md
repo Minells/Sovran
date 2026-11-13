@@ -219,7 +219,15 @@ request.
 
 Units accumulate and their tools follow `load_tools`, after the core; the index lists every loadable unit in a stable
 order. Without a new load the system prompt and the tools array are byte-identical between steps, and a load leaves the
-earlier tools as a prefix, which keeps server prompt caches valid. With every unit loaded the request is the same as
+earlier tools as a prefix, which keeps server prompt caches valid. Units are chosen afresh only when that cache is gone
+anyway: `Session.toolUnitsBasis` records the model and compaction boundary they were chosen for, and when either
+changes (another model, `/compact`, or a compaction inside a run) the chat keeps the units its visible messages called
+or loaded, plus budget and router units.
+
+Two smaller savings apply in every mode. `ToolRegistry.schema` drops JSON Schema constraints that tell the model nothing
+(`minLength: 1`, guard `maxLength`s of 1,000 or more, zod's safe-integer bounds) while zod still validates them. The
+result limit given to tools is the user's `maxToolResultChars`, lowered to 15% of a small window's input budget, so
+tools page at a size the model can afford. With every unit loaded the request is the same as
 with loading off (`all`). The router is pattern matching over the user's own words (English and Italian), never over
 attachments, files or tool results; `tests/fixtures/routingCorpus.ts` measures its precision and recall per unit.
 

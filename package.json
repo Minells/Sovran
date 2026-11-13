@@ -783,7 +783,7 @@
             "default": 20000,
             "minimum": 2000,
             "maximum": 200000,
-            "description": "Maximum characters of a single tool result sent to the model.",
+            "description": "Maximum characters of a single tool result sent to the model. Models with small context windows get less: at most about 15% of their input budget.",
             "order": 4
           }
         }

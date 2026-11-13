@@ -3082,6 +3082,10 @@ export class SovranController implements vscode.Disposable {
         );
         if (visible) this.patchSurface(this.surfaceFor(session.id)!, this.toolsView(session));
         return;
+      case 'tools_unloaded':
+        this.deps.logger.info(`Tools unloaded (no longer used) · ${e.units.join(', ')}`);
+        if (visible) this.patchSurface(this.surfaceFor(session.id)!, this.toolsView(session));
+        return;
       case 'compaction_started':
         return setActivity({ phase: 'compacting', label: 'Summarizing earlier messages' });
       case 'compacted':

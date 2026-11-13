@@ -11,9 +11,11 @@ pre-releases and even minor versions are stable releases.
   load all at once when every definition fits a tenth of the model's input budget, from the tools a chat already used,
   from what the user's message asks for (English and Italian wording, URLs, server names, `/review` and `/fix`), when
   the model calls the new `load_tools`, or when it calls a tool that is not loaded yet (that call loads it and does not
-  run). On a 32k window the first request carries about 1,500 tokens of native tool definitions instead of 4,800, and
+  run). On a 32k window the first request carries about 1,400 tokens of native tool definitions instead of 4,800, and
   MCP servers add only an index line until used. Loaded tools stay for the chat and follow the ones already sent, so
   server prompt caches stay valid. Loading never changes permissions; turn it off to send every tool.
+- Loaded tools that a chat no longer uses are dropped when the prompt cache is gone anyway: after a compaction or when
+  the chat switches models. Tools the visible conversation called or loaded stay.
 - Custom commands in `.sovran/commands/` accept an optional front matter block with `description` and `tools`, the
   tool units the command needs.
 - The context meter's tooltip splits the last request into instructions, tool definitions and conversation, and lists
@@ -108,6 +110,10 @@ pre-releases and even minor versions are stable releases.
 - Learning that a model needs prompted tools no longer drops what else Sovran learned about it.
 
 ### Changed
+- Native tool schemas sent to the model leave out constraints that tell it nothing (`minLength: 1`, guard lengths of
+  1,000 characters or more, safe-integer bounds), about 7% fewer definition tokens. Validation is unchanged.
+- `sovran.context.maxToolResultChars` is lowered for models with small context windows, to at most about 15% of their
+  input budget, so a single result cannot crowd out the conversation and tools page sooner.
 - The sidebar shows **Sovran** instead of *Sovran: Agent*: the view is named like its container, which VS Code then shows once. `Sovran: Focus Agent` is now `Sovran: Focus Panel`.
 - **"API key" is the labelled default authentication** (sent as `Authorization: Bearer <key>`, the OpenAI standard), listed first and explained in the form; providers using a custom header show it on their card.
 - **Chat titles are written by the model by default**, with room for models that always reason (GLM, DeepSeek-R1); turn it off in Settings.

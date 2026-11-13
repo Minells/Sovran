@@ -15,7 +15,8 @@ import { FORMAT_LABELS } from '../documents/types';
 export const DOCUMENT_NOTE = 'Text extracted from the file by Sovran. Images, charts and page layout are not included.';
 
 /** Conservative estimate: code tokenizes densely, so ~3.5 chars/token rather than the usual 4. */
-export const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
+export const CHARS_PER_TOKEN = 3.5;
+export const estimateTokens = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN);
 
 /** Token estimates of the image parts built for a request (the parts themselves only carry a data URL). */
 const imageTokens = new WeakMap<WireContentPart, number>();

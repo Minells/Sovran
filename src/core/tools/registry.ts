@@ -15,6 +15,28 @@ export interface ToolSelection {
   excludedToolGroups?: readonly string[];
 }
 
+/** Below this, a `maxLength` is guidance the model can use (a subject line); above it, a guard against abuse. */
+const GUARD_LENGTH = 1000;
+
+/**
+ * Drops from a derived JSON Schema the constraints that tell the model nothing: non-empty strings, guard lengths on
+ * paths and texts, and the safe-integer bounds zod puts on every integer. They cost tokens in every request. The zod
+ * schema still validates them; limits a model should respect (a page size of 50) stay.
+ */
+export function leanSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(leanSchema);
+  if (!value || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'minLength' && child === 1) continue;
+    if (key === 'maxLength' && typeof child === 'number' && child >= GUARD_LENGTH) continue;
+    if (key === 'maximum' && child === Number.MAX_SAFE_INTEGER) continue;
+    if (key === 'minimum' && child === Number.MIN_SAFE_INTEGER) continue;
+    out[key] = leanSchema(child);
+  }
+  return out;
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, AnyTool>();
   private readonly sources: ToolSource[] = [];
@@ -83,10 +105,9 @@ export class ToolRegistry {
       };
     let cached = this.schemaCache.get(tool);
     if (!cached) {
-      const json = z.toJSONSchema(tool.schema, { io: 'input', unrepresentable: 'any' }) as Record<
-        string,
-        unknown
-      >;
+      const json = leanSchema(
+        z.toJSONSchema(tool.schema, { io: 'input', unrepresentable: 'any' }),
+      ) as Record<string, unknown>;
       delete json.$schema;
       cached = {
         type: 'function',
