@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { formatToolResult, neutralizeClosingTags } from '../../src/core/agent/promptedTools';
 import { DOCUMENT_NOTE, renderAttachments } from '../../src/core/context/contextManager';
+import { CheckpointRecorder, planRestore } from '../../src/core/checkpoints/checkpoints';
 import { decide } from '../../src/core/permissions/policy';
 import { policyPaths, resolveAndVerify } from '../../src/core/security/paths';
+import { redact, redactKnown } from '../../src/core/security/redact';
 import { listDirectoryTool, readFileTool, searchFilesTool } from '../../src/core/tools/builtin/readTools';
-import { writeFileTool } from '../../src/core/tools/builtin/writeTools';
+import { editFileTool, writeFileTool } from '../../src/core/tools/builtin/writeTools';
 import type { ToolContext } from '../../src/core/tools/types';
 import { agentCommandEnv } from '../../src/extension/adapters/commandEnv';
 import { FakeProcess, MemoryWorkspace } from '../fixtures/fakes';
@@ -124,6 +126,41 @@ describe('protected files behind symbolic links', () => {
     expect(r.content).toContain('out/');
     expect(r.content).toContain('src/a.ts');
     expect(r.content).not.toContain('private.txt');
+  });
+});
+
+describe('content fidelity', () => {
+  it('tool results keep code as written: only the secrets Sovran holds are masked', () => {
+    const code = 'interface Auth { token: string; password: string }\nconst token = getToken();';
+    expect(redactKnown(code, ['sk-live-123456'])).toBe(code);
+    expect(redactKnown('key sk-live-123456 here', ['sk-live-123456', undefined, 'abc'])).toBe('key •••• here');
+    // Logs and error messages still mask by shape.
+    expect(redact('api_key=abc123456')).not.toContain('abc123456');
+  });
+
+  it('refuses to edit text that is not UTF-8 instead of replacing its characters', async () => {
+    const ws = new MemoryWorkspace();
+    ws.setBytes('legacy.txt', Uint8Array.from([0x63, 0x61, 0x66, 0xe9, 0x0a])); // "café" in Windows-1252
+    const edit = editFileTool.prepare!({ path: 'legacy.txt', old_string: 'caf', new_string: 'CAF', replace_all: false }, toolContext(ws));
+    await expect(edit).rejects.toThrow(/not UTF-8/);
+    await expect(writeFileTool.prepare!({ path: 'legacy.txt', content: 'x' }, toolContext(ws))).rejects.toThrow(/not UTF-8/);
+    // A UTF-8 file that really contains U+FFFD is ordinary text.
+    ws.set('ok.txt', 'a \uFFFD b\n');
+    await expect(editFileTool.prepare!({ path: 'ok.txt', old_string: 'a', new_string: 'A', replace_all: false }, toolContext(ws))).resolves.toBeTruthy();
+  });
+
+  it('a checkpoint records what the file holds after the write (format on save)', async () => {
+    class Formatting extends MemoryWorkspace {
+      override async writeFile(abs: string, content: string) {
+        await super.writeFile(abs, `${content.trimEnd()}\n`);
+      }
+    }
+    const ws = new Formatting({ 'a.ts': 'old\n' });
+    const recorder = new CheckpointRecorder(ws);
+    await recorder.writeFile(ws.abs('a.ts'), 'new   ');
+    expect(ws.get('a.ts')).toBe('new\n');
+    const plan = await planRestore(recorder.changedFiles(), ws);
+    expect(plan.map((p) => p.state)).toEqual(['clean']);
   });
 });
 

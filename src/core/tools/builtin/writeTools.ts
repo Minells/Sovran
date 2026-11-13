@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { policyPaths, resolveAndVerify, type ResolvedPath } from '../../security/paths';
-import { applySearchReplace, contentHash, isProbablyBinary, makeDiff } from '../edits';
+import { applySearchReplace, contentHash, isProbablyBinary, isValidUtf8, makeDiff } from '../edits';
 import { ToolError, defineTool, type PreparedAction, type ToolContext, type ToolResult } from '../types';
 
 interface EditState {
@@ -16,6 +16,14 @@ async function readExisting(ctx: ToolContext, resolved: ResolvedPath): Promise<{
   if (stat.type === 'directory') throw new ToolError(`${resolved.relative} is a directory.`);
   const text = await ctx.workspace.readFile(resolved.absolute);
   if (isProbablyBinary(text)) throw new ToolError(`${resolved.relative} is a binary file and cannot be edited.`);
+  // Text in another encoding (Windows-1252, Shift JIS…) reads as UTF-8 with U+FFFD in place of what could not be
+  // decoded. Writing that back would destroy those characters in the whole file, so the edit is refused. A file open
+  // in the editor is read from its buffer, already decoded with its own encoding, and never gets here.
+  if (text.includes('\uFFFD') && ctx.workspace.readBytes && !isValidUtf8(await ctx.workspace.readBytes(resolved.absolute))) {
+    throw new ToolError(
+      `${resolved.relative} is not UTF-8 text, so editing it would corrupt its non-ASCII characters. Ask the user to open it in the editor with its encoding, or to convert it to UTF-8.`,
+    );
+  }
   return { exists: true, text };
 }
 

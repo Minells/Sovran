@@ -15,7 +15,7 @@ import { effectiveLimits } from '../providers/limits';
 import { ProviderError, errorFromException } from '../providers/errors';
 import type { ChatProvider, ModelConfig, ResolvedToolMode } from '../providers/types';
 import { PathError } from '../security/paths';
-import { redact } from '../security/redact';
+import { redact, redactKnown } from '../security/redact';
 import {
   messagesForModel,
   type AssistantMessage,
@@ -621,7 +621,11 @@ export class AgentRunner {
       id: this.newId(),
       toolCallId: call.id,
       toolName: call.name,
-      content: truncateMiddle(redact(content, o.secrets ?? []), this.toolSettings(o).maxToolResultChars),
+      // Only the secrets Sovran holds are masked: the model must read files and output exactly as they are.
+      content: truncateMiddle(
+        redactKnown(content, o.secrets ?? []),
+        this.toolSettings(o).maxToolResultChars,
+      ),
       status,
       durationMs: this.now() - started,
       createdAt: this.now(),

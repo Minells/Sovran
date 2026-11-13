@@ -56,7 +56,9 @@ export class CheckpointRecorder implements WorkspacePort {
   async writeFile(absPath: string, content: string): Promise<void> {
     const snap = await this.snapshot(absPath);
     await this.inner.writeFile(absPath, content);
-    snap.afterHash = contentHash(content);
+    // What the file holds after the write, not what was asked for: format-on-save or the document's line endings may
+    // change it, and Undo must still recognize the file as the one the agent left.
+    snap.afterHash = contentHash(await this.inner.readFile(absPath).catch(() => content));
   }
 
   async deleteFile(absPath: string): Promise<void> {
