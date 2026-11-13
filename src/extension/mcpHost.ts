@@ -96,6 +96,7 @@ export class McpHost implements vscode.Disposable {
             userHome: os.homedir(),
             env: process.env,
           }),
+          roots: () => (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
           token: async (server) => this.deps.secrets.get(credentialKey(server)),
         }),
       logger: deps.logger,

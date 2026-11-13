@@ -9,7 +9,10 @@ import type { McpServerConfig } from '../../core/mcp/config';
 import type { McpTransportFactory } from '../../core/mcp/hub';
 import {
   commandCandidates,
+  commandInWorkspace,
   commandNotFound,
+  isBareCommand,
+  outsideWorkspace,
   McpConfigError,
   resolveLaunch,
   type McpVariables,
@@ -19,6 +22,8 @@ export interface McpTransportDeps {
   managedLaunch?: (server: McpServerConfig) => Promise<McpServerConfig>;
   /** Read for every connection: the open folder and the environment may change. */
   variables: () => McpVariables;
+  /** The open workspace folders. A bare command is never taken from one of them on Windows. */
+  roots?: () => readonly string[];
   /** The server's token from Secret Storage. */
   token: (server: McpServerConfig) => Promise<string | undefined>;
 }
@@ -52,9 +57,19 @@ export class NodeMcpTransports implements McpTransportFactory {
       pathext: lookup('PATHEXT'),
       platform: process.platform,
     });
-    if (!(await anyFile(candidates))) throw new McpConfigError(commandNotFound(launch.command));
+    let command = launch.command;
+    if (process.platform === 'win32' && isBareCommand(command, 'win32')) {
+      // Started by its full path, so cmd.exe cannot pick a file of the same name from the working folder.
+      const trusted = outsideWorkspace(candidates, this.deps.roots?.() ?? [], 'win32');
+      const found = await firstFile(trusted);
+      if (!found)
+        throw new McpConfigError(
+          (await firstFile(candidates)) ? commandInWorkspace(command) : commandNotFound(command),
+        );
+      command = found;
+    } else if (!(await firstFile(candidates))) throw new McpConfigError(commandNotFound(command));
     const transport = new StdioClientTransport({
-      command: launch.command,
+      command,
       args: launch.args,
       env: launch.env,
       cwd: launch.cwd,
@@ -76,15 +91,15 @@ export class NodeMcpTransports implements McpTransportFactory {
   }
 }
 
-/** Whether one of the files exists (and, outside Windows, may be run). */
-async function anyFile(candidates: readonly string[]): Promise<boolean> {
+/** The first of the files that exists (and, outside Windows, may be run). */
+async function firstFile(candidates: readonly string[]): Promise<string | undefined> {
   for (const file of candidates) {
     try {
       await fs.access(file, process.platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
-      if ((await fs.stat(file)).isFile()) return true;
+      if ((await fs.stat(file)).isFile()) return file;
     } catch {
       // not this one
     }
   }
-  return false;
+  return undefined;
 }
