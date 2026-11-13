@@ -535,6 +535,7 @@ export class AgentRunner {
     const blocks: string[] = [];
     let text = '';
     let reasoning = '';
+    let finishReason: string | null = null;
 
     const onSegments = (segments: { kind: string; text: string }[]) => {
       for (const s of segments) {
@@ -579,11 +580,22 @@ export class AgentRunner {
         case 'usage':
           o.emit({ type: 'usage', promptTokens: ev.promptTokens, completionTokens: ev.completionTokens });
           break;
+        case 'finish':
+          finishReason = ev.reason ?? finishReason;
+          break;
         default:
           break;
       }
     }
     onSegments(parser.flush());
+    // A reply cut at the output limit looks complete, and a tool call cut there fails as invalid JSON: say why.
+    if (finishReason === 'length') {
+      o.emit({
+        type: 'notice',
+        level: 'warning',
+        message: `${o.model.name ?? o.model.id} reached its output limit, so this reply may be cut off. Ask it to continue, or raise the model's maximum output tokens.`,
+      });
+    }
 
     const calls: ToolCall[] = [];
     if (partials.size > 0) {
