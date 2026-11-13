@@ -160,6 +160,23 @@ describe('AgentRunner', () => {
     expect(a && a.content).toBe('Answer');
   });
 
+  it('says when a reply was cut at the output limit', async () => {
+    const cut = setup([[text('half an ans'), { type: 'finish', reason: 'length' }]]);
+    await cut.run();
+    expect(cut.events.filter((e) => e.type === 'notice')).toMatchObject([{ level: 'warning', message: expect.stringMatching(/output limit/) }]);
+    const whole = setup([[text('done'), { type: 'finish', reason: 'stop' }]]);
+    await whole.run();
+    expect(whole.events.some((e) => e.type === 'notice')).toBe(false);
+  });
+
+  it('gives the model file content unchanged, masking only the provider key', async () => {
+    const source = 'const token = getToken(); // key-123456\n';
+    const t = setup([[call(0, 'read_file', { path: 'src/a.ts' })], [text('ok')]], { files: { 'src/a.ts': source } });
+    await t.run({ secrets: ['key-123456'] });
+    const result = t.session.messages.find((m) => m.role === 'tool');
+    expect(result?.content).toContain('const token = getToken(); // ••••');
+  });
+
   it('stops at the iteration limit', async () => {
     const turns = Array.from({ length: 5 }, () => [call(0, 'list_directory', { path: '.' })]);
     const t = setup(turns);

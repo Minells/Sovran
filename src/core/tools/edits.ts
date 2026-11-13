@@ -81,3 +81,12 @@ export function truncateMiddle(text: string, maxChars: number): string {
 }
 
 export const isProbablyBinary = (text: string) => text.slice(0, 8000).includes('\0');
+
+export function isValidUtf8(bytes: Uint8Array): boolean {
+  try {
+    new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -19,11 +19,12 @@ export function matchesAllowList(command: string, allowList: readonly string[]):
 }
 
 /**
- * Matches one of `words` in command position: at the start, after an operator (`; & | ( $(` or a backtick), or after
- * a launcher such as `xargs` or `env VAR=1`. A plain argument (`grep -r sudo docs`) does not match. Commands hidden
- * inside quotes are covered by the nested-shell guardrail instead.
+ * Matches one of `words` in command position: at the start, on a new line, after an operator (`; & | ( {  $(` or a
+ * backtick) or a shell keyword (`then`, `do`, `else`), and after `!`, variable assignments (`FOO=1 cmd`) or a launcher
+ * such as `xargs` or `env VAR=1`. A plain argument (`grep -r sudo docs`) does not match. Commands hidden inside quotes
+ * are covered by the nested-shell and inline-code guardrails instead.
  */
-const COMMAND_POSITION = String.raw`(?:^|[;&|(\x60]|\$\()\s*(?:(?:xargs|nohup|time|exec|command|env(?:\s+\w+=\S*)*|timeout\s+\S+)\s+)*`;
+const COMMAND_POSITION = String.raw`(?:^|[;&|({\x60\n\r]|\$\(|\b(?:then|do|else)\s)\s*(?:!\s+)?(?:\w+=\S*\s+)*(?:(?:xargs|nohup|time|exec|command|env(?:\s+\w+=\S*)*|timeout\s+\S+)\s+)*`;
 const asCommand = (words: string) => new RegExp(`${COMMAND_POSITION}(?:${words})(?=\\s|$|[;&|)])`);
 
 /**
@@ -32,22 +33,36 @@ const asCommand = (words: string) => new RegExp(`${COMMAND_POSITION}(?:${words})
  */
 const HIGH_RISK: Array<[RegExp, string]> = [
   [/\brm\s+(?:[^\n;&|]*\s)?(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b/, 'Deletes files and folders recursively.'],
+  [
+    /\bRemove-Item\b[^\n;&|]*\s-Recurse\b|\b(?:rd|rmdir|del|erase)\s+(?:[^\n;&|]*\s)?\/s\b/i,
+    'Deletes files and folders recursively.',
+  ],
   [/\bfind\b[^\n;&|]*\s(?:-delete|-exec\s+rm)\b/, 'Deletes the files a search finds.'],
   [asCommand('sudo|doas|pkexec'), 'Runs with elevated privileges.'],
   [
     /\b(?:curl|wget)\b[^|\n]*\|\s*(?:sudo\s+)?(?:\w*sh|python\d*(?:\.\d+)?|node|perl|ruby|php|pwsh|powershell|iex)\b|(?:<\(|\$\()\s*(?:curl|wget)\b/i,
     'Runs a downloaded script.',
   ],
+  [
+    /\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^|\n]*\|\s*(?:iex|Invoke-Expression)\b/i,
+    'Runs a downloaded script.',
+  ],
   [/\bbase64\s+(?:-d|--decode|-D)\b[^\n]*\|\s*\w*sh\b/, 'Runs dynamically built or hidden commands.'],
+  [/(?:^|[;&|({\n\r])\s*(?:iex|Invoke-Expression)\b/i, 'Runs dynamically built or hidden commands.'],
   [asCommand('eval'), 'Runs dynamically built or hidden commands.'],
   [
     /\b(?:ba|z|da|k|fi)?sh\s+(?:-\w+\s+)*-\w*c\b|\b(?:pwsh|powershell)(?:\.exe)?\b[^\n]*\s-(?:c|command|encodedcommand|e)\b|\bcmd(?:\.exe)?\s+\/[ck]\b/i,
     'Runs a nested shell command, which hides what actually runs.',
   ],
+  [
+    // Only among the interpreter's own leading options: `python -m pytest -c setup.cfg` is not inline code.
+    /\b(?:python[\d.]*|pypy\d*)\s+(?:-[A-Za-z]+\s+)*-[A-Za-z]*c\b|\b(?:node|nodejs|bun)\s+(?:-\S+\s+)*(?:-e|-p|-pe|--eval|--print)\b|\b(?:perl|ruby)\s+(?:-\S+\s+)*-[A-Za-z]*e\b|\bphp\s+(?:-\S+\s+)*-r\b|\bdeno\s+eval\b|\bosascript\s+(?:-\S+\s+)*-e\b/,
+    'Runs inline code in an interpreter, which the other checks cannot read.',
+  ],
   [/\bgit\s+push\b[^\n;&|]*(?:\s--force\b|\s-f\b|\s\+\S)/, 'Force-pushes and may overwrite remote history.'],
   [/\bgit\s+push\b(?![^\n;&|]*(?:\s--force\b|\s-f\b|\s\+\S))/, 'Pushes commits to a remote repository.'],
   [
-    /\bgit\s+(?:reset\s+--hard|clean\s+-[a-zA-Z]*f|checkout\s+--\s|restore\s|stash\s+(?:drop|clear)\b|branch\s+-D\b)/,
+    /\bgit\s+(?:reset\b[^\n;&|]*\s--hard\b|clean\b[^\n;&|]*\s-[a-zA-Z]*f|checkout\s+(?:[^\n;&|]*\s)?(?:--\s|\.(?:\s|$))|restore\s|stash\s+(?:drop|clear)\b|branch\s+-D\b)/,
     'Discards local changes irreversibly.',
   ],
   [/\bdd\s+if=|\bformat\s+[a-zA-Z]:/, 'Can damage the system or stop the machine.'],
@@ -63,8 +78,14 @@ const HIGH_RISK: Array<[RegExp, string]> = [
     /\bcurl\b[^\n;&|]*\s(?:-d|--data(?:-\w+)?|-F|--form|-T|--upload-file)(?=[\s=]|$)|\bwget\b[^\n;&|]*--post-(?:data|file)\b/,
     'Sends data to a remote server.',
   ],
+  [
+    // A URL built from a command's output (`curl "https://host/$(cat file)"`) uploads that output.
+    /\b(?:curl|wget)\b[^\n;&|]*(?:\$\(|\x60)|\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n;&|]*\s-(?:InFile|Body|Method\s+(?:Post|Put|Patch))\b/i,
+    'Sends data to a remote server.',
+  ],
   [asCommand('nc|ncat|netcat|socat|telnet'), 'Opens a raw network connection.'],
   [asCommand('scp|sftp'), 'Copies files to or from another machine.'],
+  [asCommand('ssh'), 'Runs commands on another machine.'],
   [/\brsync\b[^\n;&|]*\s[\w.-]+@?[\w.-]*:/, 'Copies files to or from another machine.'],
   [
     /\b(?:security\s+find-(?:generic|internet)-password|gh\s+auth\s+token|git\s+credential\s+fill|aws\s+configure\s+get|gcloud\s+auth\s+print-\w+-token|az\s+account\s+get-access-token)\b/,
@@ -79,8 +100,8 @@ const HIGH_RISK: Array<[RegExp, string]> = [
     /\bgit\s+(?:[^\n;&|]*\s)?(?:-c\s*\S+=|--config-env\b|--exec-path\b|--upload-pack\b|--receive-pack\b)|\b(?:npm|pnpm|yarn)\b[^\n;&|]*\s--script-shell\b/,
     'Overrides tool settings in a way that can run other programs.',
   ],
-  [/(?:^|[;&|(]\s*)(?:env|set)\s*(?:$|[|;&)])/, 'Prints environment variables, which may contain secrets.'],
-  [asCommand('printenv'), 'Prints environment variables, which may contain secrets.'],
+  [/(?:^|[;&|({\n\r]\s*)(?:env|set)\s*(?:$|[|;&)>\n\r])/, 'Prints environment variables, which may contain secrets.'],
+  [asCommand('printenv|export\\s+-p'), 'Prints environment variables, which may contain secrets.'],
   [asCommand('crontab|systemctl|launchctl|schtasks'), 'Changes system services or scheduled tasks.'],
   [
     /\b(?:npm|pnpm|yarn|bun)\s+(?:i|install|add)\b[^\n;&|]*\s(?:-g|--global)\b|\byarn\s+global\s+add\b|\b(?:apt|apt-get|yum|dnf|brew|choco|winget|snap|pacman)\s+(?:install|remove|upgrade|uninstall)\b/,

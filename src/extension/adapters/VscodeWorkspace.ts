@@ -112,7 +112,13 @@ export class VscodeWorkspace implements WorkspacePort {
     const edit = new vscode.WorkspaceEdit();
     edit.replace(uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), content);
     if (!(await vscode.workspace.applyEdit(edit))) throw new Error(`VS Code refused the edit to ${vscode.workspace.asRelativePath(uri)}.`);
-    await doc.save();
+    // save() answers false when nothing reached the disk (a read-only file, a conflict with a change on disk).
+    // Reporting success then would leave commands and later reads working on the old file.
+    if (!(await doc.save()) && doc.isDirty) {
+      throw new Error(
+        `${vscode.workspace.asRelativePath(uri)} was changed in the editor but could not be saved. Save it there, then retry.`,
+      );
+    }
   }
 
   async deleteFile(absPath: string): Promise<void> {

@@ -91,3 +91,39 @@ export async function resolveAndVerify(input: string, workspace: WorkspacePort):
   }
   return resolved;
 }
+
+/**
+ * The paths the permission policy must check for a verified path: the one that was asked for and, when it goes
+ * through a symbolic link, the one it really is. A link named `docs/notes.txt` that points to `.env` is the protected
+ * file, whatever it is called. For a file that does not exist yet, its nearest existing folder is resolved.
+ */
+export async function policyPaths(resolved: ResolvedPath, workspace: WorkspacePort): Promise<string[]> {
+  const paths = new Set([resolved.relative]);
+  try {
+    const realRoot = await workspace.realpath(resolved.root.path);
+    const missing: string[] = [];
+    let probe = resolved.absolute;
+    let real: string | undefined;
+    for (;;) {
+      try {
+        real = await workspace.realpath(probe);
+        break;
+      } catch {
+        const parent = path.dirname(probe);
+        if (parent === probe) break;
+        missing.unshift(path.basename(probe));
+        probe = parent;
+      }
+    }
+    if (real !== undefined) {
+      const target = path.join(real, ...missing);
+      if (isInside(realRoot, target)) {
+        const multiRoot = workspace.roots().length > 1;
+        paths.add(toRelative({ ...resolved.root, path: realRoot }, target, multiRoot, path));
+      }
+    }
+  } catch {
+    // The root cannot be resolved: resolveAndVerify has already decided whether the path may be used at all.
+  }
+  return [...paths];
+}

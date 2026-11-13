@@ -78,6 +78,16 @@ pre-releases and even minor versions are stable releases.
 - The status bar shows `auto-edit` or `auto` when Act mode runs unattended.
 
 ### Fixed
+- **The model reads files as they are.** Tool results were masked by credential *shape*, which rewrote ordinary code
+  (`token: string` reached the model as `token: ••••`) and made edits fail or write the mask into the file. Results
+  now mask only the secrets Sovran holds (provider keys and MCP tokens); logs and error messages still mask by shape.
+- Editing a file that is not UTF-8 (Windows-1252, Shift JIS…) is refused with an explanation instead of replacing
+  every non-ASCII character. A file open in the editor with its encoding can still be edited.
+- A file change that VS Code could not save (a read-only file, a conflict on disk) is reported as a failure, not as
+  "Updated".
+- **Undo changes** no longer treats a file as changed by you when format-on-save or the document's line endings
+  altered what the agent wrote.
+- A reply cut at the model's output limit says so, instead of looking complete or failing as an invalid tool call.
 - Recheck native tool permissions, trust, workspace scope and unsaved-file state at delayed Git process dispatch.
 - Remove the basic Git MCP shortcut now that native inspection and controlled writes are available, preserving saved
   servers, custom forms and import workflows.
@@ -90,6 +100,15 @@ pre-releases and even minor versions are stable releases.
 - A removed line that starts with `-- ` (an SQL or Lua comment) was hidden from diffs in the chat.
 
 ### Security
+- Protected paths are checked where a path really leads: a symbolic link to `.env`, or a linked folder that is
+  `.git/hooks`, asks before it is read or written, in every approval mode. `AGENTS.md` is not sent when it is a link
+  out of the workspace or to a protected file, and `list_directory` does not enter folders linked out of the workspace.
+- Auto mode guardrails also catch commands on a new line or after an assignment, keyword or `{`; inline code
+  (`python -c`, `node -e`, `perl -e`…); output placed in a URL (`curl "…/$(cat file)"`); `ssh`; destructive Git with
+  arguments in any order; and recursive deletes and downloaded scripts in PowerShell and `cmd.exe`. They remain
+  heuristics, not a sandbox.
+- More credential files are protected by default: other SSH key types, `.envrc`, key stores (`*.p12`, `*.pfx`,
+  `*.jks`, `*.keystore`), Terraform variables and state, and cloud, Kubernetes and Docker credential files.
 - Dependency install scripts are denied in `allowScripts` (none is needed: esbuild, vsce-sign, ttf2woff2, es5-ext), which silences npm 12's warning, and CI installs with `--ignore-scripts` to check the same setup.
 - Development tooling: `minimatch` and `glob` are overridden to their patched majors (GHSA-g3hv-75wg-m249, GHSA-3g3m-2fjr-6pw4), until ESLint, typescript-eslint, vsce and fantasticon accept them. `npm audit` reports no vulnerabilities and the `glob` deprecation warnings are gone. The extension itself was not affected: none of these packages ships in the VSIX.
 - Attaching a file that matches `sovran.security.protectedPaths` asks for confirmation first, whether it comes from `@`, the attach menu or the file dialog.
