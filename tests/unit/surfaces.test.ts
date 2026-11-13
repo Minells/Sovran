@@ -240,6 +240,26 @@ it('projects tool availability for the effective model and preserves exclusions 
   expect(latest(sidebar, 'toolGroups')?.find((group) => group.id === 'editing')?.selected).toBe(false);
 });
 
+it('projects which tool groups a chat has loaded on demand and what each sends now', async () => {
+  const group = (id: string) => latest(sidebar, 'toolGroups')?.find((g) => g.id === id);
+  expect(group('files')?.loading).toBeUndefined();
+  expect(group('git')).toMatchObject({ loading: 'on-demand', sentTokens: 0 });
+  const context = group('context')!;
+  expect(context.loading).toBe('on-demand');
+  expect(context.sentTokens).toBeGreaterThan(0);
+  expect(context.sentTokens).toBeLessThan(context.definitionTokens);
+
+  // The message asks for a commit: Git reads and writes load, remote operations stay deferred.
+  const running = controller.handle({ type: 'send', text: 'edit a and commit it' });
+  await vi.waitFor(() => expect(approvalsOf(sidebar)).toHaveLength(1));
+  const git = group('git')!;
+  expect(git.loading).toBe('on-demand');
+  expect(git.sentTokens).toBeGreaterThan(0);
+  expect(git.sentTokens).toBeLessThan(git.definitionTokens);
+  await controller.handle({ type: 'approval', id: approvalsOf(sidebar)[0]!.id, approved: false });
+  await running;
+});
+
 it('blocks an approved edit after the host excludes its group and persists the choice', async () => {
   const sessionId = sessionOf(sidebar)!;
   const running = controller.handle({ type: 'send', text: 'edit a' });

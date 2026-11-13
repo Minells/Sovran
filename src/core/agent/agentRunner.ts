@@ -44,7 +44,7 @@ import type { ToolRegistry } from '../tools/registry';
 import { routeToolUnits, type RoutingHints } from '../tools/routing';
 import { ToolError, type AnyTool, type ToolContext, type ToolSettings } from '../tools/types';
 import type { AgentEvent, RunOutcome, ToolLoadReason } from './events';
-import { parseJsonLenient, parseToolCallBlock } from './promptedTools';
+import { parseJsonLenient, parseToolCallBlock, renderToolInstructions } from './promptedTools';
 import { buildSystemPrompt } from './systemPrompt';
 import type { WebFetchPort } from '../web/types';
 import { TaggedStreamParser } from './taggedStream';
@@ -194,6 +194,7 @@ export class AgentRunner {
           estimatedTokens: built.estimatedTokens,
           budgetTokens: built.budgetTokens,
           contextWindow: built.contextWindow,
+          breakdown: built.breakdown,
         });
         const request = built.request;
         offered = built.offered;
@@ -336,6 +337,9 @@ export class AgentRunner {
     });
     const { contextWindow, budgetTokens } = this.inputBudget(o);
     const schemaTokens = toolMode === 'native' ? estimateTokens(JSON.stringify(schemas)) : 0;
+    // Prompted tools are described inside the system prompt; the breakdown still counts them as tools.
+    const promptedToolTokens =
+      toolMode === 'prompted' && schemas.length ? estimateTokens(renderToolInstructions(schemas)) : 0;
     const ctx = buildContext({
       systemPrompt,
       messages: messagesForModel(o.session),
@@ -359,6 +363,11 @@ export class AgentRunner {
       },
       droppedTurns: ctx.droppedTurns,
       estimatedTokens: ctx.estimatedTokens,
+      breakdown: {
+        system: Math.max(0, ctx.breakdown.system - promptedToolTokens),
+        tools: ctx.breakdown.tools + promptedToolTokens,
+        messages: ctx.breakdown.messages,
+      },
       budgetTokens,
       contextWindow,
     };

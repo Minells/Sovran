@@ -6,6 +6,18 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- **Tools load when needed** (`sovran.tools.loading`, on by default). Requests carry the file, editing, terminal and
+  editor-context tools; Git, diagnostics, symbols, Web fetch and each MCP server join a chat when it needs them. They
+  load all at once when every definition fits a tenth of the model's input budget, from the tools a chat already used,
+  from what the user's message asks for (English and Italian wording, URLs, server names, `/review` and `/fix`), when
+  the model calls the new `load_tools`, or when it calls a tool that is not loaded yet (that call loads it and does not
+  run). On a 32k window the first request carries about 1,500 tokens of native tool definitions instead of 4,800, and
+  MCP servers add only an index line until used. Loaded tools stay for the chat and follow the ones already sent, so
+  server prompt caches stay valid. Loading never changes permissions; turn it off to send every tool.
+- Custom commands in `.sovran/commands/` accept an optional front matter block with `description` and `tools`, the
+  tool units the command needs.
+- The context meter's tooltip splits the last request into instructions, tool definitions and conversation, and lists
+  the tools the chat has loaded. **Tools for this chat** shows which groups are loaded and what the others would add.
 - Consolidated **Settings → Tools** with built-in enable/always-review controls, optional integrations and per-chat
   group choices with definition cost estimates. Excluded groups remain blocked through approval and dispatch, in
   native and prompted tool modes. Choices persist with chats; older chats preserve existing behavior.

@@ -1,4 +1,4 @@
-import type { CompactionState, ErrorInfo, SessionMessage } from '../sessions/model';
+import type { CompactionState, ContextBreakdown, ErrorInfo, SessionMessage } from '../sessions/model';
 
 export type ToolPhase = 'awaiting_approval' | 'running';
 
@@ -19,7 +19,13 @@ export type AgentEvent =
   | { type: 'tool_phase'; callId: string; toolName: string; label: string; phase: ToolPhase }
   | { type: 'tool_output'; callId: string; chunk: string }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; message: string }
-  | { type: 'context'; estimatedTokens: number; budgetTokens: number; contextWindow: number }
+  | {
+      type: 'context';
+      estimatedTokens: number;
+      budgetTokens: number;
+      contextWindow: number;
+      breakdown?: ContextBreakdown;
+    }
   | { type: 'usage'; promptTokens?: number; completionTokens?: number }
   /** `detail` explains individual units, e.g. `git.changes: "committa"`. */
   | { type: 'tools_loaded'; units: string[]; reason: ToolLoadReason; detail?: string[] }

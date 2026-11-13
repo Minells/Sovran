@@ -56,6 +56,7 @@ const baseState = (over: Partial<AppState> = {}): AppState => ({
     maxToolResultChars: 20000,
     persistSessions: true,
     generateTitles: true,
+    toolLoading: 'auto',
     overriddenByWorkspace: [],
   },
   configFile: { path: '~/.sovran/config.yaml', state: 'missing', providers: 0, problems: [] },
@@ -541,6 +542,54 @@ describe('brand refresh UX', () => {
     expect(screen.queryByText('src/a.ts')).not.toBeInTheDocument();
     await userEvent.click(row);
     expect(screen.getByText('src/a.ts')).toBeInTheDocument();
+  });
+
+  it('folds tool loads into exploration and shows a lone load as one quiet line', async () => {
+    const step = (id: string, name: string, args: string, extra: Record<string, unknown> = {}) => [
+      { role: 'assistant', id: `a${id}`, content: '', createdAt: 0, toolCalls: [{ id: `c${id}`, name, arguments: args }] },
+      { role: 'tool', id: `t${id}`, toolCallId: `c${id}`, toolName: name, content: 'ok', status: 'success', createdAt: 0, ...extra },
+    ];
+    mount(
+      baseState({
+        session: {
+          id: 's',
+          title: 't',
+          messages: [
+            { role: 'user', id: 'u', content: 'go', createdAt: 0 },
+            ...step('1', 'read_file', '{"path":"src/a.ts"}'),
+            ...step('2', 'load_tools', '{"units":["git.changes"]}', { loaded: ['git', 'git.changes'] }),
+            ...step('3', 'read_file', '{"path":"src/b.ts"}'),
+            { role: 'assistant', id: 'a4', content: 'Now the docs.', createdAt: 0 },
+            ...step('5', 'mcp__docs__search', '{}', { loaded: ['mcp:docs'] }),
+          ] as never,
+        },
+        mcp: { active: true, servers: [{ id: 'docs', name: 'Docs MCP', tools: [] }] } as never,
+      }),
+    );
+    expect(screen.getByRole('button', { name: /Explored/ })).toHaveTextContent('2 files read, loaded Git');
+    const lone = screen.getByText('Docs MCP tools');
+    expect(lone.closest('.sv-tool')).toHaveClass('sv-tool--quiet');
+    expect(lone.closest('button')).toBeNull();
+  });
+
+  it('splits the context meter tooltip into instructions, tools and conversation', () => {
+    mount(
+      baseState({
+        usage: {
+          tokens: 7100,
+          contextWindow: 32768,
+          source: 'estimate',
+          breakdown: { system: 400, tools: 1500, messages: 5200 },
+        },
+        toolGroups: [
+          { id: 'git', label: 'Git', selected: true, availableTools: 12, definitionTokens: 2500, loading: 'loaded', sentTokens: 2500 },
+          { id: 'web', label: 'Web fetch', selected: true, availableTools: 1, definitionTokens: 170, loading: 'on-demand', sentTokens: 0 },
+        ],
+      }),
+    );
+    const meter = screen.getByRole('button', { name: /Context 22% used/ });
+    expect(meter.title).toContain('About 400 for instructions, 1.5k for tools, 5.2k for the conversation.');
+    expect(meter.title).toContain('Tools loaded in this chat: Git.');
   });
 
   it('keeps one line of key hints that follows what the keys do right now', async () => {
@@ -1521,6 +1570,27 @@ describe('settings view', () => {
         (message) => message.type === 'installMcpIntegration' || message.type === 'setMcpServerEnabled',
       ),
     ).toBe(false);
+  });
+
+  it('switches on-demand loading and shows what each group costs now and later', async () => {
+    mount(
+      settingsState({
+        toolAvailability: 'available',
+        toolGroups: [
+          { id: 'context', label: 'Editor and diagnostics', selected: true, availableTools: 6, definitionTokens: 1000, loading: 'on-demand', sentTokens: 130 },
+          { id: 'web', label: 'Web fetch', selected: true, availableTools: 1, definitionTokens: 170, loading: 'on-demand', sentTokens: 0 },
+          { id: 'git', label: 'Git', selected: true, availableTools: 12, definitionTokens: 2500, loading: 'loaded', sentTokens: 2500 },
+        ],
+      }),
+    );
+    await openArea('Tools');
+    await userEvent.click(screen.getByLabelText(/Load tools when needed/));
+    expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'tools.loading', value: 'all' } });
+    await clickButton(/^Tools for this chat/);
+    expect(screen.getByText('6 available · ~130 tokens, ~870 more when needed')).toBeInTheDocument();
+    expect(screen.getByText('1 available · loads when needed, ~170 tokens')).toBeInTheDocument();
+    expect(screen.getByText('12 available · loaded · ~2,500 tokens')).toBeInTheDocument();
+    expect(screen.getByText(/Estimated definition tokens per request: ~2,630 · ~1,040 more load when needed/)).toBeInTheDocument();
   });
 
   it('summarizes Tools without opening advanced controls or writing settings', async () => {

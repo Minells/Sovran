@@ -21,7 +21,26 @@ const TOOLS: Record<string, ToolInfo> = {
   edit_file: { icon: 'edit', done: 'Edited', doing: 'Editing' },
   apply_diff: { icon: 'diff', done: 'Edited', doing: 'Editing' },
   execute_terminal: { icon: 'terminal', done: 'Ran', doing: 'Running' },
+  load_tools: { icon: 'extensions', done: 'Loaded', doing: 'Loading' },
 };
+
+/** Names of the tool units Sovran loads on demand. Git's three units read as one; MCP units are named by server. */
+const UNIT_LABELS: Record<string, string> = {
+  diagnostics: 'Diagnostics',
+  symbols: 'Symbols',
+  git: 'Git',
+  'git.changes': 'Git',
+  'git.remote': 'Git',
+  web: 'Web fetch',
+};
+
+/** "Git, Context7 MCP" for loaded units, without repeating a name. */
+export function unitsLabel(units: readonly string[], servers: ReadonlyArray<{ id: string; name: string }>): string {
+  const label = (unit: string) =>
+    UNIT_LABELS[unit] ??
+    (unit.startsWith('mcp:') ? (servers.find((s) => `mcp:${s.id}` === unit)?.name ?? unit.slice(4)) : unit);
+  return [...new Set(units.map(label))].join(', ');
+}
 
 const MCP_TOOL: ToolInfo = { icon: 'mcp', done: 'Used', doing: 'Using' };
 
@@ -65,6 +84,8 @@ export function toolTarget(name: string, rawArgs: string): string {
       return 'active editor';
     case 'list_directory':
       return pick('path') || '.';
+    case 'load_tools':
+      return Array.isArray(a.units) ? a.units.filter((u) => typeof u === 'string').join(', ') : pick('units');
     default:
       // MCP tools have no common argument to show; the row names the tool and its server instead.
       return isMcpTool(name) ? '' : pick('path');

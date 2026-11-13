@@ -15,7 +15,12 @@ function chatToolSummary(app: AppState) {
   const selected = groups.filter((group) => group.selected);
   const available = selected.reduce((sum, group) => sum + group.availableTools, 0);
   const excluded = groups.length - selected.length;
-  const tokens = selected.reduce((sum, group) => sum + group.definitionTokens, 0);
+  // With on-demand loading, what each request carries now; the rest loads when the chat needs it.
+  const tokens = selected.reduce((sum, group) => sum + (group.sentTokens ?? group.definitionTokens), 0);
+  const deferred = selected.reduce(
+    (sum, group) => sum + (group.sentTokens === undefined ? 0 : group.definitionTokens - group.sentTokens),
+    0,
+  );
   const mode = app.mode === 'plan' ? 'Plan' : 'Act';
   const status = !app.session
     ? 'No active chat'
@@ -28,7 +33,7 @@ function chatToolSummary(app: AppState) {
           : available
             ? `${available} available in ${mode}`
             : 'No tools available for this chat';
-  return { status, excluded, tokens };
+  return { status, excluded, tokens, deferred };
 }
 
 export function ChatToolMenu() {
@@ -83,14 +88,20 @@ function ChatToolGroups({ app, inSettings = false }: { app: AppState; inSettings
   if (!sessionId || !app.toolGroups?.length) {
     return <p className="sv-field__help">Tool groups appear here when available for the chat.</p>;
   }
-  const { status, tokens } = chatToolSummary(app);
+  const { status, tokens, deferred } = chatToolSummary(app);
   const servers = new Map(app.mcp.servers.map((server) => [`mcp:${server.id}`, server]));
   const groups = app.toolGroups;
   const renderGroup = (group: NonNullable<AppState['toolGroups']>[number]) => {
     const server = servers.get(group.id);
     let description = `${group.availableTools} available`;
-    if (group.definitionTokens) {
-      description += ` · ~${group.definitionTokens.toLocaleString()} tokens${group.selected ? '' : ' when selected'}`;
+    if (group.definitionTokens && group.selected && group.loading === 'on-demand') {
+      const sent = group.sentTokens ?? 0;
+      const later = (group.definitionTokens - sent).toLocaleString();
+      description += sent
+        ? ` · ~${sent.toLocaleString()} tokens, ~${later} more when needed`
+        : ` · loads when needed, ~${later} tokens`;
+    } else if (group.definitionTokens) {
+      description += `${group.loading === 'loaded' && group.selected ? ' · loaded' : ''} · ~${group.definitionTokens.toLocaleString()} tokens${group.selected ? '' : ' when selected'}`;
     } else if (server) {
       if (!app.mcp.active) description = 'Unavailable in Restricted Mode';
       else if (server.status === 'starting') description = 'Connecting…';
@@ -117,6 +128,7 @@ function ChatToolGroups({ app, inSettings = false }: { app: AppState; inSettings
       {tokens ? (
         <p className="sv-field__help sv-tabular">
           Estimated definition tokens per request: ~{tokens.toLocaleString()}
+          {deferred ? ` · ~${deferred.toLocaleString()} more load when needed` : ''}
         </p>
       ) : null}
       {integrations.length && builtIn.length ? (

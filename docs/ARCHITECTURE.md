@@ -206,6 +206,23 @@ can come and go during a run (the next model round-trip sees the change). A sour
 tool may give its JSON Schema directly (`ToolDefinition.parameters`) instead of deriving it from its zod schema; such
 schemas are not cached. The MCP hub is the only source today (section 12).
 
+**On-demand loading** (`core/tools/loading.ts`, `core/tools/routing.ts`, ADR-034). Every tool belongs to a *unit*:
+`core` (files, editing, terminal, workspace and editor context) is always offered; `diagnostics`, `symbols`, `web`,
+`git`, `git.changes`, `git.remote` and one `mcp:<server>` per MCP server are offered once the chat has loaded them
+(`Session.toolUnits`). With `sovran.tools.loading: auto`, `AgentRunner.run` starts each run with: the units of the tool
+calls already in the chat (first run only), every unit when all definitions fit 10% of the input budget (else every
+native unit when those fit), and what `routeToolUnits` reads in the user's message and slash command. During the run
+the model can call `load_tools`, a virtual tool the runner builds from the current index, or call a tool it has not
+loaded, which loads the unit and returns without running it. Loading only adds visibility: availability stays with the
+registry and permissions with the policy, and dispatch still requires the definition to have been offered in that
+request.
+
+Units accumulate and their tools follow `load_tools`, after the core; the index lists every loadable unit in a stable
+order. Without a new load the system prompt and the tools array are byte-identical between steps, and a load leaves the
+earlier tools as a prefix, which keeps server prompt caches valid. With every unit loaded the request is the same as
+with loading off (`all`). The router is pattern matching over the user's own words (English and Italian), never over
+attachments, files or tool results; `tests/fixtures/routingCorpus.ts` measures its precision and recall per unit.
+
 ## 7. Permissions
 
 `PermissionPolicy.decide(tool, args, ctx) → allow | ask | deny`:

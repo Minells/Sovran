@@ -1,7 +1,13 @@
 import { escapeAttribute, formatToolResult, neutralizeClosingTags, serializeToolCall } from '../agent/promptedTools';
 import { dimensions, estimateImageTokens, IMAGE_LABELS } from '../images/images';
 import type { ResolvedToolMode, WireContentPart, WireMessage } from '../providers/types';
-import type { ContextAttachment, ImageAttachment, SessionMessage, ToolMessage } from '../sessions/model';
+import type {
+  ContextAttachment,
+  ContextBreakdown,
+  ImageAttachment,
+  SessionMessage,
+  ToolMessage,
+} from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
 import { FORMAT_LABELS } from '../documents/types';
 
@@ -103,6 +109,8 @@ export interface BuildContextOptions {
 export interface BuildContextResult {
   messages: WireMessage[];
   estimatedTokens: number;
+  /** `estimatedTokens` by part. Tools counts the schemas sent alongside the messages only. */
+  breakdown: ContextBreakdown;
   droppedTurns: number;
   elidedResults: number;
 }
@@ -221,5 +229,7 @@ export function buildContext(o: BuildContextOptions): BuildContextResult {
     system.content += `\n\nNote: ${droppedTurns} earlier exchange(s) were omitted to fit the context window.`;
   }
   const messages = [system, ...turns.flat()];
-  return { messages, estimatedTokens: total(), droppedTurns, elidedResults };
+  const estimatedTokens = total();
+  const breakdown = { system: fixed - o.toolSchemaTokens, tools: o.toolSchemaTokens, messages: estimatedTokens - fixed };
+  return { messages, estimatedTokens, breakdown, droppedTurns, elidedResults };
 }

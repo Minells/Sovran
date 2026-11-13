@@ -47,6 +47,9 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
 - **Workspace diagnostics:** read cached editor Problems for active or unopened files, filtered by file/folder, severity and result count. Protected and external paths are omitted; the tool does not run checks or start language servers.
 - **Semantic navigation:** list file symbols, locate definitions and find references using the active VS Code language providers in trusted workspaces.
 - **Public Web reads:** `web_fetch` reads one approved public URL as structured text with source links. Available in trusted Plan/Act, with approval for each URL even in Auto. No account, search service, browser or crawler installation.
+- **Tools loaded when needed:** requests carry the file, editing and terminal tools; Git, diagnostics, symbols, Web and
+  MCP tools join a chat when your message or the model needs them, so small context windows do not fill with tool
+  definitions. Permissions do not change.
 - **Tools:** built-in permissions and per-chat group selection with definition cost estimates. Optional Playwright,
   Chrome DevTools, GitHub, GitLab and Context7 integrations, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
 - **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
@@ -130,6 +133,7 @@ Never put API keys in YAML or settings. Use **Sovran: Set Provider API Key…**.
 | `sovran.providers` | `[]` | OpenAI-compatible endpoints |
 | `sovran.defaultModel` / `sovran.planModel` | `""` | Act / Plan model; blank Plan inherits Act |
 | `sovran.approvals.mode` | `ask` | `ask`, `edits` (Auto-edit), or `auto` |
+| `sovran.tools.loading` | `auto` | Load tools when needed, or send `all` with every request |
 | `sovran.tools.disabled` / `sovran.tools.forceAsk` | `[]` | Disable native tools or always review their calls |
 | `sovran.agent.maxIterations` | `25` | Model round-trips per request |
 | `sovran.terminal.timeoutSeconds` | `120` | Command timeout |

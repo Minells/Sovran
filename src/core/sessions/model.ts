@@ -112,11 +112,20 @@ export interface ToolMessage {
 
 export type SessionMessage = UserMessage | AssistantMessage | ToolMessage;
 
+/** Estimated tokens of a request by part: instructions (system prompt, summary), tool definitions, conversation. */
+export interface ContextBreakdown {
+  system: number;
+  tools: number;
+  messages: number;
+}
+
 export interface ContextUsage {
   tokens: number;
   contextWindow: number;
   source: 'estimate' | 'server';
   updatedAt: number;
+  /** Estimated split of the last request, whatever `source` says about `tokens`. */
+  breakdown?: ContextBreakdown;
 }
 
 export interface CompactionState {

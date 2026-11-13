@@ -219,6 +219,7 @@ export function readSettingsView(s: HostSettings = readSettings()): SettingsView
     maxToolResultChars: s.agent.tools.maxToolResultChars,
     persistSessions: s.persistSessions,
     generateTitles: s.generateTitles,
+    toolLoading: s.agent.toolLoading ?? 'auto',
     overriddenByWorkspace: overridden,
   };
 }

@@ -208,9 +208,20 @@ export function ContextMeter() {
   const pct = Math.min(1, usage.tokens / usage.contextWindow);
   const level = pct >= 0.9 ? 'high' : pct >= 0.7 ? 'mid' : 'low';
   const percent = Math.round(pct * 100);
-  const title = `${usage.source === 'server' ? 'Reported by the server' : 'Estimated'}: ${usage.tokens.toLocaleString('en-US')} of ${usage.contextWindow.toLocaleString(
-    'en-US',
-  )} tokens (${percent}%) in the last request. Click to summarize older messages and free context.`;
+  const split = usage.breakdown;
+  const loaded = (app.toolGroups ?? []).filter((group) => group.loading === 'loaded').map((group) => group.label);
+  const title = [
+    `${usage.source === 'server' ? 'Reported by the server' : 'Estimated'}: ${usage.tokens.toLocaleString('en-US')} of ${usage.contextWindow.toLocaleString(
+      'en-US',
+    )} tokens (${percent}%) in the last request.`,
+    split
+      ? `About ${fmtTokens(split.system)} for instructions, ${fmtTokens(split.tools)} for tools, ${fmtTokens(split.messages)} for the conversation.`
+      : '',
+    loaded.length ? `Tools loaded in this chat: ${loaded.join(', ')}.` : '',
+    'Click to summarize older messages and free context.',
+  ]
+    .filter(Boolean)
+    .join('\n');
   return (
     <button
       type="button"

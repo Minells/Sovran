@@ -7,7 +7,8 @@ import { TOOL_GROUP_PATTERN } from '../core/tools/groups';
 import { hasShellMetacharacters } from '../core/permissions/shell';
 import type { AgentMode, ApprovalMode } from '../core/permissions/policy';
 import type { ToolMode } from '../core/providers/types';
-import type { SessionMessage, SessionSummary } from '../core/sessions/model';
+import type { ContextBreakdown, SessionMessage, SessionSummary } from '../core/sessions/model';
+import type { ToolLoadingMode } from '../core/tools/loading';
 import type { DocumentFormat } from '../core/documents/types';
 import { IMAGE_LIMITS, type ImageMime } from '../core/images/images';
 import {
@@ -193,6 +194,8 @@ export interface ContextUsageView {
   tokens: number;
   contextWindow: number;
   source: 'estimate' | 'server';
+  /** Estimated split of the last request into instructions, tool definitions and conversation. */
+  breakdown?: ContextBreakdown;
 }
 
 export interface CompactionView {
@@ -240,6 +243,8 @@ export interface SettingsView {
   persistSessions: boolean;
   /** Ask the model for a short chat title instead of using the first words of the first message. */
   generateTitles: boolean;
+  /** `auto` sends the core tools and loads the others when a chat needs them; `all` sends every tool. */
+  toolLoading: ToolLoadingMode;
   /** Keys whose effective value comes from workspace settings, so a change here may not apply in this workspace. */
   overriddenByWorkspace: SettingKey[];
 }
@@ -328,6 +333,12 @@ export interface ToolGroupView {
   selected: boolean;
   availableTools: number;
   definitionTokens: number;
+  /**
+   * With tools loaded on demand, whether this chat has loaded the group (`loaded`) or loads it when needed
+   * (`on-demand`), and the tokens it adds to each request now. Absent when the group is always sent.
+   */
+  loading?: 'loaded' | 'on-demand';
+  sentTokens?: number;
 }
 export interface NativeToolView {
   name: string;
@@ -487,6 +498,7 @@ export const settingUpdateSchema = z.discriminatedUnion('key', [
   z.object({ key: z.literal('context.maxToolResultChars'), value: z.number().int().min(2000).max(200_000) }),
   z.object({ key: z.literal('sessions.persist'), value: z.boolean() }),
   z.object({ key: z.literal('sessions.generateTitles'), value: z.boolean() }),
+  z.object({ key: z.literal('tools.loading'), value: z.enum(['auto', 'all']) }),
 ]);
 export type SettingUpdate = z.infer<typeof settingUpdateSchema>;
 export type SettingKey = SettingUpdate['key'];
