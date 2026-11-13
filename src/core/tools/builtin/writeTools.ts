@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { resolveAndVerify, type ResolvedPath } from '../../security/paths';
+import { policyPaths, resolveAndVerify, type ResolvedPath } from '../../security/paths';
 import { applySearchReplace, contentHash, isProbablyBinary, makeDiff } from '../edits';
 import { ToolError, defineTool, type PreparedAction, type ToolContext, type ToolResult } from '../types';
 
@@ -19,12 +19,19 @@ async function readExisting(ctx: ToolContext, resolved: ResolvedPath): Promise<{
   return { exists: true, text };
 }
 
-function proposal(resolved: ResolvedPath, exists: boolean, original: string, proposed: string): PreparedAction {
+async function proposal(
+  ctx: ToolContext,
+  resolved: ResolvedPath,
+  exists: boolean,
+  original: string,
+  proposed: string,
+): Promise<PreparedAction> {
   if (exists && original === proposed) throw new ToolError(`The change would not modify ${resolved.relative}.`);
   const { diff, added, removed } = makeDiff(resolved.relative, original, proposed);
   const state: EditState = { resolved, exists, originalHash: contentHash(original), proposed };
   return {
-    paths: [resolved.relative],
+    // Through a symbolic link, the file that is really written decides whether the path is protected.
+    paths: await policyPaths(resolved, ctx.workspace),
     state,
     approval: {
       kind: 'edit',
@@ -72,7 +79,7 @@ export const writeFileTool = defineTool({
   async prepare(a, ctx) {
     const resolved = await resolveAndVerify(a.path, ctx.workspace);
     const existing = await readExisting(ctx, resolved);
-    return proposal(resolved, existing.exists, existing.text, a.content);
+    return proposal(ctx, resolved, existing.exists, existing.text, a.content);
   },
   execute: (_a, ctx, prepared) => commit(ctx, prepared),
 });
@@ -94,7 +101,7 @@ export const editFileTool = defineTool({
     const existing = await readExisting(ctx, resolved);
     if (!existing.exists) throw new ToolError(`File not found: ${resolved.relative}. Use write_file to create it.`);
     const next = applySearchReplace(existing.text, [{ search: a.old_string, replace: a.new_string, replaceAll: a.replace_all }]);
-    return proposal(resolved, true, existing.text, next);
+    return proposal(ctx, resolved, true, existing.text, next);
   },
   execute: (_a, ctx, prepared) => commit(ctx, prepared),
 });
@@ -118,7 +125,7 @@ export const applyDiffTool = defineTool({
     const existing = await readExisting(ctx, resolved);
     if (!existing.exists) throw new ToolError(`File not found: ${resolved.relative}. Use write_file to create it.`);
     const next = applySearchReplace(existing.text, a.edits);
-    return proposal(resolved, true, existing.text, next);
+    return proposal(ctx, resolved, true, existing.text, next);
   },
   execute: (_a, ctx, prepared) => commit(ctx, prepared),
 });

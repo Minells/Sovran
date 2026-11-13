@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import * as path from 'node:path';
-import { resolveAndVerify, resolveWorkspacePath } from '../../security/paths';
+import { policyPaths, resolveAndVerify, resolveWorkspacePath } from '../../security/paths';
 import { decodeText, describeDocumentError, sniffFile } from '../../documents/detect';
 import { DOCUMENT_LIMITS, DocumentError, FORMAT_LABELS } from '../../documents/types';
 import { dimensions, IMAGE_LABELS, imageInfo } from '../../images/images';
@@ -100,7 +100,9 @@ export const readFileTool = defineTool({
   label: (a) => a.path,
   async prepare(a, ctx) {
     const resolved = await resolveAndVerify(a.path, ctx.workspace);
-    return { paths: [resolved.relative], approval: { kind: 'read', path: resolved.relative, reason: 'Protected file' }, state: resolved };
+    // A symbolic link to a protected file is that file: the policy checks where the path really leads too.
+    const paths = await policyPaths(resolved, ctx.workspace);
+    return { paths, approval: { kind: 'read', path: resolved.relative, reason: 'Protected file' }, state: resolved };
   },
   async execute(a, ctx) {
     const resolved = await resolveAndVerify(a.path, ctx.workspace);
@@ -167,7 +169,10 @@ export const listDirectoryTool = defineTool({
         if (IGNORED_DIRS.has(e.name)) continue;
         const rel = prefix ? `${prefix}/${e.name}` : e.name;
         out.push(e.type === 'directory' ? `${rel}/` : rel);
-        if (e.type === 'directory' && level < a.depth) await walk(path.join(dir, e.name), rel, level + 1);
+        if (e.type !== 'directory' || level >= a.depth) continue;
+        const child = path.join(dir, e.name);
+        // A folder that is a symbolic link out of the workspace is listed by name, never entered.
+        if (await resolveAndVerify(child, ctx.workspace).then(() => true, () => false)) await walk(child, rel, level + 1);
       }
     };
     await walk(resolved.absolute, '', 1);
@@ -252,7 +257,14 @@ export const searchFilesTool = defineTool({
         const stat = await ctx.workspace.stat(file);
         if (!stat || stat.type !== 'file' || stat.size > MAX_SEARCH_FILE_BYTES) continue;
         const rel = relativeOf(ctx, file);
-        if (isProtectedPath(rel, ctx.settings.protectedPaths)) {
+        // The file search may follow symbolic links: skip what leaves the workspace or really is a protected file.
+        let checked: string[];
+        try {
+          checked = await policyPaths(await resolveAndVerify(file, ctx.workspace), ctx.workspace);
+        } catch {
+          continue;
+        }
+        if ([rel, ...checked].some((p) => isProtectedPath(p, ctx.settings.protectedPaths))) {
           skippedProtected++;
           continue;
         }

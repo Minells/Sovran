@@ -48,7 +48,13 @@ import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
 import { normalizeApiKey, probeConnection } from '../core/providers/connection';
 import type { ModelInfo, ServerLimits } from '../core/providers/limits';
 import type { ModelConfig, ProviderConfig } from '../core/providers/types';
-import { PathError, resolveAndVerify, resolveWorkspacePath, type ResolvedPath } from '../core/security/paths';
+import {
+  PathError,
+  policyPaths,
+  resolveAndVerify,
+  resolveWorkspacePath,
+  type ResolvedPath,
+} from '../core/security/paths';
 import { compareEntries, displayPath } from '../core/util/files';
 import {
   decodeText,
@@ -2975,7 +2981,11 @@ export class SovranController implements vscode.Disposable {
     const root = this.deps.workspace.roots()[0];
     if (!root) return undefined;
     try {
-      return (await this.deps.workspace.readFile(path.join(root.path, 'AGENTS.md'))).slice(0, 8000);
+      // Sent with every request, unasked: a link out of the workspace or to a protected file is never followed.
+      const file = await resolveAndVerify(path.join(root.path, 'AGENTS.md'), this.deps.workspace);
+      const paths = await policyPaths(file, this.deps.workspace);
+      if (paths.some((p) => isProtectedPath(p, this.settings.agent.policy.protectedPaths))) return undefined;
+      return (await this.deps.workspace.readFile(file.absolute)).slice(0, 8000);
     } catch {
       return undefined;
     }
