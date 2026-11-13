@@ -171,6 +171,14 @@ describe('command environment', () => {
     expect(env).toMatchObject({ PATH: '/bin', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0', CI: '1' });
   });
 
+  it('keeps credential-like variables unless the user chose to hide them', () => {
+    const base = { PATH: '/bin', GITHUB_TOKEN: 't', AWS_SECRET_ACCESS_KEY: 's', npm_config_api_key: 'k', SSH_AUTH_SOCK: '/s', HOME: '/h' };
+    expect(agentCommandEnv(base)).toMatchObject(base);
+    const hidden = agentCommandEnv(base, true);
+    expect(hidden).toMatchObject({ PATH: '/bin', SSH_AUTH_SOCK: '/s', HOME: '/h', GIT_TERMINAL_PROMPT: '0' });
+    expect(Object.keys(hidden).filter((k) => /TOKEN|SECRET|api_key/i.test(k))).toEqual([]);
+  });
+
 });
 
 describe('pasted images from the webview', () => {

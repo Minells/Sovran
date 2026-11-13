@@ -60,14 +60,18 @@ export class TerminalMirror implements vscode.Disposable {
  * attached to stdin, with timeout, cancellation and process-tree termination.
  */
 export class NodeProcessRunner implements ProcessPort {
-  constructor(private readonly mirror?: () => TerminalMirror | undefined) {}
+  constructor(
+    private readonly mirror?: () => TerminalMirror | undefined,
+    /** Read for every command: whether credential-like variables are removed from its environment. */
+    private readonly hideSecretVariables: () => boolean = () => false,
+  ) {}
 
   run(command: string, options: ProcessOptions): Promise<ProcessResult> {
     const mirror = this.mirror?.();
     if (!options.signal.aborted) mirror?.begin(command, options.cwd);
     return runProcess(command, [], options, {
       shell: shellPath(),
-      env: agentCommandEnv(process.env),
+      env: agentCommandEnv(process.env, this.hideSecretVariables()),
       onRawOutput: (chunk) => mirror?.write(chunk),
     }).then((result) => {
       mirror?.end(result);

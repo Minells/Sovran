@@ -75,7 +75,10 @@ export async function activate(context: vscode.ExtensionContext) {
     secrets: new ProviderSecrets(context.secrets),
     diff,
     workspace: new VscodeWorkspace(ripgrep),
-    process: new NodeProcessRunner(() => (readSettings().mirrorToTerminal ? mirror : undefined)),
+    process: new NodeProcessRunner(
+      () => (readSettings().mirrorToTerminal ? mirror : undefined),
+      () => readSettings().hideSecretVariables,
+    ),
     web: new NativeWebFetcher(new WorkerHtmlExtractor(context.asAbsolutePath('dist/webWorker.js'))),
     capabilities: new MementoCapabilityStore(context.globalState),
     statusBar,

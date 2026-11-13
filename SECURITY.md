@@ -123,7 +123,8 @@ with reviewed descriptions. Server schemas and returned documentation still cont
   acts outside Sovran's guardrails and checkpoints. Install servers only from sources you trust, and keep tools that
   change data on *Ask*.
 - SOVRAN does **not** sandbox commands. An approved command, or a command that runs in Auto mode, runs with your user's
-  privileges and inherits the editor's environment variables.
+  privileges and inherits the editor's environment variables. Turn on `sovran.terminal.hideSecretVariables` to remove
+  the variables whose name looks like a credential; it matches names, so a secret under another name still passes.
 - Auto-mode guardrails are heuristics over the command text, not a shell interpreter. They catch the common dangerous
   shapes; they cannot see what a script, a build step or a package's install hooks do once they run. Dependency
   installs (`npm install`, `pip install`) and project scripts run in Auto mode. Use Auto only in repositories you trust.

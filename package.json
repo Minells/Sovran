@@ -602,6 +602,13 @@
             "scope": "application",
             "order": 3
           },
+          "sovran.terminal.hideSecretVariables": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Remove environment variables whose name looks like a credential (`*TOKEN*`, `*SECRET*`, `*PASSWORD*`, `*API_KEY*`, `*ACCESS_KEY*`, `*PRIVATE_KEY*`, `*CREDENTIAL*`) from the commands the agent runs. Commands that need one, such as `gh` or `npm publish`, stop working while this is on. User settings only.",
+            "scope": "application",
+            "order": 4
+          },
           "sovran.diff.openOnProposal": {
             "type": "boolean",
             "default": true,

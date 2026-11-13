@@ -130,6 +130,8 @@ export interface HostSettings {
   persistSessions: boolean;
   openDiffOnProposal: boolean;
   mirrorToTerminal: boolean;
+  /** Remove credential-like variables from the environment of agent commands. */
+  hideSecretVariables: boolean;
   autoCompact: boolean;
   /** Name new chats with the model (an extra short request) instead of the first words of the first message. */
   generateTitles: boolean;
@@ -178,6 +180,8 @@ export function readSettings(): HostSettings {
     openDiffOnProposal: setting('diff.openOnProposal', true),
     // Command visibility is a safety property: a workspace must not be able to hide the terminal mirror.
     mirrorToTerminal: userSetting('terminal.mirrorToTerminal', true),
+    // User scope only: a workspace must not decide which credentials its commands can read.
+    hideSecretVariables: userSetting<unknown>('terminal.hideSecretVariables', false) === true,
     autoCompact: setting('context.autoCompact', true),
     // User scope only: it decides whether the first message goes out in an extra request.
     generateTitles: userSetting('sessions.generateTitles', true),

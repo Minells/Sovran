@@ -91,6 +91,7 @@ exports.run = async function run() {
       'sovran.approvals.allowedCommands',
       'sovran.security.protectedPaths',
       'sovran.terminal.mirrorToTerminal',
+      'sovran.terminal.hideSecretVariables',
       'sovran.sessions.generateTitles',
       'sovran.sessions.titleModel',
       'sovran.mcp.servers',
