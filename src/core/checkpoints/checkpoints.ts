@@ -33,7 +33,11 @@ export class CheckpointRecorder implements WorkspacePort {
   readonly diagnostics: WorkspacePort['diagnostics'];
   readonly querySemantic: WorkspacePort['querySemantic'];
 
-  constructor(private readonly inner: WorkspacePort) {
+  /** `onChange` runs after every write or delete, so the host can save the checkpoint while the run is going. */
+  constructor(
+    private readonly inner: WorkspacePort,
+    private readonly onChange?: () => void,
+  ) {
     this.searchText = inner.searchText?.bind(inner);
     this.readBytes = inner.readBytes?.bind(inner);
     this.isDirty = inner.isDirty?.bind(inner);
@@ -59,12 +63,14 @@ export class CheckpointRecorder implements WorkspacePort {
     // What the file holds after the write, not what was asked for: format-on-save or the document's line endings may
     // change it, and Undo must still recognize the file as the one the agent left.
     snap.afterHash = contentHash(await this.inner.readFile(absPath).catch(() => content));
+    this.onChange?.();
   }
 
   async deleteFile(absPath: string): Promise<void> {
     const snap = await this.snapshot(absPath);
     await this.inner.deleteFile(absPath);
     snap.afterHash = null;
+    this.onChange?.();
   }
 
   /** Files whose final state differs from their original state. */
