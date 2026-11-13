@@ -1,7 +1,13 @@
 import { escapeAttribute, formatToolResult, neutralizeClosingTags, serializeToolCall } from '../agent/promptedTools';
 import { dimensions, estimateImageTokens, IMAGE_LABELS } from '../images/images';
 import type { ResolvedToolMode, WireContentPart, WireMessage } from '../providers/types';
-import type { ContextAttachment, ImageAttachment, SessionMessage, ToolMessage } from '../sessions/model';
+import type {
+  ContextAttachment,
+  ContextBreakdown,
+  ImageAttachment,
+  SessionMessage,
+  ToolMessage,
+} from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
 import { FORMAT_LABELS } from '../documents/types';
 
@@ -9,7 +15,8 @@ import { FORMAT_LABELS } from '../documents/types';
 export const DOCUMENT_NOTE = 'Text extracted from the file by Sovran. Images, charts and page layout are not included.';
 
 /** Conservative estimate: code tokenizes densely, so ~3.5 chars/token rather than the usual 4. */
-export const estimateTokens = (text: string) => Math.ceil(text.length / 3.5);
+export const CHARS_PER_TOKEN = 3.5;
+export const estimateTokens = (text: string) => Math.ceil(text.length / CHARS_PER_TOKEN);
 
 /** Token estimates of the image parts built for a request (the parts themselves only carry a data URL). */
 const imageTokens = new WeakMap<WireContentPart, number>();
@@ -103,6 +110,8 @@ export interface BuildContextOptions {
 export interface BuildContextResult {
   messages: WireMessage[];
   estimatedTokens: number;
+  /** `estimatedTokens` by part. Tools counts the schemas sent alongside the messages only. */
+  breakdown: ContextBreakdown;
   droppedTurns: number;
   elidedResults: number;
 }
@@ -221,5 +230,7 @@ export function buildContext(o: BuildContextOptions): BuildContextResult {
     system.content += `\n\nNote: ${droppedTurns} earlier exchange(s) were omitted to fit the context window.`;
   }
   const messages = [system, ...turns.flat()];
-  return { messages, estimatedTokens: total(), droppedTurns, elidedResults };
+  const estimatedTokens = total();
+  const breakdown = { system: fixed - o.toolSchemaTokens, tools: o.toolSchemaTokens, messages: estimatedTokens - fixed };
+  return { messages, estimatedTokens, breakdown, droppedTurns, elidedResults };
 }

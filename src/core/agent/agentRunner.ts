@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { planCompaction, renderForSummary, summarize } from '../context/compaction';
 import type { DocumentReader } from '../documents/reader';
-import { buildContext, estimateTokens } from '../context/contextManager';
+import { buildContext, CHARS_PER_TOKEN, estimateTokens } from '../context/contextManager';
 import { commandPathRisks } from '../permissions/commands';
 import { decide, type AgentMode, type PolicySettings, type SessionGrants } from '../permissions/policy';
 import type { ApprovalPort, Logger, ProcessPort, WorkspacePort } from '../ports';
@@ -26,13 +26,32 @@ import {
   type ToolStatus,
 } from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
+import {
+  addUnits,
+  CORE_UNIT,
+  LOAD_TOOLS,
+  loadableUnits,
+  loadToolsSchema,
+  offerTools,
+  resolveLoadRequest,
+  unitOf,
+  unitsWithinBudget,
+  withImplied,
+  type LoadableUnit,
+  type ToolLoadingMode,
+} from '../tools/loading';
 import type { ToolRegistry } from '../tools/registry';
+import { routeToolUnits, type RoutingHints } from '../tools/routing';
 import { ToolError, type AnyTool, type ToolContext, type ToolSettings } from '../tools/types';
-import type { AgentEvent, RunOutcome } from './events';
-import { parseJsonLenient, parseToolCallBlock } from './promptedTools';
+import type { AgentEvent, RunOutcome, ToolLoadReason } from './events';
+import { parseJsonLenient, parseToolCallBlock, renderToolInstructions } from './promptedTools';
 import { buildSystemPrompt } from './systemPrompt';
 import type { WebFetchPort } from '../web/types';
 import { TaggedStreamParser } from './taggedStream';
+
+/** Share of the input budget a single tool result may take: small windows get shorter results and smaller pages. */
+const RESULT_BUDGET_SHARE = 0.15;
+const MIN_RESULT_CHARS = 2000;
 
 const defaultsOf = (s: Pick<AgentSettings, 'defaultContextWindow' | 'defaultMaxOutputTokens'>) => ({
   contextWindow: s.defaultContextWindow,
@@ -45,6 +64,8 @@ export interface AgentSettings {
   tools: ToolSettings;
   defaultContextWindow: number;
   defaultMaxOutputTokens: number;
+  /** `auto` offers the core tools and loads the others on demand; missing means `all`, every tool each request. */
+  toolLoading?: ToolLoadingMode;
 }
 
 export interface AgentDeps {
@@ -83,12 +104,16 @@ export interface RunOptions {
   policy?: () => PolicySettings;
   /** Data URLs of the images in the chat's messages, by image id (see `UserMessage.images`). */
   images?: ReadonlyMap<string, string>;
+  /** What on-demand loading can know about the request beyond its text: its slash command and the MCP servers. */
+  routing?: RoutingHints;
 }
 
 export type CompactOptions = Pick<
   RunOptions,
   'session' | 'model' | 'settings' | 'signal' | 'emit' | 'secrets'
 >;
+
+type ToolResultFactory = (status: ToolStatus, content: string, extra?: Partial<ToolMessage>) => ToolMessage;
 
 interface TurnResult {
   text: string;
@@ -132,6 +157,8 @@ export class AgentRunner {
       });
     }
 
+    this.prepareToolUnits(o);
+
     while (iteration < o.settings.maxIterations) {
       if (o.signal.aborted) return { reason: 'cancelled' };
       iteration++;
@@ -151,11 +178,16 @@ export class AgentRunner {
 
       let turn: TurnResult;
       let offered: ReadonlyMap<string, AnyTool>;
+      let loadable: readonly LoadableUnit[];
       try {
         let built = this.buildRequest(o, toolMode, vision);
         if (built.droppedTurns > 0 && o.autoCompact && !compactedThisRun) {
           compactedThisRun = true;
-          if (await this.compact(o)) built = this.buildRequest(o, toolMode, vision);
+          if (await this.compact(o)) {
+            // The prompt changed from the start: a good moment to drop tools the conversation no longer uses.
+            this.prepareToolUnits(o);
+            built = this.buildRequest(o, toolMode, vision);
+          }
           if (o.signal.aborted) return { reason: 'cancelled' };
         }
         if (built.droppedTurns > 0) {
@@ -170,9 +202,11 @@ export class AgentRunner {
           estimatedTokens: built.estimatedTokens,
           budgetTokens: built.budgetTokens,
           contextWindow: built.contextWindow,
+          breakdown: built.breakdown,
         });
         const request = built.request;
         offered = built.offered;
+        loadable = built.loadable;
         o.session.messages.push(assistant);
         o.emit({ type: 'message_started', message: { ...assistant } });
         turn = await this.streamTurn(assistant, request, toolMode, o);
@@ -252,7 +286,7 @@ export class AgentRunner {
           this.cancelRemaining(o, turn.calls.slice(i));
           return { reason: 'cancelled' };
         }
-        const result = await this.executeCall(call, o, offered);
+        const result = await this.executeCall(call, o, offered, loadable);
         o.session.messages.push(result);
         o.emit({ type: 'message_committed', message: { ...result } });
         if (result.status === 'cancelled') {
@@ -284,20 +318,24 @@ export class AgentRunner {
   }
 
   private buildRequest(o: RunOptions, toolMode: ResolvedToolMode, vision = false) {
-    const tools =
-      toolMode === 'none'
-        ? []
-        : this.deps.registry.list(o.mode, {
-            ...(o.policy?.() ?? o.settings.policy),
-            excludedToolGroups: o.session.excludedToolGroups,
-            workspaceTrusted: this.deps.workspace.isTrusted(),
-          });
-    const schemas = this.deps.registry.schemas(tools);
+    const available = toolMode === 'none' ? [] : this.availableTools(o);
+    const offer =
+      o.settings.toolLoading === 'auto'
+        ? offerTools(available, o.session.toolUnits ?? [], loadableUnits(available, (tool) => this.tokensOf(tool)))
+        : { core: available, loaded: [], index: [] };
+    const tools = [...offer.core, ...offer.loaded];
+    // load_tools sits between the core and the loaded units: neither it nor anything before it changes as units load.
+    const schemas = [
+      ...this.deps.registry.schemas(offer.core),
+      ...(offer.index.length ? [loadToolsSchema(offer.index)] : []),
+      ...this.deps.registry.schemas(offer.loaded),
+    ];
     const env = this.deps.workspace.environment();
     const systemPrompt = buildSystemPrompt({
       mode: o.mode,
       toolMode,
       tools: schemas,
+      onDemandTools: offer.index.length > 0,
       os: env.os,
       shell: env.shell,
       folders: this.deps.workspace.roots().map((r) => r.name),
@@ -305,26 +343,25 @@ export class AgentRunner {
       trusted: this.deps.workspace.isTrusted(),
       projectInstructions: o.projectInstructions,
     });
-    const { contextWindow, reserveTokens: maxOutput } = effectiveLimits(
-      o.model,
-      o.model.serverLimits,
-      defaultsOf(o.settings),
-    );
+    const { contextWindow, budgetTokens } = this.inputBudget(o);
     const schemaTokens = toolMode === 'native' ? estimateTokens(JSON.stringify(schemas)) : 0;
-    const budgetTokens = Math.max(1024, contextWindow - maxOutput);
+    // Prompted tools are described inside the system prompt; the breakdown still counts them as tools.
+    const promptedToolTokens =
+      toolMode === 'prompted' && schemas.length ? estimateTokens(renderToolInstructions(schemas)) : 0;
     const ctx = buildContext({
       systemPrompt,
       messages: messagesForModel(o.session),
       toolMode,
       budgetTokens,
       toolSchemaTokens: schemaTokens,
-      maxToolResultChars: o.settings.tools.maxToolResultChars,
+      maxToolResultChars: this.toolSettings(o).maxToolResultChars,
       summary: o.session.compaction?.summary,
       images: o.images,
       vision,
     });
     return {
       offered: new Map(tools.map((tool) => [tool.name, tool])),
+      loadable: offer.index,
       request: {
         model: o.model.id,
         messages: ctx.messages,
@@ -334,9 +371,118 @@ export class AgentRunner {
       },
       droppedTurns: ctx.droppedTurns,
       estimatedTokens: ctx.estimatedTokens,
+      breakdown: {
+        system: Math.max(0, ctx.breakdown.system - promptedToolTokens),
+        tools: ctx.breakdown.tools + promptedToolTokens,
+        messages: ctx.breakdown.messages,
+      },
       budgetTokens,
       contextWindow,
     };
+  }
+
+  /** Tools the model may use in this chat and mode, whether or not their unit is loaded. */
+  private availableTools(o: RunOptions): AnyTool[] {
+    return this.deps.registry.list(o.mode, {
+      ...(o.policy?.() ?? o.settings.policy),
+      excludedToolGroups: o.session.excludedToolGroups,
+      workspaceTrusted: this.deps.workspace.isTrusted(),
+    });
+  }
+
+  private tokensOf(tool: AnyTool): number {
+    return estimateTokens(JSON.stringify(this.deps.registry.schema(tool)));
+  }
+
+  /**
+   * Tool settings for this model. The result limit is the user's, lowered for small windows so that one result
+   * cannot take more than `RESULT_BUDGET_SHARE` of the input budget; tools then page at that size.
+   */
+  private toolSettings(o: Pick<RunOptions, 'model' | 'settings'>): ToolSettings {
+    const cap = Math.floor(this.inputBudget(o).budgetTokens * RESULT_BUDGET_SHARE * CHARS_PER_TOKEN);
+    const maxToolResultChars = Math.min(o.settings.tools.maxToolResultChars, Math.max(MIN_RESULT_CHARS, cap));
+    return { ...o.settings.tools, maxToolResultChars };
+  }
+
+  /** The model's context window and the part of it left for the request once the reply is reserved. */
+  private inputBudget(o: Pick<RunOptions, 'model' | 'settings'>) {
+    const { contextWindow, reserveTokens } = effectiveLimits(o.model, o.model.serverLimits, defaultsOf(o.settings));
+    return { contextWindow, budgetTokens: Math.max(1024, contextWindow - reserveTokens) };
+  }
+
+  /**
+   * With on-demand loading, the units a run starts with: those the chat has used, whatever fits the budget for this
+   * model, and what the user's message asks for. Within a chat units only accumulate, so the prompt prefix stays
+   * stable. They are chosen afresh only when the server's prompt cache is gone anyway: for another model, or after a
+   * compaction. Units the visible conversation used or loaded stay; the others go.
+   */
+  private prepareToolUnits(o: RunOptions) {
+    if (o.settings.toolLoading !== 'auto') return;
+    const toolMode = resolveToolMode(o.model.toolMode, this.deps.capabilities.get(capabilityKey(o.providerId, o.model.id)));
+    if (toolMode === 'none') return;
+    const basis = `${o.providerId}/${o.model.id}#${o.session.compaction?.firstKeptId ?? ''}`;
+    const previous = o.session.toolUnits;
+    // Units the chat already had are not reported again when they are chosen afresh.
+    const known = new Set(previous ?? []);
+    if (previous === undefined || o.session.toolUnitsBasis !== basis) {
+      o.session.toolUnits = [];
+      o.session.toolUnitsBasis = basis;
+      this.loadUnits(o, this.unitsInHistory(o), 'history', undefined, known);
+    }
+    const available = this.availableTools(o);
+    const coreTokens = available
+      .filter((tool) => unitOf(tool) === CORE_UNIT)
+      .reduce((sum, tool) => sum + this.tokensOf(tool), 0);
+    const units = loadableUnits(available, (tool) => this.tokensOf(tool));
+    this.loadUnits(o, unitsWithinBudget(coreTokens, units, this.inputBudget(o).budgetTokens), 'budget', undefined, known);
+    const latest = o.session.messages.findLast((m) => m.role === 'user');
+    if (latest?.role === 'user') {
+      const routed = routeToolUnits(
+        latest.content,
+        units.map((unit) => unit.id),
+        o.routing,
+      );
+      const why = new Map(routed.map((r) => [r.unit, r.reason]));
+      this.loadUnits(o, routed.map((r) => r.unit), 'router', why, known);
+    }
+    const dropped = (previous ?? []).filter((unit) => !o.session.toolUnits?.includes(unit));
+    if (dropped.length) o.emit({ type: 'tools_unloaded', units: dropped });
+  }
+
+  /** Units of the tools the visible conversation called or loaded, in order of first appearance. */
+  private unitsInHistory(o: RunOptions): string[] {
+    const used: string[] = [];
+    const use = (unit: string | undefined) => {
+      if (unit && unit !== CORE_UNIT && !used.includes(unit)) used.push(unit);
+    };
+    for (const message of messagesForModel(o.session)) {
+      if (message.role === 'tool') for (const unit of message.loaded ?? []) use(unit);
+      if (message.role !== 'assistant') continue;
+      for (const c of message.toolCalls ?? []) {
+        const tool = this.deps.registry.get(c.name);
+        use(tool && unitOf(tool));
+      }
+    }
+    return used;
+  }
+
+  /**
+   * Adds units to the chat. Their tools are offered from the next model request. Units in `known` were loaded before
+   * and are not reported as news.
+   */
+  private loadUnits(
+    o: RunOptions,
+    units: readonly string[],
+    reason: ToolLoadReason,
+    why?: ReadonlyMap<string, string>,
+    known?: ReadonlySet<string>,
+  ): string[] {
+    const added = addUnits((o.session.toolUnits ??= []), units);
+    const news = known ? added.filter((unit) => !known.has(unit)) : added;
+    if (!news.length) return added;
+    const detail = why && news.map((unit) => `${unit}: ${why.get(unit) ?? 'needed by another unit'}`);
+    o.emit({ type: 'tools_loaded', units: news, reason, ...(detail ? { detail } : {}) });
+    return added;
   }
 
   /**
@@ -467,6 +613,7 @@ export class AgentRunner {
     call: ToolCall,
     o: RunOptions,
     offered: ReadonlyMap<string, AnyTool>,
+    loadable: readonly LoadableUnit[] = [],
   ): Promise<ToolMessage> {
     const started = this.now();
     const result = (status: ToolStatus, content: string, extra: Partial<ToolMessage> = {}): ToolMessage => ({
@@ -474,7 +621,7 @@ export class AgentRunner {
       id: this.newId(),
       toolCallId: call.id,
       toolName: call.name,
-      content: truncateMiddle(redact(content, o.secrets ?? []), o.settings.tools.maxToolResultChars),
+      content: truncateMiddle(redact(content, o.secrets ?? []), this.toolSettings(o).maxToolResultChars),
       status,
       durationMs: this.now() - started,
       createdAt: this.now(),
@@ -486,15 +633,33 @@ export class AgentRunner {
       const msg = parsed.ok ? String((parsed.value as { error?: unknown }).error) : 'Invalid tool call.';
       return result('error', msg);
     }
+    // Offered only while something is deferred; otherwise the name is unknown like any other.
+    if (call.name === LOAD_TOOLS && loadable.length) return this.loadTools(call, o, loadable, result);
     const tool = this.deps.registry.get(call.name);
     if (!tool) {
-      const names = [...offered.keys()].join(', ');
-      return result('error', `Unknown tool "${call.name}". Available tools: ${names}.`);
+      const names = [...offered.keys(), ...(loadable.length ? [LOAD_TOOLS] : [])].join(', ');
+      const more = loadable.length
+        ? ` More tools load with ${LOAD_TOOLS}: ${loadable.map((unit) => unit.id).join(', ')}.`
+        : '';
+      return result('error', `Unknown tool "${call.name}". Available tools: ${names}.${more}`);
     }
     if (o.mode === 'plan' && tool.risk !== 'read') {
       return result(
         'denied',
         `${tool.name} is not available in Plan mode (read-only). Describe the change in your plan instead.`,
+      );
+    }
+
+    // A tool that was available but not loaded: load its unit for the next request instead of running it here, since
+    // the model did not see its definition. Unavailable tools are never in `loadable` and fall through to the denial.
+    const unit = offered.has(call.name) ? undefined : loadable.find((u) => u.tools.includes(tool));
+    if (unit) {
+      const units = withImplied([unit.id]).filter((id) => loadable.some((u) => u.id === id));
+      this.loadUnits(o, units, 'call');
+      return result(
+        'success',
+        `${call.name} was not loaded yet, so it did not run. Sovran loaded ${units.join(', ')}: call ${call.name} again with the same arguments.`,
+        { loaded: units, summary: units.join(', ') },
       );
     }
 
@@ -531,7 +696,7 @@ export class AgentRunner {
       workspace: this.deps.workspace,
       process: this.deps.process,
       signal: o.signal,
-      settings: { ...o.settings.tools, protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths },
+      settings: { ...this.toolSettings(o), protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths },
       onOutput: (chunk) => o.emit({ type: 'tool_output', callId: call.id, chunk }),
       ...(this.deps.documents ? { documents: this.deps.documents } : {}),
       ...(this.deps.web ? { web: this.deps.web } : {}),
@@ -659,6 +824,31 @@ export class AgentRunner {
       this.deps.logger.warn(`Tool ${tool.name} failed: ${e instanceof Error ? e.message : String(e)}`);
       return result('error', describeToolFailure(e), { summary: label });
     }
+  }
+
+  /** `load_tools`: adds units to the chat and runs nothing else, so it needs no approval in any mode. */
+  private loadTools(
+    call: ToolCall,
+    o: RunOptions,
+    loadable: readonly LoadableUnit[],
+    result: ToolResultFactory,
+  ): ToolMessage {
+    const parsed = parseJsonLenient(call.arguments);
+    if (!parsed.ok) return result('error', `Arguments for ${LOAD_TOOLS} are not valid JSON: ${parsed.error}`);
+    const request = resolveLoadRequest(parsed.value, loadable);
+    if (!request.ok) return result('error', request.error);
+    const added = this.loadUnits(o, request.units, 'model');
+    const names = loadable
+      .filter((unit) => request.units.includes(unit.id))
+      .flatMap((unit) => unit.tools.map((tool) => tool.name));
+    const units = request.units.join(', ');
+    return result(
+      'success',
+      added.length
+        ? `Loaded ${units}: ${names.join(', ')}. Use them from your next step.`
+        : `Already loaded: ${units} (${names.join(', ')}).`,
+      { loaded: request.units, summary: units },
+    );
   }
 
   private removeMessage(o: RunOptions, id: string) {

@@ -235,6 +235,31 @@ describe('slash commands', () => {
 
     expect(command).toMatchObject({ description: 'Draft release notes', template });
   });
+
+  it('reads description and tool units from an optional front matter block', () => {
+    const command = parseCustomCommand(
+      'ship.md',
+      '---\ndescription: Commit and push the work\ntools: [git.changes, "git.remote", shell]\n---\nCommit and push $ARGUMENTS.',
+    );
+    expect(command).toEqual({
+      name: 'ship',
+      description: 'Commit and push the work',
+      kind: 'prompt',
+      source: 'workspace',
+      template: 'Commit and push $ARGUMENTS.',
+      tools: ['git.changes', 'git.remote'],
+    });
+    expect(parseCustomCommand('docs.md', '---\r\ntools: web\r\n---\r\n# Look it up\r\nRead $ARGUMENTS.')).toMatchObject({
+      description: 'Look it up',
+      template: '# Look it up\r\nRead $ARGUMENTS.',
+      tools: ['web'],
+    });
+    // Without a closing line the file is a plain template, as before; a header alone is not a command.
+    expect(parseCustomCommand('odd.md', '---\nNot front matter')).toMatchObject({ template: '---\nNot front matter' });
+    expect(parseCustomCommand('empty.md', '---\ntools: git\n---\n')).toBeNull();
+    expect(BUILTIN_COMMANDS.find((c) => c.name === 'review')?.tools).toEqual(['git']);
+    expect(BUILTIN_COMMANDS.find((c) => c.name === 'fix')?.tools).toEqual(['diagnostics']);
+  });
 });
 
 describe('fuzzy matching', () => {

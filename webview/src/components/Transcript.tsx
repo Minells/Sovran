@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type Mouse
 import type { ApprovalView, AssistantMessageView, RunViewT, ToolCallView, ToolMessageView } from './types';
 import type { SessionMessage } from '../../../src/shared/protocol';
 import { renderMarkdown } from '../lib/markdown';
-import { documentInfo, imageDescription, isMcpTool, mcpToolLabel, toolInfo, toolTarget } from '../lib/format';
+import { documentInfo, imageDescription, isMcpTool, mcpToolLabel, toolInfo, toolTarget, unitsLabel } from '../lib/format';
 import { post } from '../vscode';
 import { useStore } from '../state/store';
 import { ApprovalDetail, approvalAnchor } from './Approval';
@@ -212,7 +212,8 @@ const READ_TOOLS = new Set([
   'get_active_editor_context',
 ]);
 
-type ToolPart = { kind: 'tool'; key: string; call: ToolCallView };
+/** `loaded`: the call loaded these tool units instead of doing work (see LoadRow). */
+type ToolPart = { kind: 'tool'; key: string; call: ToolCallView; loaded?: string[] };
 type ReasoningPart = { kind: 'reasoning'; key: string; message: AssistantMessageView };
 type Part =
   | ReasoningPart
@@ -223,7 +224,8 @@ type Part =
 
 /**
  * Flattens a turn into display parts and folds runs of finished, successful read-only tool calls
- * ("exploration") into one collapsible row, so the transcript shows decisions rather than noise.
+ * ("exploration") into one collapsible row, so the transcript shows decisions rather than noise. Calls that only
+ * loaded tools fold in with them.
  */
 function buildParts(messages: AssistantMessageView[], results: Map<string, ToolMessageView>): Part[] {
   const raw: Part[] = [];
@@ -231,7 +233,11 @@ function buildParts(messages: AssistantMessageView[], results: Map<string, ToolM
     if (m.reasoning) raw.push({ kind: 'reasoning', key: `${m.id}:r`, message: m });
     if (m.content) raw.push({ kind: 'text', key: `${m.id}:t`, message: m });
     if (m.error) raw.push({ kind: 'error', key: `${m.id}:e`, message: m });
-    for (const call of m.toolCalls ?? []) raw.push({ kind: 'tool', key: call.id, call });
+    for (const call of m.toolCalls ?? []) {
+      const result = results.get(call.id);
+      const loaded = result?.status === 'success' && result.loaded?.length ? result.loaded : undefined;
+      raw.push({ kind: 'tool', key: call.id, call, ...(loaded ? { loaded } : {}) });
+    }
   }
   const out: Part[] = [];
   let bucket: Array<ToolPart | ReasoningPart> = [];
@@ -244,8 +250,7 @@ function buildParts(messages: AssistantMessageView[], results: Map<string, ToolM
   for (const part of raw) {
     const explorable =
       part.kind === 'tool' &&
-      READ_TOOLS.has(part.call.name) &&
-      results.get(part.call.id)?.status === 'success';
+      (!!part.loaded || (READ_TOOLS.has(part.call.name) && results.get(part.call.id)?.status === 'success'));
     if (explorable || (part.kind === 'reasoning' && bucket.length > 0))
       bucket.push(part as ToolPart | ReasoningPart);
     else {
@@ -257,7 +262,8 @@ function buildParts(messages: AssistantMessageView[], results: Map<string, ToolM
   return out;
 }
 
-export function exploreSummary(calls: ToolCallView[]): string {
+/** "3 files read, 1 search, loaded Git" — `loaded` names the units that calls in the group loaded. */
+export function exploreSummary(calls: ToolCallView[], loaded = ''): string {
   const count = (names: string[]) => calls.filter((c) => names.includes(c.name)).length;
   const reads = count(['read_file']);
   const searches = count(['search_files', 'find_files']);
@@ -269,9 +275,24 @@ export function exploreSummary(calls: ToolCallView[]): string {
     searches && plural(searches, 'search', 'searches'),
     listings && plural(listings, 'folder listed', 'folders listed'),
     other && plural(other, 'check', 'checks'),
+    loaded && `loaded ${loaded}`,
   ]
     .filter(Boolean)
     .join(', ');
+}
+
+/** A call that loaded tools instead of doing work. Loading is housekeeping: one quiet line, nothing to open. */
+function LoadRow({ units }: { units: string[] }) {
+  const { app } = useStore();
+  return (
+    <div className="sv-tool sv-tool--quiet" data-status="success">
+      <div className="sv-tool__row">
+        <Icon name="extensions" className="sv-tool__icon" />
+        <span className="sv-tool__verb">Loaded</span>
+        <span className="sv-tool__label">{unitsLabel(units, app.mcp.servers)} tools</span>
+      </div>
+    </div>
+  );
 }
 
 function Reasoning({ message }: { message: AssistantMessageView }) {
@@ -320,14 +341,18 @@ function ExploreGroup({
   items: Array<ToolPart | ReasoningPart>;
   render: (p: ToolPart | ReasoningPart) => React.ReactNode;
 }) {
+  const { app } = useStore();
   const [open, setOpen] = useState(false);
-  const calls = items.flatMap((p) => (p.kind === 'tool' ? [p.call] : []));
+  const calls = items.flatMap((p) => (p.kind === 'tool' && !p.loaded ? [p.call] : []));
+  const loaded = items.flatMap((p) => (p.kind === 'tool' && p.loaded ? p.loaded : []));
   return (
     <div className="sv-tool sv-explore" data-status="success">
       <button type="button" className="sv-tool__row" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Icon name="search" className="sv-tool__icon" />
         <span className="sv-tool__verb">Explored</span>
-        <span className="sv-explore__summary">{exploreSummary(calls)}</span>
+        <span className="sv-explore__summary">
+          {exploreSummary(calls, loaded.length ? unitsLabel(loaded, app.mcp.servers) : '')}
+        </span>
         <span className="sv-tool__meta" />
         <Icon name="chevron-down" className="sv-tool__chevron" />
       </button>
@@ -355,6 +380,8 @@ function TurnBody({
   const renderTool = (p: ToolPart | ReasoningPart) =>
     p.kind === 'reasoning' ? (
       <Reasoning key={p.key} message={p.message} />
+    ) : p.loaded ? (
+      <LoadRow key={p.key} units={p.loaded} />
     ) : (
       <ToolRow
         key={p.key}

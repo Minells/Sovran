@@ -354,8 +354,20 @@ const conversation: SessionMessage[] = [
     content: "I'll check how the TTL is defined and where it is used.",
     toolCalls: [
       { id: 't1', name: 'search_files', arguments: JSON.stringify({ query: 'TTL', glob: 'src/**/*.ts' }) },
+      { id: 't0', name: 'load_tools', arguments: JSON.stringify({ units: ['symbols'] }) },
       { id: 't2', name: 'read_file', arguments: JSON.stringify({ path: 'src/auth/session.ts' }) },
     ],
+  },
+  {
+    role: 'tool',
+    id: 'r0',
+    toolCallId: 't0',
+    toolName: 'load_tools',
+    createdAt: now - 54_500,
+    status: 'success',
+    summary: 'symbols',
+    content: 'Loaded symbols: list_document_symbols, go_to_definition, find_references. Use them from your next step.',
+    loaded: ['symbols'],
   },
   {
     role: 'tool',
@@ -767,7 +779,15 @@ function baseState(): AppState {
     grants: { edits: false },
     planModel: null,
     titleModel: null,
-    usage: scenario === 'conversation' ? { tokens: 23_480, contextWindow: 32_768, source: 'server' } : null,
+    usage:
+      scenario === 'conversation'
+        ? {
+            tokens: 23_480,
+            contextWindow: 32_768,
+            source: 'server',
+            breakdown: { system: 620, tools: 1_480, messages: 21_380 },
+          }
+        : null,
     compaction: null,
     commands: [
       { name: 'explain', description: 'Explain the selection, a file or a concept', source: 'builtin' },
@@ -805,6 +825,7 @@ function baseState(): AppState {
       maxToolResultChars: 20000,
       persistSessions: true,
       generateTitles: params.get('titles') !== 'off',
+      toolLoading: 'auto',
       overriddenByWorkspace: [],
     },
     configFile:
@@ -866,6 +887,14 @@ function mockTools(app: AppState): Pick<AppState, 'toolAvailability' | 'toolGrou
       group.definitionTokens = tools.reduce((sum, tool) => sum + estimateTokens(tool), 0);
     }
     groups.set(group.id, group);
+  }
+  // With on-demand loading, everything but files, editing and terminal waits until a chat needs it.
+  if (app.settings.toolLoading === 'auto') {
+    for (const group of groups.values()) {
+      if (['files', 'editing', 'terminal'].includes(group.id) || !group.definitionTokens) continue;
+      group.loading = 'on-demand';
+      group.sentTokens = group.id === 'context' ? Math.round(group.definitionTokens * 0.15) : 0;
+    }
   }
   return { toolAvailability, toolGroups: [...groups.values()] };
 }
@@ -1013,6 +1042,7 @@ onPost((m) => {
           'context.maxToolResultChars': 'maxToolResultChars',
           'sessions.persist': 'persistSessions',
           'sessions.generateTitles': 'generateTitles',
+          'tools.loading': 'toolLoading',
         } as const
       )[key];
       state = { ...state, settings: { ...state.settings, [field]: m.setting.value } };

@@ -151,6 +151,8 @@ beforeEach(async () => {
     'sovran.configFile.enabled': false,
     'sovran.terminal.mirrorToTerminal': false,
     'sovran.mcp.servers': [{ id: 'notes', name: 'Notes', command: 'node' }],
+    // These tests are about MCP itself: every tool in every request. On-demand loading has its own tests below.
+    'sovran.tools.loading': 'all',
   };
   sidebar = [];
   notices = [];
@@ -386,6 +388,38 @@ describe('MCP in the host', () => {
 
     await controller.handle({ type: 'setMcpToolPolicy', id: 'notes', tool: 'read_note', policy: 'ask' });
     expect(servers()[0]!.disabledTools).toBeUndefined();
+  });
+
+  describe('with tools loaded on demand', () => {
+    beforeEach(async () => {
+      delete h.config['sovran.tools.loading'];
+      for (const listener of h.configListeners) await listener({ affectsConfiguration: (k) => k === 'sovran' });
+    });
+    const offered = (request: (typeof model.requests)[number] | undefined) =>
+      ((request?.body?.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);
+
+    it('loads a server when the model first calls one of its tools, without running that call', async () => {
+      const before = model.requests.length;
+      await controller.handle({ type: 'send', text: 'read my note' });
+      await until(() => latest('run') === null);
+      const chat = model.requests.slice(before).filter((r) => r.body?.tools);
+      expect(offered(chat[0])).toContain('load_tools');
+      expect(offered(chat[0])).not.toContain('mcp__notes__read_note');
+      expect(toolMessages()[0]).toMatchObject({ status: 'success', loaded: ['mcp:notes'] });
+      expect(latest('approvals') ?? []).toEqual([]);
+      expect(offered(chat[1])).toContain('mcp__notes__read_note');
+    });
+
+    it('offers a server from the first request when the message names it, and still asks before it runs', async () => {
+      const before = model.requests.length;
+      const sent = controller.handle({ type: 'send', text: 'Read the welcome entry from my notes' });
+      await until(() => (latest('approvals') ?? []).length === 1);
+      const chat = model.requests.slice(before).filter((r) => r.body?.tools);
+      expect(offered(chat[0])).toContain('mcp__notes__read_note');
+      await controller.handle({ type: 'approval', id: latest('approvals')![0]!.id, approved: true });
+      await sent;
+      expect(toolMessages()[0]).toMatchObject({ status: 'success', content: 'Hello from MCP' });
+    });
   });
 
   it('adds a server with its token in Secret Storage, never in settings or in a message to the webview', async () => {

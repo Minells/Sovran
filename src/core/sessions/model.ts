@@ -105,16 +105,27 @@ export interface ToolMessage {
   durationMs?: number;
   /** Set when a file change or command ran without asking the user, with the policy's reason (Auto mode, allow-list…). */
   autoApproved?: string;
+  /** Tool units this call loaded instead of running (`load_tools`, or a call to a tool that was not loaded). */
+  loaded?: string[];
   createdAt: number;
 }
 
 export type SessionMessage = UserMessage | AssistantMessage | ToolMessage;
+
+/** Estimated tokens of a request by part: instructions (system prompt, summary), tool definitions, conversation. */
+export interface ContextBreakdown {
+  system: number;
+  tools: number;
+  messages: number;
+}
 
 export interface ContextUsage {
   tokens: number;
   contextWindow: number;
   source: 'estimate' | 'server';
   updatedAt: number;
+  /** Estimated split of the last request, whatever `source` says about `tokens`. */
+  breakdown?: ContextBreakdown;
 }
 
 export interface CompactionState {
@@ -136,6 +147,13 @@ export interface Session {
   messages: SessionMessage[];
   /** Missing means all groups selected, preserving older chats. Empty groups remain excluded after reconnects. */
   excludedToolGroups?: string[];
+  /**
+   * Tool units loaded on demand, in load order (the core is always offered). Missing until the chat first runs with
+   * on-demand loading; it then starts from the units of the tool calls in its history.
+   */
+  toolUnits?: string[];
+  /** Model and compaction the units were chosen for; when either changes they are chosen afresh. */
+  toolUnitsBasis?: string;
   usage?: ContextUsage;
   compaction?: CompactionState;
 }

@@ -598,6 +598,23 @@ a {
   background: var(--sv-hover);
 }
 
+/* Loading tools is housekeeping: one quiet line with nothing to open. */
+.sv-tool--quiet .sv-tool__row {
+  cursor: default;
+}
+
+.sv-tool--quiet .sv-tool__row:hover {
+  background: transparent;
+}
+
+.sv-tool__label {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--sv-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* A pending approval cannot be folded away. */
 .sv-tool__row:disabled {
   cursor: default;

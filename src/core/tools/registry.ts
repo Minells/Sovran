@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { AgentMode } from '../permissions/policy';
 import type { ToolSchema } from '../providers/types';
+import { LOAD_TOOLS } from './loading';
 import type { AnyTool } from './types';
 
 /** Tools that come and go while Sovran runs (the tools of connected MCP servers). Asked again for every request. */
@@ -14,6 +15,28 @@ export interface ToolSelection {
   excludedToolGroups?: readonly string[];
 }
 
+/** Below this, a `maxLength` is guidance the model can use (a subject line); above it, a guard against abuse. */
+const GUARD_LENGTH = 1000;
+
+/**
+ * Drops from a derived JSON Schema the constraints that tell the model nothing: non-empty strings, guard lengths on
+ * paths and texts, and the safe-integer bounds zod puts on every integer. They cost tokens in every request. The zod
+ * schema still validates them; limits a model should respect (a page size of 50) stay.
+ */
+export function leanSchema(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(leanSchema);
+  if (!value || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'minLength' && child === 1) continue;
+    if (key === 'maxLength' && typeof child === 'number' && child >= GUARD_LENGTH) continue;
+    if (key === 'maximum' && child === Number.MAX_SAFE_INTEGER) continue;
+    if (key === 'minimum' && child === Number.MIN_SAFE_INTEGER) continue;
+    out[key] = leanSchema(child);
+  }
+  return out;
+}
+
 export class ToolRegistry {
   private readonly tools = new Map<string, AnyTool>();
   private readonly sources: ToolSource[] = [];
@@ -21,6 +44,7 @@ export class ToolRegistry {
 
   register(tool: AnyTool): this {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(tool.name)) throw new Error(`Invalid tool name: ${tool.name}`);
+    if (tool.name === LOAD_TOOLS) throw new Error(`Reserved tool name: ${tool.name}`);
     if (this.tools.has(tool.name)) throw new Error(`Tool already registered: ${tool.name}`);
     this.tools.set(tool.name, tool);
     return this;
@@ -81,10 +105,9 @@ export class ToolRegistry {
       };
     let cached = this.schemaCache.get(tool);
     if (!cached) {
-      const json = z.toJSONSchema(tool.schema, { io: 'input', unrepresentable: 'any' }) as Record<
-        string,
-        unknown
-      >;
+      const json = leanSchema(
+        z.toJSONSchema(tool.schema, { io: 'input', unrepresentable: 'any' }),
+      ) as Record<string, unknown>;
       delete json.$schema;
       cached = {
         type: 'function',

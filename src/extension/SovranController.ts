@@ -27,6 +27,8 @@ import type { AgentEvent } from '../core/agent/events';
 import { matchesAllowList, suggestAllowPrefix } from '../core/permissions/commands';
 import type { AgentMode, ApprovalMode, SessionGrants } from '../core/permissions/policy';
 import { TOOL_GROUP_LABELS, normalizeExcludedGroups } from '../core/tools/groups';
+import { CORE_UNIT, unitOf } from '../core/tools/loading';
+import type { RoutingHints } from '../core/tools/routing';
 import { estimateTokens } from '../core/context/contextManager';
 import { isProtectedPath } from '../core/permissions/policy';
 import type {
@@ -773,6 +775,10 @@ export class SovranController implements vscode.Disposable {
     const toolAvailability = !model ? 'no-model' : model.toolMode === 'none' ? 'model-disabled' : 'available';
     const selection = { ...this.settings.agent.policy, workspaceTrusted: this.deps.workspace.isTrusted() };
     const groups = new Map<string, NonNullable<AppState['toolGroups']>[number]>();
+    // With on-demand loading: groups with tools outside the core, and the tokens of those the chat has not loaded.
+    const loadedUnits = new Set(session.toolUnits ?? []);
+    const loadable = new Set<string>();
+    const deferredTokens = new Map<string, number>();
     const servers = this.deps.mcp?.view().servers ?? [];
     // Include disconnected integrations so the chat choice survives connection and list changes.
     for (const server of servers) {
@@ -795,10 +801,23 @@ export class SovranController implements vscode.Disposable {
         definitionTokens: 0,
       };
       if (toolAvailability === 'available' && !this.registry.unavailable(tool, this.mode, selection)) {
+        const tokens = estimateTokens(JSON.stringify(this.registry.schema(tool)));
         group.availableTools++;
-        group.definitionTokens += estimateTokens(JSON.stringify(this.registry.schema(tool)));
+        group.definitionTokens += tokens;
+        const unit = unitOf(tool);
+        if (unit !== CORE_UNIT) {
+          loadable.add(id);
+          if (!loadedUnits.has(unit)) deferredTokens.set(id, (deferredTokens.get(id) ?? 0) + tokens);
+        }
       }
       groups.set(id, group);
+    }
+    if (this.settings.agent.toolLoading === 'auto') {
+      for (const group of groups.values()) {
+        if (!loadable.has(group.id)) continue;
+        group.loading = deferredTokens.has(group.id) ? 'on-demand' : 'loaded';
+        group.sentTokens = group.definitionTokens - (deferredTokens.get(group.id) ?? 0);
+      }
     }
     return {
       toolAvailability,
@@ -841,7 +860,12 @@ export class SovranController implements vscode.Disposable {
 
   private usageView(s: Session): AppState['usage'] {
     return s.usage
-      ? { tokens: s.usage.tokens, contextWindow: s.usage.contextWindow, source: s.usage.source }
+      ? {
+          tokens: s.usage.tokens,
+          contextWindow: s.usage.contextWindow,
+          source: s.usage.source,
+          ...(s.usage.breakdown ? { breakdown: s.usage.breakdown } : {}),
+        }
       : null;
   }
 
@@ -2642,6 +2666,7 @@ export class SovranController implements vscode.Disposable {
         // Read live: switching the approval mode or allowing a command mid-run applies to the next action.
         policy: () => ({ ...this.settings.agent.policy, approvalMode: this.approvalMode }),
         images: await this.imageUrls(session, model, provider.id),
+        routing: this.routingHints(user),
       });
       this.deps.logger.info(
         `Run finished · ${outcome.reason}${outcome.error ? ` · ${outcome.error.kind}` : ''}`,
@@ -2931,6 +2956,20 @@ export class SovranController implements vscode.Disposable {
     }
   }
 
+  /** What on-demand tool loading may know besides the message: the slash command's units and the MCP servers. */
+  private routingHints(user: UserMessage): RoutingHints {
+    const slash = user.display ? parseSlash(user.display) : null;
+    const command = slash ? this.commands.find((c) => c.name === slash.name && c.kind === 'prompt') : undefined;
+    return {
+      ...(command?.tools?.length ? { commandUnits: command.tools } : {}),
+      servers: (this.deps.mcp?.view().servers ?? []).map((server) => ({
+        id: server.id,
+        name: server.name,
+        ...(server.managed ? { integration: server.managed.id } : {}),
+      })),
+    };
+  }
+
   private async projectInstructions(): Promise<string | undefined> {
     if (!this.settings.projectInstructions || !vscode.workspace.isTrusted) return undefined;
     const root = this.deps.workspace.roots()[0];
@@ -3022,6 +3061,7 @@ export class SovranController implements vscode.Disposable {
           contextWindow: e.contextWindow,
           source: 'estimate',
           updatedAt: Date.now(),
+          ...(e.breakdown ? { breakdown: e.breakdown } : {}),
         };
         this.patchSession(session.id, { usage: this.usageView(session) });
         return;
@@ -3035,6 +3075,16 @@ export class SovranController implements vscode.Disposable {
           };
           this.patchSession(session.id, { usage: this.usageView(session) });
         }
+        return;
+      case 'tools_loaded':
+        this.deps.logger.info(
+          `Tools loaded (${e.reason}) · ${e.detail ? e.detail.join(' · ') : e.units.join(', ')}`,
+        );
+        if (visible) this.patchSurface(this.surfaceFor(session.id)!, this.toolsView(session));
+        return;
+      case 'tools_unloaded':
+        this.deps.logger.info(`Tools unloaded (no longer used) · ${e.units.join(', ')}`);
+        if (visible) this.patchSurface(this.surfaceFor(session.id)!, this.toolsView(session));
         return;
       case 'compaction_started':
         return setActivity({ phase: 'compacting', label: 'Summarizing earlier messages' });

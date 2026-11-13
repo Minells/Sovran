@@ -79,6 +79,8 @@ exports.run = async function run() {
     assert.deepStrictEqual(cfg.get('mcp.servers'), []);
     assert.deepStrictEqual(cfg.get('tools.disabled'), []);
     assert.deepStrictEqual(cfg.get('tools.forceAsk'), []);
+    // Tools load on demand by default; `all` sends every tool with every request.
+    assert.strictEqual(cfg.get('tools.loading'), 'auto');
     // Security-relevant settings ignore workspace values. A repository must never be able to start an MCP server.
     const scope = (key) =>
       ext.packageJSON.contributes.configuration
@@ -94,6 +96,7 @@ exports.run = async function run() {
       'sovran.mcp.servers',
       'sovran.tools.disabled',
       'sovran.tools.forceAsk',
+      'sovran.tools.loading',
     ]) {
       assert.strictEqual(scope(key), 'application', `${key} must be application-scoped`);
     }

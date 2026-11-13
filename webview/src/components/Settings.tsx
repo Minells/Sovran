@@ -536,6 +536,14 @@ function ToolsSettings({ app }: { app: AppState }) {
 
   return (
     <div className="sv-settings__sections">
+      <div className="sv-subfield">
+        <CheckRow
+          checked={app.settings.toolLoading === 'auto'}
+          onChange={(on) => update({ key: 'tools.loading', value: on ? 'auto' : 'all' })}
+          label="Load tools when needed"
+          description="Sends file, editing and terminal tools with every request and adds Git, diagnostics, symbols, Web and MCP tools when a chat needs them, to keep the context small. Permissions do not change."
+        />
+      </div>
       <ChatToolSettings app={app} />
       <SettingsDisclosure
         title="Built-in tools"

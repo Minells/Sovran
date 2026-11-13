@@ -1,6 +1,12 @@
-import type { CompactionState, ErrorInfo, SessionMessage } from '../sessions/model';
+import type { CompactionState, ContextBreakdown, ErrorInfo, SessionMessage } from '../sessions/model';
 
 export type ToolPhase = 'awaiting_approval' | 'running';
+
+/**
+ * Why tool units were loaded: they fit the budget, the chat had used them, the request asked for them, the model
+ * asked for them or called one of their tools.
+ */
+export type ToolLoadReason = 'budget' | 'history' | 'router' | 'model' | 'call';
 
 export type AgentEvent =
   | { type: 'iteration'; iteration: number; maxIterations: number }
@@ -13,8 +19,18 @@ export type AgentEvent =
   | { type: 'tool_phase'; callId: string; toolName: string; label: string; phase: ToolPhase }
   | { type: 'tool_output'; callId: string; chunk: string }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; message: string }
-  | { type: 'context'; estimatedTokens: number; budgetTokens: number; contextWindow: number }
+  | {
+      type: 'context';
+      estimatedTokens: number;
+      budgetTokens: number;
+      contextWindow: number;
+      breakdown?: ContextBreakdown;
+    }
   | { type: 'usage'; promptTokens?: number; completionTokens?: number }
+  /** `detail` explains individual units, e.g. `git.changes: "committa"`. */
+  | { type: 'tools_loaded'; units: string[]; reason: ToolLoadReason; detail?: string[] }
+  /** Units dropped when the chat's units were chosen afresh (another model, or after a compaction). */
+  | { type: 'tools_unloaded'; units: string[] }
   | { type: 'compaction_started' }
   | { type: 'compacted'; compaction: CompactionState };
 

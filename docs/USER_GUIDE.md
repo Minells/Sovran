@@ -219,7 +219,17 @@ stay in the view; the mode, approval mode and models are shared by all chats in 
 **`@` files and `/` commands.**
 - **`@`:** type `@` to fuzzy-find a workspace file and attach it.
 - **Built-in commands:** type `/` for `/explain`, `/fix`, `/test`, `/review`, `/doc`, `/compact` and `/new`.
-- **Your own commands:** add Markdown files to `.sovran/commands/` (for example `.sovran/commands/release-notes.md`, using `$ARGUMENTS` for the text you type after the command). They load only in trusted workspaces.
+- **Your own commands:** add Markdown files to `.sovran/commands/` (for example `.sovran/commands/release-notes.md`, using `$ARGUMENTS` for the text you type after the command). They load only in trusted workspaces. An optional front matter block can set the description and the tools the command needs, which then load with it:
+
+  ```markdown
+  ---
+  description: Commit and push the current work
+  tools: [git.changes, git.remote]
+  ---
+  Commit the changes in $ARGUMENTS with a clear message, then push the branch.
+  ```
+
+  Tool units are `git`, `git.changes`, `git.remote`, `diagnostics`, `symbols`, `web` and `mcp:<server id>`.
 
 <p align="center"><img src="../media/screenshots/slash-commands-dark.png" width="320" alt="Slash command suggestions"></p>
 
@@ -513,7 +523,37 @@ Choices are saved with the chat when chat persistence is enabled. Older chats an
 selected, preserving existing behavior. A new integration starts selected unless excluded in that chat; its separate
 Connect and per-tool policies still apply. Deselecting a group also blocks pending calls. Global permissions and
 Plan/Restricted Mode remain in force. Re-enable a group and make a fresh model request to use definitions not offered
-in the previous request. No model request is used to select tools and no tool is silently removed by a token heuristic.
+in the previous request. No model request is used to select tools.
+
+### Tools loaded when needed
+
+Every tool definition a request carries takes room in the model's context window: Sovran's 27 native tools take about
+4,500 tokens, and MCP servers often take more. With **Settings → Tools → Load tools when needed** (on by default,
+`sovran.tools.loading: auto`), each request carries the file, editing, terminal and editor-context tools, and the other
+tools join a chat when it needs them:
+
+- **When everything fits.** If all tool definitions take less than a tenth of the model's input budget, every tool is
+  sent, as with the setting off. A model with a large window works as before; a 32k local model starts with about
+  1,400 tokens of tools instead of 4,500.
+- **From your message.** Before the first request, Sovran reads what you typed, in English or Italian, and loads what it
+  asks for: commit or push wording loads the Git tools, a public URL loads Web fetch, a `localhost` URL the browser
+  integration, compile errors the diagnostics, usages and renames the symbol tools, and the name or topic of a
+  configured MCP server that server. `/review` loads Git and `/fix` the diagnostics. Attachments, files and tool results
+  never load tools.
+- **From the model.** The model sees a short index of what it can load and calls `load_tools`. If it calls a tool that
+  is not loaded yet, Sovran loads it and asks the model to call it again: that call does not run, because the model had
+  not seen the tool's definition.
+
+Loaded tools stay for the chat. Keeping the start of each request the same lets local servers (Ollama, LM Studio, vLLM
+and others) reuse their prompt cache. When that cache is gone anyway, after a compaction or when you switch models,
+Sovran keeps only the tools the visible conversation used or loaded and lets the others load again when needed. Loading appears as *loaded Git* in the **Explored** row of the chat,
+the context meter's tooltip shows how the last request split into instructions, tools and conversation, and **Tools
+for this chat** shows which groups are loaded and what the others would add. The Sovran output channel logs what
+loaded each group and why.
+
+Loading never changes permissions. Excluded groups, disabled tools, Off MCP tools, Plan mode and Restricted Mode still
+apply, and every MCP call still asks until you allow it. Turn the setting off to send every available tool with every
+request.
 
 ## Settings
 
@@ -535,6 +575,7 @@ request it again with the current tools. Plan mode remains read-only.
 | `sovran.planModel` | `""` | Model for Plan mode. Empty means the same as Act |
 | `sovran.configFile.enabled` | `true` | Use `~/.sovran/config.yaml` when it exists, kept in sync with `sovran.providers`. User scope only |
 | `sovran.agent.maxIterations` | `25` | Maximum model round-trips per request |
+| `sovran.tools.loading` | `auto` | `auto` sends the core tools and loads the others when a chat needs them ([details](#tools-loaded-when-needed)); `all` sends every tool with every request. User scope only |
 | `sovran.tools.disabled` / `sovran.tools.forceAsk` | `[]` | Native tool names to disable or always approve; user scope only |
 | `sovran.mcp.servers` | `[]` | MCP servers whose tools the agent can use in Act mode (see [MCP servers](#mcp-servers)). User scope only |
 | `sovran.approvals.mode` | `ask` | Approval mode a new window starts in: `ask`, `edits` (Auto-edit) or `auto`. User scope only |
@@ -543,7 +584,7 @@ request it again with the current tools. Plan mode remains read-only.
 | `sovran.terminal.timeoutSeconds` | `120` | Command timeout |
 | `sovran.terminal.mirrorToTerminal` | `true` | Show command output in a Sovran terminal |
 | `sovran.context.includeActiveEditor` | `true` | Attach the active file or selection by default |
-| `sovran.context.maxToolResultChars` | `20000` | Size cap for each tool result sent to the model |
+| `sovran.context.maxToolResultChars` | `20000` | Size cap for each tool result sent to the model. Small windows get less: at most about 15% of the model's input budget, so tools page sooner |
 | `sovran.context.autoCompact` | `true` | Summarize older messages when the context window is full |
 | `sovran.context.projectInstructions` | `true` | Use `AGENTS.md` from the workspace root (trusted workspaces only) |
 | `sovran.sessions.persist` | `true` | Save chats in VS Code workspace storage |

@@ -170,6 +170,7 @@ export function readSettings(): HostSettings {
       },
       defaultContextWindow: DEFAULT_CONTEXT_WINDOW,
       defaultMaxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      toolLoading: userSetting<string>('tools.loading', 'auto') === 'all' ? 'all' : 'auto',
     },
     includeActiveEditor: setting('context.includeActiveEditor', true),
     projectInstructions: setting('context.projectInstructions', true),
@@ -218,6 +219,7 @@ export function readSettingsView(s: HostSettings = readSettings()): SettingsView
     maxToolResultChars: s.agent.tools.maxToolResultChars,
     persistSessions: s.persistSessions,
     generateTitles: s.generateTitles,
+    toolLoading: s.agent.toolLoading ?? 'auto',
     overriddenByWorkspace: overridden,
   };
 }
