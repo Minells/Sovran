@@ -27,6 +27,7 @@ import type { AgentEvent } from '../core/agent/events';
 import { matchesAllowList, suggestAllowPrefix } from '../core/permissions/commands';
 import type { AgentMode, ApprovalMode, SessionGrants } from '../core/permissions/policy';
 import { TOOL_GROUP_LABELS, normalizeExcludedGroups } from '../core/tools/groups';
+import type { RoutingHints } from '../core/tools/routing';
 import { estimateTokens } from '../core/context/contextManager';
 import { isProtectedPath } from '../core/permissions/policy';
 import type {
@@ -2642,6 +2643,7 @@ export class SovranController implements vscode.Disposable {
         // Read live: switching the approval mode or allowing a command mid-run applies to the next action.
         policy: () => ({ ...this.settings.agent.policy, approvalMode: this.approvalMode }),
         images: await this.imageUrls(session, model, provider.id),
+        routing: this.routingHints(user),
       });
       this.deps.logger.info(
         `Run finished · ${outcome.reason}${outcome.error ? ` · ${outcome.error.kind}` : ''}`,
@@ -2931,6 +2933,20 @@ export class SovranController implements vscode.Disposable {
     }
   }
 
+  /** What on-demand tool loading may know besides the message: the slash command's units and the MCP servers. */
+  private routingHints(user: UserMessage): RoutingHints {
+    const slash = user.display ? parseSlash(user.display) : null;
+    const command = slash ? this.commands.find((c) => c.name === slash.name && c.kind === 'prompt') : undefined;
+    return {
+      ...(command?.tools?.length ? { commandUnits: command.tools } : {}),
+      servers: (this.deps.mcp?.view().servers ?? []).map((server) => ({
+        id: server.id,
+        name: server.name,
+        ...(server.managed ? { integration: server.managed.id } : {}),
+      })),
+    };
+  }
+
   private async projectInstructions(): Promise<string | undefined> {
     if (!this.settings.projectInstructions || !vscode.workspace.isTrusted) return undefined;
     const root = this.deps.workspace.roots()[0];
@@ -3037,7 +3053,9 @@ export class SovranController implements vscode.Disposable {
         }
         return;
       case 'tools_loaded':
-        this.deps.logger.info(`Tools loaded (${e.reason}) · ${e.units.join(', ')}`);
+        this.deps.logger.info(
+          `Tools loaded (${e.reason}) · ${e.detail ? e.detail.join(' · ') : e.units.join(', ')}`,
+        );
         return;
       case 'compaction_started':
         return setActivity({ phase: 'compacting', label: 'Summarizing earlier messages' });

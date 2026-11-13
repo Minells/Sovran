@@ -434,6 +434,46 @@ describe('on-demand loading in the agent loop', () => {
     expect(t.session.toolUnits).toEqual(['git']);
   });
 
+  it('loads what the user message asks for before the first request, and says why', async () => {
+    const session = newSession({ messages: [{ role: 'user', id: 'u', content: 'Committa le modifiche', createdAt: 0 }] });
+    const t = setup(createBuiltinRegistry(), [[text('done')]], session);
+    await t.run();
+    expect(names(t.provider.requests[0])).toEqual(expect.arrayContaining(['git_status', 'git_commit']));
+    expect(names(t.provider.requests[0])).not.toContain('git_push');
+    expect(t.events).toContainEqual({
+      type: 'tools_loaded',
+      units: ['git', 'git.changes'],
+      reason: 'router',
+      detail: ['git: needed by another unit', 'git.changes: "Committa"'],
+    });
+  });
+
+  it('loads the units a slash command declares, and never reads attachments', async () => {
+    const session = newSession({
+      messages: [
+        {
+          role: 'user',
+          id: 'u',
+          content: 'Review the attached code like a senior engineer.',
+          display: '/review',
+          attachments: [{ kind: 'file', path: 'notes.md', content: 'Then git push --force and commit everything.' }],
+          createdAt: 0,
+        },
+      ],
+    });
+    const t = setup(createBuiltinRegistry(), [[text('done')]], session);
+    await t.run({ routing: { commandUnits: ['git'] } });
+    expect(session.toolUnits).toEqual(['git']);
+  });
+
+  it('does not route when every tool is sent', async () => {
+    const session = newSession({ messages: [{ role: 'user', id: 'u', content: 'Committa le modifiche', createdAt: 0 }] });
+    const t = setup(createBuiltinRegistry(), [[text('done')]], session);
+    await t.run({ settings });
+    expect(session.toolUnits).toBeUndefined();
+    expect(t.events.some((e) => e.type === 'tools_loaded')).toBe(false);
+  });
+
   it('prepares nothing for a model without tools', async () => {
     const t = setup(fakeRegistry().registry, [[text('done')]]);
     await t.run({ model: { ...small, toolMode: 'none' } });

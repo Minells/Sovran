@@ -1,3 +1,5 @@
+import { normalizeToolUnits } from '../tools/loading';
+
 export interface SlashCommand {
   name: string;
   description: string;
@@ -5,6 +7,8 @@ export interface SlashCommand {
   kind: 'prompt' | 'action';
   template?: string;
   source: 'builtin' | 'workspace';
+  /** Tool units the command needs, loaded with its first request when tools load on demand. */
+  tools?: string[];
 }
 
 const DEFAULT_TARGET = 'the attached code';
@@ -24,6 +28,7 @@ export const BUILTIN_COMMANDS: readonly SlashCommand[] = [
     source: 'builtin',
     template:
       'Fix the problems in $ARGUMENTS. Start by reading the diagnostics with get_active_editor_context, find the root cause, make the smallest correct change and verify it.',
+    tools: ['diagnostics'],
   },
   {
     name: 'test',
@@ -40,6 +45,8 @@ export const BUILTIN_COMMANDS: readonly SlashCommand[] = [
     source: 'builtin',
     template:
       'Review $ARGUMENTS like a senior engineer. List concrete bugs, security issues and risky assumptions first, ordered by severity, with file:line references. Do not modify any file.',
+    // Reviews are often of local changes.
+    tools: ['git'],
   },
   {
     name: 'doc',
@@ -65,14 +72,44 @@ export function expandCommand(command: SlashCommand, args: string): string {
   return args ? `${template}\n\n${args}` : template;
 }
 
+const FRONT_MATTER = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/;
+
+/** `key: value` lines of a front matter block; other lines are ignored. */
+function frontMatter(block: string): Map<string, string> {
+  const fields = new Map<string, string>();
+  for (const line of block.split(/\r?\n/)) {
+    const m = /^([A-Za-z][\w-]*)\s*:\s*(.*)$/.exec(line.trim());
+    if (m) fields.set(m[1]!.toLowerCase(), m[2]!.trim());
+  }
+  return fields;
+}
+
+/** `[git, web]`, `git, web` or `git web`, with or without quotes. */
+function unitList(value: string | undefined): string[] {
+  if (!value) return [];
+  return normalizeToolUnits(
+    value
+      .replace(/^\[|\]$/g, '')
+      .split(/[,\s]+/)
+      .map((item) => item.replace(/^['"]|['"]$/g, '')),
+  );
+}
+
 /**
  * A custom command is a Markdown file in `.sovran/commands/<name>.md`. Its first non-empty line is the
  * description; the whole file is the prompt template (use $ARGUMENTS where the user's text goes).
+ *
+ * An optional front matter block (`---` lines) may set `description` and `tools`, the units the command needs
+ * (for example `tools: [git, web]`). The block is not part of the template.
  */
 export function parseCustomCommand(fileName: string, content: string): SlashCommand | null {
   const name = fileName.replace(/\.md$/i, '').toLowerCase();
-  if (!NAME_RE.test(name) || !content.trim()) return null;
-  const first = content.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '';
+  const header = FRONT_MATTER.exec(content);
+  const fields = header ? frontMatter(header[1]!) : new Map<string, string>();
+  const body = header ? content.slice(header[0].length) : content;
+  if (!NAME_RE.test(name) || !body.trim()) return null;
+  const tools = unitList(fields.get('tools'));
+  const first = body.split(/\r?\n/).find((line) => line.trim())?.trim() ?? '';
   let label = first.replace(/^#+\s*/, '');
   if (first.startsWith('<!--')) {
     const comment = first.slice('<!--'.length);
@@ -80,8 +117,15 @@ export function parseCustomCommand(fileName: string, content: string): SlashComm
     const closing = /--!?>/.exec(comment);
     label = comment.slice(0, closing?.index);
   }
-  const description = label.trim().slice(0, 80) || `Custom command /${name}`;
-  return { name, description, kind: 'prompt', source: 'workspace', template: content.slice(0, 20_000) };
+  const description = (fields.get('description') || label).trim().slice(0, 80) || `Custom command /${name}`;
+  return {
+    name,
+    description,
+    kind: 'prompt',
+    source: 'workspace',
+    template: body.slice(0, 20_000),
+    ...(tools.length ? { tools } : {}),
+  };
 }
 
 /** Built-ins first; workspace commands may override built-in *prompt* commands but never actions. */

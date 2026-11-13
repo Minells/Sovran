@@ -2,8 +2,11 @@ import type { CompactionState, ErrorInfo, SessionMessage } from '../sessions/mod
 
 export type ToolPhase = 'awaiting_approval' | 'running';
 
-/** Why tool units were loaded: they fit the budget, the chat had used them, the model asked or called one. */
-export type ToolLoadReason = 'budget' | 'history' | 'model' | 'call';
+/**
+ * Why tool units were loaded: they fit the budget, the chat had used them, the request asked for them, the model
+ * asked for them or called one of their tools.
+ */
+export type ToolLoadReason = 'budget' | 'history' | 'router' | 'model' | 'call';
 
 export type AgentEvent =
   | { type: 'iteration'; iteration: number; maxIterations: number }
@@ -18,7 +21,8 @@ export type AgentEvent =
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; message: string }
   | { type: 'context'; estimatedTokens: number; budgetTokens: number; contextWindow: number }
   | { type: 'usage'; promptTokens?: number; completionTokens?: number }
-  | { type: 'tools_loaded'; units: string[]; reason: ToolLoadReason }
+  /** `detail` explains individual units, e.g. `git.changes: "committa"`. */
+  | { type: 'tools_loaded'; units: string[]; reason: ToolLoadReason; detail?: string[] }
   | { type: 'compaction_started' }
   | { type: 'compacted'; compaction: CompactionState };
 

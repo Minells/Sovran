@@ -529,7 +529,7 @@
               "auto",
               "all"
             ],
-            "default": "all",
+            "default": "auto",
             "enumDescriptions": [
               "Send the core tools with every request and load the others when a request needs them.",
               "Send every available tool with every request."

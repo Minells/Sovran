@@ -41,6 +41,7 @@ import {
   type ToolLoadingMode,
 } from '../tools/loading';
 import type { ToolRegistry } from '../tools/registry';
+import { routeToolUnits, type RoutingHints } from '../tools/routing';
 import { ToolError, type AnyTool, type ToolContext, type ToolSettings } from '../tools/types';
 import type { AgentEvent, RunOutcome, ToolLoadReason } from './events';
 import { parseJsonLenient, parseToolCallBlock } from './promptedTools';
@@ -99,6 +100,8 @@ export interface RunOptions {
   policy?: () => PolicySettings;
   /** Data URLs of the images in the chat's messages, by image id (see `UserMessage.images`). */
   images?: ReadonlyMap<string, string>;
+  /** What on-demand loading can know about the request beyond its text: its slash command and the MCP servers. */
+  routing?: RoutingHints;
 }
 
 export type CompactOptions = Pick<
@@ -382,7 +385,8 @@ export class AgentRunner {
 
   /**
    * With on-demand loading, the units a run starts with: the first time, those of the tool calls already in the chat;
-   * then whatever fits the budget for this model. A chat only ever adds units, so its prompt prefix stays stable.
+   * then whatever fits the budget for this model, and what the user's message asks for. A chat only ever adds units,
+   * so its prompt prefix stays stable.
    */
   private prepareToolUnits(o: RunOptions) {
     if (o.settings.toolLoading !== 'auto') return;
@@ -398,6 +402,19 @@ export class AgentRunner {
       .reduce((sum, tool) => sum + this.tokensOf(tool), 0);
     const units = loadableUnits(available, (tool) => this.tokensOf(tool));
     this.loadUnits(o, unitsWithinBudget(coreTokens, units, this.inputBudget(o).budgetTokens), 'budget');
+    const latest = o.session.messages.findLast((m) => m.role === 'user');
+    if (latest?.role !== 'user') return;
+    const routed = routeToolUnits(
+      latest.content,
+      units.map((unit) => unit.id),
+      o.routing,
+    );
+    this.loadUnits(
+      o,
+      routed.map((r) => r.unit),
+      'router',
+      new Map(routed.map((r) => [r.unit, r.reason])),
+    );
   }
 
   /** Units of the tools the chat has already called, in the order they were first called. */
@@ -415,9 +432,16 @@ export class AgentRunner {
   }
 
   /** Adds units to the chat. Their tools are offered from the next model request. */
-  private loadUnits(o: RunOptions, units: readonly string[], reason: ToolLoadReason): string[] {
+  private loadUnits(
+    o: RunOptions,
+    units: readonly string[],
+    reason: ToolLoadReason,
+    why?: ReadonlyMap<string, string>,
+  ): string[] {
     const added = addUnits((o.session.toolUnits ??= []), units);
-    if (added.length) o.emit({ type: 'tools_loaded', units: added, reason });
+    if (!added.length) return added;
+    const detail = why && added.map((unit) => `${unit}: ${why.get(unit) ?? 'needed by another unit'}`);
+    o.emit({ type: 'tools_loaded', units: added, reason, ...(detail ? { detail } : {}) });
     return added;
   }
 
