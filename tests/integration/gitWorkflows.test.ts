@@ -88,7 +88,8 @@ describe('native Git workflow tools', () => {
     expect(test.calls.some((args) => args.includes('fetch'))).toBe(false);
   });
 
-  it('pins the rebase target and refuses a dirty working tree or editor', async () => {
+  // About ten Git processes: close to the default 5 s on Windows runners, like the other tests timed here.
+  it('pins the rebase target and refuses a dirty working tree or editor', { timeout: 20_000 }, async () => {
     const test = await fixture();
     git(test.root, 'switch', '-c', 'feature');
     await fs.writeFile(path.join(test.root, 'feature.txt'), 'feature\n');
