@@ -290,8 +290,39 @@ describe('native Git reads on disposable repositories', () => {
     git(t.root, 'config', 'extensions.partialClone', 'fixture');
     git(t.root, 'config', 'protocol.ssh.allow', 'always');
     git(t.root, 'config', 'core.sshCommand', `"${process.execPath}" "${helper}"`);
-    await expect(t.execute(gitShowTool, { path: 'a.txt' })).rejects.toThrow('Git inspection failed');
+    // A Git with --no-lazy-fetch fails on the missing object; an older one is refused before it reads anything.
+    await expect(t.execute(gitShowTool, { path: 'a.txt' })).rejects.toThrow(/Git inspection failed|partial clone/);
     expect(await fs.stat(marker).catch(() => null)).toBeNull();
+  });
+
+  it('works on a host Git without --no-lazy-fetch, except in a partial clone', async () => {
+    const t = await fixture();
+    // Whatever Git is installed, answer like one that predates the option.
+    const real = t.ctx.process.runFile.bind(t.ctx.process);
+    t.ctx.process.runFile = async (executable, argv, options) =>
+      argv.includes('--no-lazy-fetch')
+        ? {
+            exitCode: 129,
+            signal: null,
+            output: '',
+            stdout: '',
+            stderr: 'unknown option: --no-lazy-fetch',
+            truncated: false,
+            timedOut: false,
+            cancelled: false,
+            durationMs: 1,
+          }
+        : real(executable, argv, options);
+    expect((await t.execute(gitStatusTool)).branch).toBe('main');
+    expect(t.calls.length).toBeGreaterThan(0);
+    expect(t.calls.flat()).not.toContain('--no-lazy-fetch');
+
+    git(t.root, 'config', 'remote.fixture.url', 'ssh://fixture.invalid/repository');
+    git(t.root, 'config', 'remote.fixture.promisor', 'true');
+    const before = t.calls.length;
+    await expect(t.execute(gitStatusTool)).rejects.toThrow(/partial clone/);
+    // Only the configuration was read: no status, diff or object access followed.
+    expect(t.calls.slice(before).every((argv) => argv.includes('config'))).toBe(true);
   });
 
   it('pins the working tree even if repository configuration points elsewhere', async () => {

@@ -73,7 +73,7 @@ textconv and effective clean/process filters. The executable is resolved outside
 processes inherit a minimal host environment without ambient Git redirection, credentials or runtime preloads.
 Bulk patches omit protected paths and detected protected rename sources; explicit protected-file inspection uses
 approval. Paths and revisions have separate contracts, metadata must be complete before parsing, and raw process
-output is never streamed to chat or mirrored before filtering. Git must support the required protective flags.
+output is never streamed to chat or mirrored before filtering. A host Git without `--no-lazy-fetch` is used only for repositories that are not partial clones (no promisor remote or `extensions.partialClone`), checked before every operation; partial clones are refused there.
 
 
 Native Git index changes and commits are separate execute-risk tools that require one-time approval in Act even in

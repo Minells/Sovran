@@ -75,8 +75,10 @@ revision ranges are not accepted as a revision. Commit IDs, branch/tag names and
 Bulk patches omit protected paths and detected renames from protected sources. An exact protected-file request uses
 the ordinary approval card, including in Auto. Status/history metadata may still name protected files.
 
-Git is resolved from the extension host's PATH outside workspace roots. The host Git must support `--no-lazy-fetch`
-(documented in Git 2.48); if it does not, update Git rather than falling back to an unsafe read. Native inspection
+Git is resolved from the extension host's PATH outside workspace roots. Sovran passes `--no-lazy-fetch`
+(documented in Git 2.48) so a read can never download missing objects. A host Git that predates the option, as on
+current LTS distributions, still works for ordinary repositories; only a partial clone (a repository with a promisor
+remote) is refused there, because it is the one case where a read could fetch. Update Git to use those. Native inspection
 disables pagers, fsmonitor, textconv, external diff and configured clean/process filters. Results are bounded, with a
 15-second maximum command budget per inspection and 2 MiB maximum historical blob. Very large metadata sets fail
 explicitly; large patches are marked truncated. Structured Git output is filtered before it reaches chat and is not

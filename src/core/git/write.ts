@@ -305,7 +305,7 @@ export async function executeGitWrite(
       [
         '--no-pager',
         '--no-optional-locks',
-        '--no-lazy-fetch',
+        ...git.noLazyFetch,
         '--no-replace-objects',
         '--literal-pathspecs',
         `--git-dir=${path.join(git.repository.absolute, '.git')}`,
