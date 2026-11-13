@@ -170,6 +170,7 @@ export function readSettings(): HostSettings {
       },
       defaultContextWindow: DEFAULT_CONTEXT_WINDOW,
       defaultMaxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      toolLoading: userSetting<string>('tools.loading', 'all') === 'auto' ? 'auto' : 'all',
     },
     includeActiveEditor: setting('context.includeActiveEditor', true),
     projectInstructions: setting('context.projectInstructions', true),

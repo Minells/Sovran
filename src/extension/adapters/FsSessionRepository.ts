@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { normalizeExcludedGroups } from '../../core/tools/groups';
+import { normalizeToolUnits } from '../../core/tools/loading';
 import {
   summarize,
   type Session,
@@ -60,6 +61,7 @@ export class FsSessionRepository implements SessionRepository {
       const s = JSON.parse(await fs.readFile(this.file(id), 'utf8')) as Session;
       if (s?.excludedToolGroups !== undefined)
         s.excludedToolGroups = normalizeExcludedGroups(s.excludedToolGroups);
+      if (s?.toolUnits !== undefined) s.toolUnits = normalizeToolUnits(s.toolUnits);
       return s && s.id === id && Array.isArray(s.messages) ? s : undefined;
     } catch {
       return undefined;

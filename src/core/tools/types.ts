@@ -59,6 +59,11 @@ export interface ToolDefinition<A = unknown> {
   /** Provenance and deterministic context grouping; absent metadata means a native tool. */
   source?: { kind: 'native' } | { kind: 'mcp'; serverId: string };
   group?: string;
+  /**
+   * The set of tools this one is loaded with when tools load on demand (see `tools/loading.ts`). Native tools name
+   * theirs; absent means the always-offered core. MCP tools load with their server.
+   */
+  unit?: string;
   /** Some read tools also require a trusted extension host (e.g. Git or network access). */
   requiresTrust?: boolean;
   /** Synchronous, side-effect-free live availability check. Returns a reason when unavailable. */

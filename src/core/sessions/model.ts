@@ -105,6 +105,8 @@ export interface ToolMessage {
   durationMs?: number;
   /** Set when a file change or command ran without asking the user, with the policy's reason (Auto mode, allow-list…). */
   autoApproved?: string;
+  /** Tool units this call loaded instead of running (`load_tools`, or a call to a tool that was not loaded). */
+  loaded?: string[];
   createdAt: number;
 }
 
@@ -136,6 +138,11 @@ export interface Session {
   messages: SessionMessage[];
   /** Missing means all groups selected, preserving older chats. Empty groups remain excluded after reconnects. */
   excludedToolGroups?: string[];
+  /**
+   * Tool units loaded on demand, in load order (the core is always offered). Missing until the chat first runs with
+   * on-demand loading; it then starts from the units of the tool calls in its history.
+   */
+  toolUnits?: string[];
   usage?: ContextUsage;
   compaction?: CompactionState;
 }

@@ -522,6 +522,20 @@
         "title": "Tools",
         "order": 3,
         "properties": {
+          "sovran.tools.loading": {
+            "type": "string",
+            "scope": "application",
+            "enum": [
+              "auto",
+              "all"
+            ],
+            "default": "all",
+            "enumDescriptions": [
+              "Send the core tools with every request and load the others when a request needs them.",
+              "Send every available tool with every request."
+            ],
+            "markdownDescription": "Which tool definitions model requests carry. `auto` keeps the context small: file, editing and terminal tools are always sent, and Git, diagnostics, symbols, Web and MCP tools are added to the chat when it needs them. Permissions and approvals do not change. Only user settings are honored."
+          },
           "sovran.tools.disabled": {
             "type": "array",
             "scope": "application",

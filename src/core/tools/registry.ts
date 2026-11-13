@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { AgentMode } from '../permissions/policy';
 import type { ToolSchema } from '../providers/types';
+import { LOAD_TOOLS } from './loading';
 import type { AnyTool } from './types';
 
 /** Tools that come and go while Sovran runs (the tools of connected MCP servers). Asked again for every request. */
@@ -21,6 +22,7 @@ export class ToolRegistry {
 
   register(tool: AnyTool): this {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(tool.name)) throw new Error(`Invalid tool name: ${tool.name}`);
+    if (tool.name === LOAD_TOOLS) throw new Error(`Reserved tool name: ${tool.name}`);
     if (this.tools.has(tool.name)) throw new Error(`Tool already registered: ${tool.name}`);
     this.tools.set(tool.name, tool);
     return this;

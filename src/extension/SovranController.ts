@@ -3036,6 +3036,9 @@ export class SovranController implements vscode.Disposable {
           this.patchSession(session.id, { usage: this.usageView(session) });
         }
         return;
+      case 'tools_loaded':
+        this.deps.logger.info(`Tools loaded (${e.reason}) · ${e.units.join(', ')}`);
+        return;
       case 'compaction_started':
         return setActivity({ phase: 'compacting', label: 'Summarizing earlier messages' });
       case 'compacted':
