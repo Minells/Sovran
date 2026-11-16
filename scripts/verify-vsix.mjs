@@ -11,6 +11,8 @@ for (const required of [
   'dist/extension.js',
   'dist/documentWorker.js',
   'dist/webWorker.js',
+  'dist/codeModeWorker.js',
+  'dist/quickjs.wasm',
   'THIRD_PARTY_NOTICES.md',
   'SECURITY.md',
   'package.json',

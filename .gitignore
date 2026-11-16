@@ -5,3 +5,6 @@ coverage/
 .vscode-test/
 *.vsix
 .DS_Store
+
+# Local Code Mode benchmark reports
+/code-mode-benchmark*.json

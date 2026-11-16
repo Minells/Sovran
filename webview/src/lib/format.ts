@@ -21,6 +21,9 @@ const TOOLS: Record<string, ToolInfo> = {
   edit_file: { icon: 'edit', done: 'Edited', doing: 'Editing' },
   apply_diff: { icon: 'diff', done: 'Edited', doing: 'Editing' },
   execute_terminal: { icon: 'terminal', done: 'Ran', doing: 'Running' },
+  code_search: { icon: 'search', done: 'Found MCP tools', doing: 'Finding MCP tools' },
+  code_describe: { icon: 'book', done: 'Read MCP schemas', doing: 'Reading MCP schemas' },
+  execute_code: { icon: 'code', done: 'Executed Code Mode', doing: 'Running Code Mode' },
   load_tools: { icon: 'extensions', done: 'Loaded', doing: 'Loading' },
 };
 

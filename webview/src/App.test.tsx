@@ -90,6 +90,38 @@ function clickButton(name: RegExp) {
 }
 
 describe('App', () => {
+  it('shows Code Mode source and child calls without mixing them into its result', async () => {
+    mount(baseState({ session: { id: 's', title: 'Code Mode', messages: [
+      { role: 'user', id: 'u', content: '/code count', createdAt: 0 },
+      { role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c', name: 'execute_code', arguments: JSON.stringify({ manifestId: 'm', code: 'return {count: 2};' }) }] },
+      { role: 'tool', id: 't', toolCallId: 'c', toolName: 'execute_code', content: '{"count":2}', status: 'success', createdAt: 0,
+        codeMode: { calls: [{ id: 'child', tool: 'list_projects', server: 'GitLab', status: 'success', durationMs: 12 }] } },
+    ] } }));
+    await clickButton(/Executed Code Mode/);
+    expect(screen.getByText('MCP calls (1)')).toBeInTheDocument();
+    expect(screen.getByText(/success · GitLab · list_projects · 12 ms/)).toBeInTheDocument();
+    expect(screen.getByText('return {count: 2};')).toBeInTheDocument();
+  });
+
+  it('replaces Code Mode progress snapshots while ordinary tool output still appends', () => {
+    const state = { ...initialUiState, app: baseState(), toolOutputs: { c: 'queued' } };
+    const updated = reducer(state, { type: 'toolOutput', sessionId: 's', callId: 'c', chunk: 'success', replace: true });
+    expect(updated.toolOutputs.c).toBe('success');
+    expect(reducer(updated, { type: 'toolOutput', sessionId: 's', callId: 'c', chunk: '\nnext' }).toolOutputs.c).toBe('success\nnext');
+  });
+
+  it('renders malformed code arguments as text after validation fails', async () => {
+    const args = JSON.stringify({ manifestId: 'm', code: {} });
+    mount(baseState({ session: { id: 's', title: 'Code Mode', messages: [
+      { role: 'user', id: 'u', content: '/code test', createdAt: 0 },
+      { role: 'assistant', id: 'a', content: '', createdAt: 0, toolCalls: [{ id: 'c', name: 'execute_code', arguments: args }] },
+      { role: 'tool', id: 't', toolCallId: 'c', toolName: 'execute_code', content: 'Invalid arguments', status: 'error', createdAt: 0, codeMode: { calls: [] } },
+    ] } }));
+    await clickButton(/Executed Code Mode/);
+    expect(screen.getByText(args)).toBeInTheDocument();
+    expect(screen.getByText('Invalid arguments')).toBeInTheDocument();
+  });
+
   it('handshakes with the host and renders the start page with starters', async () => {
     mount(baseState());
     expect(sent[0]).toEqual({ type: 'ready' });

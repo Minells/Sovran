@@ -1,3 +1,4 @@
+import { CODE_TOOL_NAMES } from '../codeMode/contracts';
 import type { ToolSchema } from '../providers/types';
 
 /**
@@ -85,6 +86,11 @@ export function parseToolCallBlock(block: string): ParsedBlock {
   const v = parsed.value as { name?: unknown; arguments?: unknown; parameters?: unknown };
   if (!v || typeof v !== 'object' || typeof v.name !== 'string' || !v.name) {
     return { ok: false, error: 'The <tool_call> block must be a JSON object with a "name" string.' };
+  }
+  // Repairing malformed JSON with a regex can silently change string literals inside JavaScript.
+  if (CODE_TOOL_NAMES.some((name) => name === v.name)) {
+    try { JSON.parse(block.trim()); }
+    catch { return { ok: false, error: 'Code Mode calls require valid JSON; regenerate the call without repairing its source.' }; }
   }
   const args = v.arguments ?? v.parameters ?? {};
   return { ok: true, name: v.name, argumentsJson: typeof args === 'string' ? args : JSON.stringify(args) };

@@ -52,6 +52,9 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
   definitions. Permissions do not change.
 - **Tools:** built-in permissions and per-chat group selection with definition cost estimates. Optional Playwright,
   Chrome DevTools, GitHub, GitLab and Context7 integrations, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
+- **Experimental Code Mode:** opt-in `/code` runs JavaScript locally to aggregate selected read-only GitHub/GitLab
+  MCP results before returning a small summary to the model. Existing approvals apply to every call.
+  [Scope and setup](docs/USER_GUIDE.md#experimental-code-mode).
 - **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
   history that can persist across restarts.
 
@@ -134,6 +137,7 @@ Never put API keys in YAML or settings. Use **Sovran: Set Provider API Key…**.
 | `sovran.defaultModel` / `sovran.planModel` | `""` | Act / Plan model; blank Plan inherits Act |
 | `sovran.approvals.mode` | `ask` | `ask`, `edits` (Auto-edit), or `auto` |
 | `sovran.tools.loading` | `auto` | Load tools when needed, or send `all` with every request |
+| `sovran.experimental.codeMode.enabled` | `false` | Enable the explicit `/code` prototype in trusted Act chats |
 | `sovran.tools.disabled` / `sovran.tools.forceAsk` | `[]` | Disable native tools or always review their calls |
 | `sovran.agent.maxIterations` | `25` | Model round-trips per request |
 | `sovran.terminal.timeoutSeconds` | `120` | Command timeout |

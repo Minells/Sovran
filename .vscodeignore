@@ -5,6 +5,9 @@
 !dist/documentWorker.js.LEGAL.txt
 !dist/webWorker.js
 !dist/webWorker.js.LEGAL.txt
+!dist/codeModeWorker.js
+!dist/codeModeWorker.js.LEGAL.txt
+!dist/quickjs.wasm
 !dist/webview/**
 !media/brand/**
 !media/sovran.css

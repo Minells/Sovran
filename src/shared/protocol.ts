@@ -368,7 +368,7 @@ export type HostMessage =
       field: 'content' | 'reasoning';
       text: string;
     }
-  | { type: 'toolOutput'; sessionId: string; callId: string; chunk: string }
+  | { type: 'toolOutput'; sessionId: string; callId: string; chunk: string; replace?: boolean }
   | { type: 'notice'; id: string; level: 'info' | 'warning' | 'error'; message: string }
   | { type: 'providerTest'; requestId: string; providerId: string; result: ProviderTestResult }
   /** Answers a `saveProvider` that carried a requestId; a `providerTest` for the same request follows. */

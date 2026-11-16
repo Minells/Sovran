@@ -54,13 +54,14 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
 
 // ------------------------------------------------------------------------------------- tool row
 
-type RowStatus = 'queued' | 'awaiting' | 'running' | 'success' | 'error' | 'denied' | 'cancelled';
+type RowStatus = 'queued' | 'awaiting' | 'running' | 'success' | 'partial' | 'error' | 'denied' | 'cancelled';
 
 const STATUS_ICON: Record<RowStatus, { name: string; spin?: boolean; label: string }> = {
   queued: { name: 'circle-outline', label: 'Queued' },
   awaiting: { name: 'circle-filled', label: 'Waiting for approval' },
   running: { name: 'loading', spin: true, label: 'Running' },
   success: { name: 'check', label: 'Done' },
+  partial: { name: 'warning', label: 'Partial result: inspect failed MCP calls' },
   error: { name: 'error', label: 'Failed' },
   denied: { name: 'circle-slash', label: 'Not allowed' },
   cancelled: { name: 'debug-stop', label: 'Cancelled' },
@@ -82,7 +83,7 @@ export function ToolRow({
   const { app } = useStore();
   const info = toolInfo(call.name);
   const status: RowStatus = result
-    ? result.status
+    ? result.status === 'success' && result.codeMode?.calls.some((item) => item.status !== 'success') ? 'partial' : result.status
     : approval
       ? 'awaiting'
       : run?.activity.callId === call.id && run.activity.phase === 'running'
@@ -92,7 +93,7 @@ export function ToolRow({
           : 'cancelled';
   const [open, setOpen] = useState<boolean | null>(null);
   // A pending approval always shows its detail: the bar above links to it, so it must not be folded away.
-  const expanded = status === 'awaiting' || (open ?? (status === 'running' && call.name === 'execute_terminal'));
+  const expanded = status === 'awaiting' || (open ?? (status === 'running' && (call.name === 'execute_terminal' || call.name === 'execute_code')));
   const target =
     toolTarget(call.name, call.arguments) || result?.summary || (isMcpTool(call.name) ? (approval?.title ?? mcpToolLabel(call.name, app.mcp.servers)) : '');
   const display = result?.display;
@@ -146,6 +147,7 @@ export function ToolRow({
         <div className="sv-tool__detail">
           {approval ? <ApprovalDetail approval={approval} /> : null}
           {!approval && status === 'running' && output ? <pre className="sv-output">{output}</pre> : null}
+          {call.name === 'execute_code' ? <CodeModeDetails call={call} result={result} /> : null}
           {result ? <ToolResultDetail result={result} /> : null}
           {!result && !approval && status !== 'running' ? (
             <pre className="sv-output">{call.arguments}</pre>
@@ -154,6 +156,20 @@ export function ToolRow({
       ) : null}
     </div>
   );
+}
+
+function CodeModeDetails({ call, result }: { call: ToolCallView; result?: ToolMessageView }) {
+  let code = call.arguments;
+  try {
+    const value: unknown = JSON.parse(call.arguments);
+    if (value && typeof value === 'object' && 'code' in value && typeof value.code === 'string') code = value.code;
+  } catch { /* Show original arguments. */ }
+  return <>
+    <details><summary>JavaScript</summary><pre className="sv-output">{code}</pre></details>
+    {result?.codeMode?.calls.length ? <details open><summary>MCP calls ({result.codeMode.calls.length})</summary>
+      <ul className="sv-list">{result.codeMode.calls.map((item) => <li key={item.id}>{item.status} · {item.server} · {item.tool} · {Math.round(item.durationMs)} ms</li>)}</ul>
+    </details> : null}
+  </>;
 }
 
 function ToolResultDetail({ result }: { result: ToolMessageView }) {

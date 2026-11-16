@@ -10,6 +10,7 @@ import {
 import { NodeProcessRunner, TerminalMirror } from './adapters/NodeProcessRunner';
 import { RipgrepSearch } from './adapters/RipgrepSearch';
 import { VscodeWorkspace } from './adapters/VscodeWorkspace';
+import { QuickJSExecutor } from './adapters/QuickJSExecutor';
 import { WorkerDocumentConverter } from './adapters/WorkerDocumentConverter';
 import { NativeWebFetcher } from './adapters/NativeWebFetcher';
 import { WorkerHtmlExtractor } from './adapters/WorkerHtmlExtractor';
@@ -95,6 +96,7 @@ export async function activate(context: vscode.ExtensionContext) {
     commandLoader,
     configFile,
     // Bundled next to extension.js by scripts/build-host.mjs; parsers never load in the extension host itself.
+    codeSandbox: new QuickJSExecutor(context.asAbsolutePath('dist/codeModeWorker.js'), context.asAbsolutePath('dist/quickjs.wasm')),
     documents: new WorkerDocumentConverter(path.join(context.extensionPath, 'dist', 'documentWorker.js')),
     // Images follow the chats: on disk next to them, or only in memory when chats are not persisted.
     images: new SwitchingImageStore(new FsImageStore(path.join(storage, 'images')), new MemoryImageStore(), persistSessions),

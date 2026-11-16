@@ -60,12 +60,31 @@ exports.run = async function run() {
     for (const asset of [
       'dist/documentWorker.js',
       'dist/webWorker.js',
+      'dist/codeModeWorker.js',
+      'dist/quickjs.wasm',
       'resources/mcp/playwright/package.json',
       'resources/mcp/playwright/package-lock.json',
       'resources/mcp/devtools/package.json',
       'resources/mcp/devtools/package-lock.json',
     ])
       assert.ok(fs.statSync(path.join(ext.extensionPath, asset)).size > 0, asset);
+  });
+  await test('bundled QuickJS worker runs with local WASM inside the extension host', async () => {
+    const { Worker } = require('node:worker_threads');
+    const path = require('node:path');
+    const worker = new Worker(path.join(ext.extensionPath, 'dist/codeModeWorker.js'), {
+      workerData: { code: 'return {answer: 6 * 7, node: typeof process};', wasmPath: path.join(ext.extensionPath, 'dist/quickjs.wasm'), cpuMs: 500, maxOutputBytes: 1024 },
+      env: {}, execArgv: [],
+    });
+    try {
+      const result = await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error('QuickJS worker timed out')), 10000);
+        worker.once('message', (message) => { clearTimeout(timer); resolve(message); });
+        worker.once('error', (error) => { clearTimeout(timer); reject(error); });
+      });
+      assert.strictEqual(result.type, 'result', JSON.stringify(result));
+      assert.deepStrictEqual(JSON.parse(result.json), {answer: 42, node: 'undefined'});
+    } finally { await worker.terminate(); }
   });
   await test('secure defaults', async () => {
     const cfg = vscode.workspace.getConfiguration('sovran');
@@ -81,6 +100,7 @@ exports.run = async function run() {
     assert.deepStrictEqual(cfg.get('tools.forceAsk'), []);
     // Tools load on demand by default; `all` sends every tool with every request.
     assert.strictEqual(cfg.get('tools.loading'), 'auto');
+    assert.strictEqual(cfg.get('experimental.codeMode.enabled'), false);
     // Security-relevant settings ignore workspace values. A repository must never be able to start an MCP server.
     const scope = (key) =>
       ext.packageJSON.contributes.configuration
@@ -98,6 +118,7 @@ exports.run = async function run() {
       'sovran.tools.disabled',
       'sovran.tools.forceAsk',
       'sovran.tools.loading',
+      'sovran.experimental.codeMode.enabled',
     ]) {
       assert.strictEqual(scope(key), 'application', `${key} must be application-scoped`);
     }

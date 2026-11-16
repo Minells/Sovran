@@ -14,6 +14,7 @@ export interface SlashCommand {
 const DEFAULT_TARGET = 'the attached code';
 
 export const BUILTIN_COMMANDS: readonly SlashCommand[] = [
+  { name: 'code', description: 'Experimental: aggregate reviewed read-only MCP tools with JavaScript', kind: 'prompt', source: 'builtin', template: '$ARGUMENTS' },
   {
     name: 'explain',
     description: 'Explain the selection, a file or a concept',
@@ -133,7 +134,7 @@ export function mergeCommands(custom: readonly SlashCommand[]): SlashCommand[] {
   const byName = new Map(BUILTIN_COMMANDS.map((c) => [c.name, c]));
   for (const c of custom) {
     const existing = byName.get(c.name);
-    if (existing?.kind === 'action') continue;
+    if (existing?.kind === 'action' || c.name === 'code') continue;
     byName.set(c.name, c);
   }
   return [...byName.values()];

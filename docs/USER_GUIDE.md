@@ -498,6 +498,71 @@ is separate from chats in extension global storage (`mcp/artifacts`), with a 20 
 Deleting a chat does not remove browser output. The managed tool surface excludes screenshots-to-model, arbitrary code
 and upload/install tools; no returned local path is opened automatically.
 
+### Experimental Code Mode
+
+Code Mode lets the model write a short JavaScript procedure that calls selected MCP tools, filters their results
+locally and returns a compact JSON summary. It uses the existing model endpoint and MCP connections. QuickJS/WASM
+ships in the extension; no Docker, compiler, additional runtime installation or cloud account is required.
+
+To try it:
+
+1. Enable `"sovran.experimental.codeMode.enabled": true` in **VS Code User Settings**. Workspace values are ignored.
+2. Use a trusted workspace, Act mode and a model with native or prompted tool calling enabled.
+3. Connect a managed **GitHub** or **GitLab** integration with its **readonly** profile. Per-tool Off/Ask/Allow and
+   the chat's integration selection still apply. Keep Ask while first evaluating the feature.
+4. Send `/code` followed by a bounded request, for example: `/code For these explicit GitLab project IDs, count
+   failed pipelines and return only counts. Follow pagination and report incomplete results.`
+
+Ordinary messages continue to use normal tools. `/code` is explicit for each run; it does not switch the entire chat.
+The model discovers schemas, then calls `execute_code`. Expand that row to inspect JavaScript and child calls.
+Approvals show the actual MCP arguments one at a time. Stop prevents further local dispatch and requests cancellation
+of remote calls; a server may still finish a request already sent. Disabling the experiment prevents later dispatches.
+
+The initial allowlist is intentionally small: GitHub `get_me`, `search_issues`, `search_pull_requests`; GitLab
+`get_project`, `list_projects`, `get_merge_request`, `list_merge_requests`, `get_issue`, `list_pipelines`, `get_pipeline`.
+Tools with unsupported input schemas are excluded. The prototype accepts bounded basic JSON Schema, not remote
+references, regular-expression constraints or arbitrary schema extensions. Custom servers and browser tools are
+excluded even when they report `readOnlyHint`. A readonly label never grants permissions by itself.
+
+Code uses `await tools.call(toolId, args)` and receives `{data?, text?, contentTypes}`. Structured content is preserved;
+a single text block containing valid JSON can supply `data`; other text stays text. No output shape is invented.
+The procedure must await every call and return a small JSON value. Imports, TypeScript syntax, Node, files, terminal,
+native tools, direct networking and writes are unavailable inside this sandbox. Each execution starts fresh.
+The surrounding Act agent retains its ordinary native tools and their existing permissions; the sandbox's
+readonly scope does not turn the entire Act chat into Plan mode.
+
+Initial limits include 32 KiB code, a 64 MiB QuickJS heap, 64 MCP attempts per execution/128 per run, 4 concurrent
+calls (2 per server), 16 queued calls, 2 MiB per response/20 MiB total, and a final result up to 16 KiB, further limited
+by the chat context budget. Use batches of four and explicit pagination. The host has an active deadline of 120 s
+and an absolute deadline of 5 minutes; human approval waits pause only the active deadline when no other work runs.
+At most three code executions and eight discovery calls are allowed per run. These are runtime controls, not a
+guarantee of total process memory, network bytes or server cancellation.
+
+For a reproducible development check without accounts:
+
+```bash
+npm run build
+npm run benchmark:code-mode -- --reference --runs 3 --out /tmp/sovran-code-reference.json
+```
+
+The reference uses scripted model responses, real MCP in-memory transports and the real QuickJS Worker. It tests
+orchestration and context volume; it does **not** measure model reasoning, token billing or real LLM latency.
+For a model endpoint already running on your machine, including llama.cpp or Ollama with an OpenAI-compatible API:
+
+```bash
+npm run benchmark:code-mode -- --endpoint http://127.0.0.1:8080/v1 --model MODEL_ID \
+  --tool-mode prompted --runs 3 --out /tmp/sovran-code-model.json
+```
+
+If authentication is needed, bind `SOVRAN_BENCHMARK_API_KEY` through the environment's secret mechanism. Never put
+the key in command arguments or commit it. The harness uses synthetic projects, not your private repositories.
+It currently covers one aggregation task, not the complete evaluation matrix in the prototype plan. Model quality,
+pagination, partial failures and latency need broader evaluation before enabling automatic selection or writes.
+
+If no eligible tools are found, check the integration profile, connection, chat selection and supported schemas.
+If an execution reports stale capabilities, let the model describe the current tools again. Oversized results and
+failed MCP requests are errors, not empty lists or zero counts. No retry of the entire procedure is automatic.
+
 ### Optional custom setups
 
 - **Serena.** Follow the upstream instructions to install the reviewed version you want using uv and initialize its

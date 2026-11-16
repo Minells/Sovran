@@ -119,6 +119,22 @@ with reviewed descriptions. Server schemas and returned documentation still cont
 
 ## Known limitations
 
+The experimental `/code` feature runs untrusted JavaScript in QuickJS/WASM inside a dedicated Worker thread. It
+exposes only a serialized RPC capability for a reviewed subset of managed readonly MCP tools. Discovery manifests
+are host-owned, scoped to one run and tied to the exact described definitions. Each call uses the same authorization
+pipeline as direct tools, including live availability/trust, per-chat exclusions and Off/Ask/Allow. Code Mode is off
+by default, user-scoped, explicit per run and unavailable in Plan or Restricted Mode. No host object, credential,
+module loader, filesystem, Node, VS Code or networking API is exposed to the guest.
+
+Interrupts, host watchdogs, bounded queues, call/payload budgets and fresh Workers limit abuse. Worker heap and
+QuickJS heap limits do not cap all process/WASM/transport memory. MCP response limits apply before transfer into the
+guest, after the SDK has received the response; they are not a network byte limit. Termination prevents new dispatch,
+but remote cancellation is best effort. This is not an OS sandbox, DLP system or guarantee against engine defects
+and prompt injection. An allowed read tool can send its query to a service. Known credential values are masked before
+guest processing; arbitrary sensitive data is not classified. JavaScript and final results follow chat persistence;
+intermediate datasets are not deliberately logged or persisted. Metadata of child calls is shown separately and is
+not added to provider context or compaction. TypeScript, arbitrary MCP servers, native tools and writes are excluded.
+
 - An MCP server runs with your privileges and can do whatever its code does: an allowed tool, or a call you approve,
   acts outside Sovran's guardrails and checkpoints. Install servers only from sources you trust, and keep tools that
   change data on *Ask*.

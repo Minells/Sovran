@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import picomatch from 'picomatch';
+import type { CodeSandboxPort } from '../core/codeMode/contracts';
 import { AgentRunner } from '../core/agent/agentRunner';
 import {
   CheckpointRecorder,
@@ -164,6 +165,7 @@ async function readHead(absolute: string, length = 8000): Promise<Uint8Array> {
 }
 
 export interface ControllerDeps {
+  codeSandbox?: CodeSandboxPort;
   web?: WebFetchPort;
   logger: HostLogger;
   secrets: ProviderSecrets;
@@ -2589,6 +2591,7 @@ export class SovranController implements vscode.Disposable {
       logger: this.deps.logger,
       documents: this.documentReader,
       web: this.deps.web,
+      codeSandbox: this.deps.codeSandbox,
     });
   }
 
@@ -2673,6 +2676,7 @@ export class SovranController implements vscode.Disposable {
         model,
         mode,
         settings: this.settings.agent,
+        codeModeAllowed: () => this.settings.agent.codeModeEnabled === true && this.mode === 'act' && vscode.workspace.isTrusted,
         grants: this.grantsFor(session.id),
         signal: run.abort.signal,
         emit: (e) => this.onAgentEvent(session, e),
@@ -3066,6 +3070,12 @@ export class SovranController implements vscode.Disposable {
           messageId: e.messageId,
         });
         return;
+      case 'code_trace': {
+        if (!visible) return;
+        this.outputs.set(e.callId, { type: 'toolOutput', sessionId: session.id, callId: e.callId, replace: true,
+          chunk: e.calls.map((call) => `${call.status} · ${call.server} · ${call.tool} · ${Math.round(call.durationMs)} ms`).join('\n') });
+        return this.scheduleFlush();
+      }
       case 'tool_phase':
         return setActivity({ phase: e.phase, label: e.label, toolName: e.toolName, callId: e.callId });
       case 'tool_output': {

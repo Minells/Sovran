@@ -78,7 +78,7 @@ export function reducer(state: UiState, action: UiAction): UiState {
     case 'toolOutput': {
       if (state.app?.session?.id !== action.sessionId) return state;
       const prev = state.toolOutputs[action.callId] ?? '';
-      const next = (prev + action.chunk).slice(-MAX_OUTPUT);
+      const next = ((action.replace ? '' : prev) + action.chunk).slice(-MAX_OUTPUT);
       return { ...state, toolOutputs: { ...state.toolOutputs, [action.callId]: next } };
     }
     case 'notice': {

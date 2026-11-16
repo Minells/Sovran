@@ -1,3 +1,4 @@
+import type { CodeCallTrace } from '../codeMode/contracts';
 import type { CompactionState, ContextBreakdown, ErrorInfo, SessionMessage } from '../sessions/model';
 
 export type ToolPhase = 'awaiting_approval' | 'running';
@@ -26,6 +27,7 @@ export type AgentEvent =
       contextWindow: number;
       breakdown?: ContextBreakdown;
     }
+  | { type: 'code_trace'; callId: string; calls: CodeCallTrace[] }
   | { type: 'usage'; promptTokens?: number; completionTokens?: number }
   /** `detail` explains individual units, e.g. `git.changes: "committa"`. */
   | { type: 'tools_loaded'; units: string[]; reason: ToolLoadReason; detail?: string[] }

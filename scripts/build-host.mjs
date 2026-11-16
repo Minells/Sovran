@@ -1,6 +1,11 @@
 // Bundles the extension host (core + extension + shared) into a single CommonJS file, and the document worker (the
 // document parsers, pdf.js included) into a second one, so the parsers never load in the extension host itself.
 import * as esbuild from 'esbuild';
+import { copyFileSync, mkdirSync } from 'node:fs';
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+mkdirSync('dist', { recursive: true });
+copyFileSync(require.resolve('@jitl/quickjs-wasmfile-release-sync/wasm'), 'dist/quickjs.wasm');
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -10,7 +15,9 @@ const ctx = await esbuild.context({
     extension: 'src/extension/extension.ts',
     documentWorker: 'src/extension/adapters/documentWorker.ts',
     webWorker: 'src/extension/adapters/webWorker.ts',
+    codeModeWorker: 'src/extension/adapters/codeModeWorker.ts',
   },
+  alias: { '@jitl/quickjs-wasmfile-release-sync/emscripten-module': require.resolve('@jitl/quickjs-wasmfile-release-sync/emscripten-module') },
   bundle: true,
   format: 'cjs',
   platform: 'node',

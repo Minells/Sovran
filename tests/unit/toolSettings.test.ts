@@ -29,6 +29,16 @@ beforeEach(() => {
 });
 
 describe('native tool settings', () => {
+  it('keeps Code Mode off unless the user explicitly enables it, ignoring workspace values', () => {
+    config.workspace = { 'experimental.codeMode.enabled': true };
+    expect(readSettings().agent.codeModeEnabled).toBe(false);
+    config.user = { 'experimental.codeMode.enabled': 'true' };
+    expect(readSettings().agent.codeModeEnabled).toBe(false);
+    config.user = { 'experimental.codeMode.enabled': true };
+    config.workspace = { 'experimental.codeMode.enabled': false };
+    expect(readSettings().agent.codeModeEnabled).toBe(true);
+  });
+
   it('preserves default tool behavior and ignores workspace overrides', () => {
     config.workspace = { 'tools.disabled': ['read_file'], 'tools.forceAsk': ['execute_terminal'] };
     expect(readSettings().agent.policy).toMatchObject({ disabledTools: [], forceAskTools: [] });

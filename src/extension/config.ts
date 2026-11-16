@@ -172,6 +172,7 @@ export function readSettings(): HostSettings {
       },
       defaultContextWindow: DEFAULT_CONTEXT_WINDOW,
       defaultMaxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+      codeModeEnabled: userSetting<unknown>('experimental.codeMode.enabled', false) === true,
       toolLoading: userSetting<string>('tools.loading', 'auto') === 'all' ? 'all' : 'auto',
     },
     includeActiveEditor: setting('context.includeActiveEditor', true),

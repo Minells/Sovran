@@ -1,3 +1,4 @@
+import type { CodeCallTrace } from '../codeMode/contracts';
 import type { AgentMode } from '../permissions/policy';
 import type { DocumentFormat } from '../documents/types';
 import type { ImageMime } from '../images/images';
@@ -105,6 +106,8 @@ export interface ToolMessage {
   durationMs?: number;
   /** Set when a file change or command ran without asking the user, with the policy's reason (Auto mode, allow-list…). */
   autoApproved?: string;
+  /** UI-only child call metadata. Never included in provider context or compaction. */
+  codeMode?: { calls: CodeCallTrace[] };
   /** Tool units this call loaded instead of running (`load_tools`, or a call to a tool that was not loaded). */
   loaded?: string[];
   createdAt: number;

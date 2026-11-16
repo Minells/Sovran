@@ -18,6 +18,8 @@ export interface ToolContext {
   signal: AbortSignal;
   settings: ToolSettings;
   onOutput?: (chunk: string) => void;
+  /** Trusted dispatcher request: preserve raw MCP data for the Code Mode bridge only. */
+  captureMcpResult?: boolean;
   /** Runtime-owned live permission check for a tool about to perform a delayed effect. */
   revalidate?: () => void;
   /** Converts documents for `read_file`. Without it (or without `workspace.readBytes`), documents read as binary. */
@@ -41,6 +43,8 @@ export interface PreparedAction {
 
 export interface ToolResult {
   content: string;
+  /** Internal MCP data, never persisted or sent directly to a provider by the tool runner. */
+  mcpResult?: { content?: unknown; structuredContent?: unknown };
   isError?: boolean;
   summary?: string;
   display?: ToolDisplay;
@@ -55,6 +59,8 @@ export interface ToolDefinition<A = unknown> {
    * JSON Schema, and the server validates the arguments itself.
    */
   parameters?: Record<string, unknown>;
+  /** Present only on host-reviewed read tools eligible for the Code Mode prototype. */
+  codeMode?: { inputSchema: Record<string, unknown>; outputSchema?: Record<string, unknown> };
   risk: ToolRisk;
   /** Provenance and deterministic context grouping; absent metadata means a native tool. */
   source?: { kind: 'native' } | { kind: 'mcp'; serverId: string };

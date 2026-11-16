@@ -30,6 +30,7 @@ import { connectionKey, toolPolicy, transportOf, type McpServerConfig, type McpT
 import { commandNotFound, McpConfigError } from './launch';
 import { mcpToolName } from './naming';
 import { formatToolResult } from './results';
+import { codeModeEligible } from '../codeMode/eligibility';
 import type { McpStatus } from './status';
 
 /** Starting a server can include `npx` downloading it on first use. */
@@ -409,6 +410,9 @@ export class McpHub implements ToolSource {
       description: this.clean(descriptionOf(tool, connection.config)),
       schema: argumentsSchema,
       parameters: parametersOf(tool),
+      ...(codeModeEligible(connection.config.managed, tool.name)
+        ? { codeMode: { inputSchema: tool.inputSchema as Record<string, unknown>, outputSchema: tool.outputSchema as Record<string, unknown> | undefined } }
+        : {}),
       risk: 'execute',
       source: { kind: 'mcp', serverId },
       group: `mcp:${serverId}`,
@@ -464,7 +468,7 @@ export class McpHub implements ToolSource {
       execute: async (args: Record<string, unknown>, ctx) => {
         const reason = definition.unavailable?.();
         if (reason) throw new ToolError(reason);
-        return this.callTool(serverId, tool.name, args, ctx.signal, label());
+        return this.callTool(serverId, tool.name, args, ctx.signal, label(), ctx.captureMcpResult);
       },
     };
     return definition;
@@ -477,6 +481,7 @@ export class McpHub implements ToolSource {
     args: Record<string, unknown>,
     signal: AbortSignal,
     summary?: string,
+    captureMcpResult = false,
   ): Promise<ToolResult> {
     const conn = this.connections.get(serverId);
     const name = conn?.config.name ?? serverId;
@@ -500,7 +505,7 @@ export class McpHub implements ToolSource {
         { signal, timeout, resetTimeoutOnProgress: true, maxTotalTimeout: MAX_TOTAL_MS },
       );
       const formatted = formatToolResult(result);
-      return { content: formatted.text, isError: formatted.isError, ...(summary ? { summary } : {}) };
+      return { content: formatted.text, isError: formatted.isError, ...(captureMcpResult ? { mcpResult: { content: result.content, structuredContent: result.structuredContent } } : {}), ...(summary ? { summary } : {}) };
     } catch (e) {
       if (signal.aborted) throw e;
       throw new ToolError(this.describeCallFailure(e, conn));
