@@ -6,6 +6,14 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- Opt-in managed write profiles for Sentry issue triage/notes, Grafana dashboards/annotations, HCP/TFE workspaces
+  and runs, and bounded OpenSearch index/document operations. Each write requires approval even in Auto mode or
+  imported Allow settings. Existing read connections keep their capabilities. Host argument/schema checks reject
+  Terraform auto-apply/destroy-run creation, forced Grafana overwrites and unrestricted OpenSearch API requests.
+- Optional Sentry 0.49.0, Grafana 2.3.0 and Terraform 1.4.1 catalog integrations using separately installed
+  executables, plus external OpenSearch Streamable HTTP connections. Reviewed read profiles, destination-bound
+  SecretStorage credentials, exact executable version checks and OpenSearch connection-override guards. Terraform
+  offers public Registry without a token and a separate HCP/TFE read profile; Grafana/Sentry telemetry is disabled.
 - **A busy server is asked again.** HTTP 429, 502, 503 and 504 no longer end the run at once: Sovran retries after
   1 s and 3 s, or after the server's `Retry-After` when it is at most 30 s, and says so in the chat. It retries only
   when nothing of the reply has arrived, and stopping the run stops the wait.

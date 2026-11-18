@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   trusted: true,
   warningAnswer: undefined as string | undefined,
   inputAnswer: undefined as string | undefined,
+  inputAnswers: [] as Array<string | undefined>,
   configListeners: [] as Array<(e: { affectsConfiguration: (k: string) => boolean }) => unknown>,
   trustListeners: [] as Array<() => unknown>,
 }));
@@ -69,7 +70,7 @@ vi.mock('vscode', async () => {
       onDidChangeTextEditorSelection: event(),
       showInformationMessage: async () => undefined,
       showWarningMessage: async () => h.warningAnswer,
-      showInputBox: async () => h.inputAnswer,
+      showInputBox: async () => (h.inputAnswers.length ? h.inputAnswers.shift() : h.inputAnswer),
     },
     commands: { executeCommand: async () => undefined },
   };
@@ -134,6 +135,7 @@ beforeEach(async () => {
   h.trusted = true;
   h.warningAnswer = undefined;
   h.inputAnswer = undefined;
+  h.inputAnswers = [];
   h.configListeners = [];
   h.trustListeners = [];
   h.config = {
@@ -209,6 +211,81 @@ beforeEach(async () => {
 });
 
 describe('integration catalog host lifecycle', () => {
+  it.each([
+    ['sentry', 'readonly', 'sentry-mcp', 'https://sentry.io', 'SENTRY_AUTH_TOKEN'],
+    ['grafana', 'readonly', 'mcp-grafana', 'https://grafana.example.test', 'GRAFANA_SERVICE_ACCOUNT_TOKEN'],
+    ['terraform', 'hcp-readonly', 'terraform-mcp-server', 'https://tfe.example.test', 'TFE_TOKEN'],
+    ['sentry', 'collaboration', 'sentry-mcp', 'https://sentry.io', 'SENTRY_AUTH_TOKEN'],
+    [
+      'grafana',
+      'collaboration',
+      'mcp-grafana',
+      'https://grafana.example.test',
+      'GRAFANA_SERVICE_ACCOUNT_TOKEN',
+    ],
+    ['terraform', 'hcp-operations', 'terraform-mcp-server', 'https://tfe.example.test', 'TFE_TOKEN'],
+  ] as const)(
+    'configures %s disconnected and binds its token to the destination',
+    async (id, profile, executable, instanceUrl, envName) => {
+      h.inputAnswers = [executable, instanceUrl];
+      await mcp.addIntegration(id, profile);
+      const config = servers().at(-1)!;
+      expect(config).toMatchObject({
+        enabled: false,
+        command: executable,
+        managed: { id, profile, executable, instanceUrl },
+        auth: { type: 'env', envName },
+      });
+      h.inputAnswer = 'private-token-fixture';
+      await mcp.promptToken(config.id as string);
+      expect(mcp.view().servers.at(-1)?.hasToken).toBe(true);
+      expect(JSON.stringify(servers())).not.toContain('private-token-fixture');
+      expect(JSON.stringify(sidebar)).not.toContain('private-token-fixture');
+      const mutation =
+        id === 'sentry' ? 'add_issue_note' : id === 'grafana' ? 'update_dashboard' : 'create_run';
+      if (profile === 'collaboration' || profile === 'hcp-operations')
+        await expect(mcp.setToolPolicy(config.id as string, mutation, 'allow')).rejects.toThrow(
+          /requires approval/,
+        );
+      config.managed = { ...(config.managed as object), instanceUrl: 'https://elsewhere.example.test' };
+      for (const listener of h.configListeners) await listener({ affectsConfiguration: () => true });
+      expect(mcp.view().servers.at(-1)?.hasToken).toBe(false);
+    },
+  );
+
+  it('configures public Terraform Registry without token or service URL and cancels incomplete setup', async () => {
+    h.inputAnswer = 'terraform-mcp-server';
+    await mcp.addIntegration('terraform', 'registry');
+    expect(servers().at(-1)).toMatchObject({
+      enabled: false,
+      managed: { id: 'terraform', profile: 'registry' },
+    });
+    expect(servers().at(-1)!.auth).toBeUndefined();
+    const before = structuredClone(servers());
+    h.inputAnswers = ['sentry-mcp', undefined];
+    await mcp.addIntegration('sentry', 'readonly');
+    expect(servers()).toEqual(before);
+  });
+
+  it('configures external OpenSearch without a cluster credential and scopes its optional proxy token', async () => {
+    h.inputAnswer = 'https://search-mcp.example.test/mcp';
+    await mcp.addIntegration('opensearch', 'readonly');
+    const config = servers().at(-1)!;
+    expect(config).toMatchObject({
+      enabled: false,
+      url: h.inputAnswer,
+      managed: { endpoint: h.inputAnswer },
+      auth: { type: 'bearer' },
+    });
+    expect(mcp.view().servers.at(-1)).toMatchObject({ hasToken: false, status: 'disabled' });
+    h.inputAnswer = 'proxy-secret-fixture';
+    await mcp.promptToken(config.id as string);
+    expect(mcp.view().servers.at(-1)?.hasToken).toBe(true);
+    config.url = 'https://other.example.test/mcp';
+    config.managed = { ...(config.managed as object), endpoint: config.url };
+    for (const listener of h.configListeners) await listener({ affectsConfiguration: () => true });
+    expect(mcp.view().servers.at(-1)?.hasToken).toBe(false);
+  });
   it('keeps a managed GitLab token scoped to the configured instance even after settings edits', async () => {
     h.inputAnswer = 'https://gitlab.example.test:8443/team/';
     await mcp.addIntegration('gitlab', 'collaboration');
@@ -393,7 +470,8 @@ describe('MCP in the host', () => {
   describe('with tools loaded on demand', () => {
     beforeEach(async () => {
       delete h.config['sovran.tools.loading'];
-      for (const listener of h.configListeners) await listener({ affectsConfiguration: (k) => k === 'sovran' });
+      for (const listener of h.configListeners)
+        await listener({ affectsConfiguration: (k) => k === 'sovran' });
     });
     const offered = (request: (typeof model.requests)[number] | undefined) =>
       ((request?.body?.tools ?? []) as Array<{ function: { name: string } }>).map((t) => t.function.name);

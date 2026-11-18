@@ -6,6 +6,7 @@ import {
   integration,
   integrationArguments,
   integrationEndpoint,
+  integrationConnection,
   supportedNode,
   INTEGRATIONS,
   type IntegrationId,
@@ -15,6 +16,7 @@ import type { McpServerConfig } from '../../core/mcp/config';
 import { isInside } from '../../core/security/paths';
 import { MCP_INHERITED_ENV } from '../../core/mcp/launch';
 import { runFileProcess } from './processExecution';
+import { launchPreinstalledIntegration } from './PreinstalledMcp';
 
 interface Installed {
   digest: string;
@@ -39,7 +41,11 @@ export class ManagedMcpPackages {
   constructor(private readonly options: ManagedPackageOptions) {}
   states(): InstallationState[] {
     return INTEGRATIONS.map(
-      (item) => this.state.get(item.id) ?? { id: item.id, status: item.package ? 'missing' : 'remote' },
+      (item) =>
+        this.state.get(item.id) ?? {
+          id: item.id,
+          status: item.package ? 'missing' : item.external ? 'external' : 'remote',
+        },
     );
   }
   async inspect(): Promise<void> {
@@ -224,12 +230,17 @@ export class ManagedMcpPackages {
     const args = integrationArguments(managed);
     this.options.authorize();
     const item = integration(managed.id);
+    if (item.external) return launchPreinstalledIntegration(server, this.options);
     if (item.remote) {
+      const expected = integrationConnection(managed);
       const headers = item.remote.headers?.(managed.profile) ?? {};
       if (
         server.command ||
         server.url !== integrationEndpoint(managed) ||
-        server.auth.type !== 'bearer' ||
+        JSON.stringify(server.auth) !== JSON.stringify(expected.auth) ||
+        server.args?.length ||
+        Object.keys(server.env ?? {}).length ||
+        server.cwd ||
         Object.keys(server.headers ?? {}).length !== Object.keys(headers).length ||
         Object.entries(headers).some(([key, value]) => server.headers?.[key] !== value)
       ) {

@@ -15,8 +15,10 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client';
 import { z } from 'zod';
+import { isIntegrationWrite, reviewedWriteApprovalArguments, reviewedWriteParameters } from './writes';
 import {
   integrationCallProblem,
+  integrationDiscoveryProblem,
   integrationToolAllowed,
   integrationToolRequiresApproval,
   reviewedToolDescription,
@@ -105,7 +107,9 @@ interface Connection {
 /** Arguments are an object; a model that sends nothing at all means "no arguments". */
 const argumentsSchema = z.preprocess((v) => (v == null ? {} : v), z.record(z.string(), z.unknown()));
 
-function hintsOf(tool: Tool): McpToolHint[] {
+function hintsOf(tool: Tool, server: McpServerConfig): McpToolHint[] {
+  if (isIntegrationWrite(server.managed, tool.name))
+    return ['managed-write', ...(tool.annotations?.openWorldHint === true ? ['open-world' as const] : [])];
   const a = tool.annotations;
   if (!a) return [];
   const hints: McpToolHint[] = [];
@@ -116,8 +120,10 @@ function hintsOf(tool: Tool): McpToolHint[] {
 }
 
 /** The input schema as an OpenAI-style function `parameters` object. */
-function parametersOf(tool: Tool): Record<string, unknown> {
-  const { $schema: _ignored, ...schema } = (tool.inputSchema ?? {}) as Record<string, unknown>;
+function parametersOf(tool: Tool, server: McpServerConfig): Record<string, unknown> {
+  const upstream = (tool.inputSchema ?? {}) as Record<string, unknown>;
+  const { $schema: _ignored, ...schema } =
+    reviewedWriteParameters(server.managed, tool.name, upstream) ?? upstream;
   const object = { ...schema, type: 'object', properties: (schema.properties as object | undefined) ?? {} };
   return JSON.stringify(object).length > MAX_SCHEMA_CHARS
     ? { type: 'object', properties: {}, additionalProperties: true }
@@ -247,6 +253,11 @@ export class McpHub implements ToolSource {
         ? (await client.listTools(undefined, { timeout: config.timeoutSeconds * 1000 })).tools
         : [];
       if (this.stale(conn, generation)) return void client.close().catch(() => undefined);
+      const discoveryProblem = integrationDiscoveryProblem(
+        config.managed,
+        tools.map((tool) => tool.name),
+      );
+      if (discoveryProblem) throw new McpConfigError(discoveryProblem);
       const info = client.getServerVersion();
       conn.server = info ? { name: info.name, version: info.version } : undefined;
       conn.tools = tools.filter((tool) => integrationToolAllowed(config.managed, tool.name));
@@ -312,6 +323,17 @@ export class McpHub implements ToolSource {
       return this.deps.logger.warn(
         `MCP ${conn.config.id}: could not refresh the tool list: ${this.clean(error.message)}`,
       );
+    const problem = integrationDiscoveryProblem(
+      conn.config.managed,
+      (tools ?? []).map((tool) => tool.name),
+    );
+    if (problem) {
+      void this.stop(conn);
+      conn.status = 'error';
+      conn.error = problem;
+      this.changed();
+      return;
+    }
     conn.tools = (tools ?? []).filter((tool) => integrationToolAllowed(conn.config.managed, tool.name));
     this.deps.logger.info(`MCP ${conn.config.id}: tool list changed · ${conn.tools.length} tools`);
     this.changed();
@@ -350,12 +372,12 @@ export class McpHub implements ToolSource {
           ...(t.description ? { description: this.clean(t.description) } : {}),
           modelName,
           policy: toolPolicy(c.config, t.name),
-          hints: hintsOf(t),
+          hints: hintsOf(t, c.config),
           ...(integrationToolRequiresApproval(c.config.managed, t.name)
             ? { requiresApproval: true as const }
             : {}),
           definitionTokens: estimateTokens(
-            modelName + descriptionOf(t, c.config) + JSON.stringify(parametersOf(t)),
+            modelName + descriptionOf(t, c.config) + JSON.stringify(parametersOf(t, c.config)),
           ),
         };
       }),
@@ -408,7 +430,7 @@ export class McpHub implements ToolSource {
       name,
       description: this.clean(descriptionOf(tool, connection.config)),
       schema: argumentsSchema,
-      parameters: parametersOf(tool),
+      parameters: parametersOf(tool, connection.config),
       risk: 'execute',
       source: { kind: 'mcp', serverId },
       group: `mcp:${serverId}`,
@@ -444,7 +466,11 @@ export class McpHub implements ToolSource {
           throw new ToolError(`${tool.name} is turned off in Sovran's MCP settings.`);
         const problem = integrationCallProblem(config.managed, tool.name, args);
         if (problem) throw new ToolError(problem);
-        const shown = JSON.stringify(args, null, 2);
+        const shown = JSON.stringify(
+          reviewedWriteApprovalArguments(config.managed, tool.name, args),
+          null,
+          2,
+        );
         return {
           paths: [],
           mcp: { server: config.name, allowed: policy === 'allow' },
@@ -456,7 +482,7 @@ export class McpHub implements ToolSource {
             ...(tool.title ? { title: tool.title } : {}),
             arguments:
               shown.length > MAX_ARGUMENTS_SHOWN ? `${shown.slice(0, MAX_ARGUMENTS_SHOWN)}\n…` : shown,
-            hints: hintsOf(tool),
+            hints: hintsOf(tool, config),
             ...(integrationToolRequiresApproval(config.managed, tool.name) ? { requiresApproval: true } : {}),
           },
         };
