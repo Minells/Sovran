@@ -486,6 +486,18 @@ trust or settings changes. Cost is an estimate, not a budget-based eviction mech
 `mcp` settings route for compatibility. **Browse Catalog** and **Custom MCP Server** both create disconnected entries
 and use the same status projection. Only the custom editor and advanced details show connection mechanics.
 
+The catalog distinguishes locked npm browser packages, hosted endpoints, preinstalled executables (Sentry/Grafana/
+Terraform) and a configurable external OpenSearch endpoint. `integrationConnection` constructs the canonical
+persisted connection, checked before any credential lookup. `PreinstalledMcp` resolves an executable outside workspace
+roots, verifies its pinned version without credentials, and launches it from extension storage with reviewed args/env;
+it neither installs a runtime nor inspects Chrome. The transport looks up secrets using the original persisted
+connection, before runtime path/cwd substitutions. New integration credentials bind to a hash of that connection;
+GitLab retains its existing instance binding. Tool allowlists remain enforced at discovery, refresh and dispatch.
+OpenSearch per-call connection overrides are rejected; cluster auth stays server-side. Terraform separates public
+Registry from HCP/TFE reads and rejects an HCP connection that discovers only Registry tools. OAuth, additional
+data source groups, generic upstream executors and infrastructure mutations are outside these presets.
+See the [implementation and validation plan](plans/2026-11-18-mcp-observability-terraform.md).
+
 Tool discovery and transport stay behind the hub. A future tool lookup or Code Mode can use the existing registry and
 controlled dispatch boundary, including live workspace trust, approvals, group exclusions and cancellation. The
 [catalog assessment](plans/2026-11-12-mcp-catalog-expansion.md) records the upstream review and follow-up criteria.

@@ -119,6 +119,8 @@ export const mcpServerEntrySchema = z
           .regex(/^[a-zA-Z0-9 _-]{1,80}$/)
           .optional(),
         instanceUrl: mcpHttpUrl.optional(),
+        executable: z.string().min(1).max(1000).optional(),
+        endpoint: mcpHttpUrl.optional(),
       })
       .strict()
       .optional(),

@@ -13,6 +13,9 @@ import { z } from 'zod';
 import { McpHub } from '../../src/core/mcp/hub';
 import { nullLogger, type Logger } from '../../src/core/ports';
 import { NodeMcpTransports } from '../../src/extension/adapters/McpTransports';
+import { ManagedMcpPackages } from '../../src/extension/adapters/ManagedMcpPackages';
+import { integrationConnection } from '../../src/core/mcp/catalog';
+import { fromEntry } from '../../src/core/mcp/config';
 import { server, until } from '../fixtures/mcp';
 
 const fixture = path.resolve(__dirname, '../fixtures/mcpStdioServer.mjs');
@@ -117,7 +120,13 @@ describe('Streamable HTTP transport', { timeout: 30_000 }, () => {
   const seen: http.IncomingHttpHeaders[] = [];
   const handler = createMcpHandler(() => {
     const s = new McpServer({ name: 'web', version: '2.0.0' });
-    for (const name of ['echo', 'query-docs', 'resolve-library-id']) {
+    for (const name of [
+      'echo',
+      'query-docs',
+      'resolve-library-id',
+      'SearchIndexTool',
+      'GenericOpenSearchApiTool',
+    ]) {
       s.registerTool(
         name,
         { description: 'Echoes.', inputSchema: z.object({ text: z.string() }) },
@@ -182,6 +191,50 @@ describe('Streamable HTTP transport', { timeout: 30_000 }, () => {
     });
     expect(seen.at(-1)).toMatchObject({ authorization: 'Bearer web-token-987654', 'x-team': 'core' });
   });
+
+  it.each([undefined, 'opensearch-proxy-fixture'])(
+    'validates and connects an external OpenSearch endpoint (%s)',
+    async (token) => {
+      const managed = {
+        id: 'opensearch',
+        version: 'external-v1',
+        profile: 'readonly',
+        endpoint: `${base}/mcp`,
+      } as const;
+      const packages = new ManagedMcpPackages({
+        resources: '',
+        storage: '',
+        roots: () => [],
+        authorize() {},
+        changed() {},
+      });
+      const h = (hub = new McpHub({
+        transports: new NodeMcpTransports({
+          managedLaunch: (config) => packages.launch(config),
+          variables: () => ({ userHome: os.tmpdir(), env: {} }),
+          token: async () => token,
+        }),
+        logger: nullLogger,
+        client: { name: 'sovran', version: '0' },
+      }));
+      h.update([fromEntry({ id: 'opensearch', managed, ...integrationConnection(managed) })], true);
+      await until(() => h.states()[0]?.status !== 'starting', 10_000);
+      expect(h.states()[0]?.status).toBe('connected');
+      expect(h.tools().map((tool) => tool.name)).toEqual(['mcp__opensearch__SearchIndexTool']);
+      expect(
+        await h.callTool('opensearch', 'SearchIndexTool', { text: 'bounded query' }, signal()),
+      ).toMatchObject({ content: 'bounded query' });
+      expect(seen.at(-1)?.authorization).toBe(token ? `Bearer ${token}` : undefined);
+      const count = seen.length;
+      await expect(
+        h.callTool('opensearch', 'SearchIndexTool', { text: 'bad', aws_profile: 'other' }, signal()),
+      ).rejects.toThrow(/overrides/);
+      await expect(h.callTool('opensearch', 'GenericOpenSearchApiTool', {}, signal())).rejects.toThrow(
+        /no longer offered/,
+      );
+      expect(seen).toHaveLength(count);
+    },
+  );
 
   it('does not follow a redirect to another origin, and explains a refused token', async () => {
     seen.length = 0;

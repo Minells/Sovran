@@ -489,8 +489,46 @@ after MCP initialization and tool discovery complete.
   If the service requires authentication or you hit the anonymous limit, choose **Set API key (optional)**. The free
   keyed plan covers public libraries and has a monthly quota. Keep credentials and private code out of lookup queries.
   [Context7 plans](https://context7.com/plans)
+- **Sentry MCP** uses the separately installed `@sentry/mcp-server` **0.49.0** (`sentry-mcp`, Node.js **22.15+**).
+  Choose **Configure**, enter the executable name or full path and the Sentry origin (for example `https://sentry.io`
+  or `https://sentry.example.com`), then **Set token** and **Connect**. The API token needs read access to the
+  organizations, projects and events you want to inspect. Sovran exposes direct issue/event, project and release
+  reads, with telemetry disabled. `search_issues` uses Sentry query syntax; an extra LLM provider is not configured.
+  Generic tool execution, mutations, Seer and hosted OAuth login are outside this profile.
+  [Sentry stdio setup](https://github.com/getsentry/toolkit/blob/cli%400.49.0/packages/mcp-server/README.md)
+- **Grafana MCP** uses the separately installed **mcp-grafana 2.3.0** binary and Grafana **9+**. Configure the binary
+  and the Grafana service URL, then store a service account token with the needed dashboard/data source read and
+  query permissions. The profile includes data source discovery, dashboard summaries/properties, Prometheus and
+  Loki queries. Writes and upstream usage statistics are disabled. Other data sources, including Grafana's
+  Elasticsearch/OpenSearch group, are not exposed by this initial profile.
+  [Grafana setup](https://github.com/grafana/mcp-grafana/tree/v2.3.0)
+- **Terraform MCP** uses the separately installed **terraform-mcp-server 1.4.1** binary. The default **Public Registry
+  documentation** profile needs no token and reads provider, module and policy documentation. In the catalog's
+  **Advanced settings → Access mode**, choose **Registry and HCP/TFE workspace and run reads** to add workspace,
+  run and plan reads. Configure the HCP/TFE service URL and use **Set token** for its API token. A connection that
+  offers no HCP/TFE read tools is shown as failed, rather than silently falling back to Registry. Workspace mutations,
+  apply and destroy are not exposed. Plans and logs can contain sensitive infrastructure information; use an
+  appropriately scoped token. [Terraform setup](https://github.com/hashicorp/terraform-mcp-server/tree/v1.4.1)
+- **OpenSearch MCP** connects to an **existing external Streamable HTTP MCP endpoint**, such as
+  `https://search-mcp.example.com/mcp`. Enter the MCP URL, not the cluster REST API URL or a legacy `/sse` endpoint.
+  No Python environment is installed by Sovran. The operator must configure the cluster, its credentials/IAM/TLS
+  and `OPENSEARCH_DYNAMIC_CONNECTION=false` on the server; use an authenticating proxy when exposing it remotely.
+  **Set token (optional)** stores a bearer token for that MCP proxy, not the OpenSearch cluster password.
+  The profile permits `ListIndexTool`, `IndexMappingTool`, `SearchIndexTool`, `CountTool`, `MsearchTool`,
+  `ClusterHealthTool` and `GetShardsTool`. Per-call connection/authentication overrides are rejected even if the
+  upstream schema hides them. A registered `opensearch_cluster_name` can select an operator-configured cluster.
+  Start with explicit indexes, time filters, small result sizes and server-side aggregations.
+  [External server setup](https://github.com/opensearch-project/opensearch-mcp-server-py/blob/ec714bb377372cb66f140143d8376fb452ab7975/USER_GUIDE.md)
 
-Node/npm and Chrome must exist on the **extension host**, which can be a Remote SSH/WSL/container machine. Missing
+Sentry, Grafana and Terraform executables are installed and updated separately by the user, outside workspace
+folders. Sovran verifies the exact reviewed version when connecting; it does not run `npx latest`, download these
+servers or require Chrome for them. Use native executable paths; Sentry's npm Windows launcher is resolved to its
+installed bundle and run through Node. The service/MCP URLs accept HTTPS, or HTTP on literal loopback hosts only,
+without credentials, query parameters or fragments. For Remote SSH/WSL/container windows, the executable, service
+reachability and `localhost` all refer to the extension host. Changing a new integration's destination or executable
+invalidates its stored credential binding, including changes made directly in settings.
+
+For the browser integrations, Node/npm and Chrome must exist on the **extension host**, which can be a Remote SSH/WSL/container machine. Missing
 components produce instructions. There is no automatic bridge to your desktop browser. Managed profile limits remain
 in force even if an individual tool is set to Allow. To use other launch settings, edit explicitly as a custom server.
 Browser integrations have wider network/session access than `web_fetch` and can initiate downloads. Playwright output

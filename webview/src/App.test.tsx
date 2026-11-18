@@ -2464,8 +2464,12 @@ describe('MCP servers', () => {
       'Playwright MCP',
       'Context7 MCP',
       'Chrome DevTools MCP',
+      'Sentry MCP',
+      'Grafana MCP',
+      'Terraform MCP',
+      'OpenSearch MCP',
     ]);
-    expect(within(catalog).getAllByText('Remote · Not configured')).toHaveLength(3);
+    expect(within(catalog).getAllByText('Remote · Not configured')).toHaveLength(4);
     expect(within(catalog).getByText(/Node\.js 20\+ with npm/)).toBeInTheDocument();
     expect(
       sent.some((message) =>
@@ -2485,6 +2489,34 @@ describe('MCP servers', () => {
         (message) => message.type === 'installMcpIntegration' || message.type === 'setMcpServerEnabled',
       ),
     ).toBe(false);
+  });
+
+  it('selects the HCP read profile without offering a browser or dependency install', async () => {
+    await open([]);
+    await clickButton(/^Browse Catalog$/);
+    const entry = screen.getByRole('listitem', { name: 'Terraform MCP' });
+    expect(within(entry).queryByText(/No account required/)).not.toBeInTheDocument();
+    await userEvent.click(within(entry).getByRole('button', { name: 'Advanced settings' }));
+    const access = within(entry).getByLabelText('Access mode');
+    expect(access).toHaveValue('registry');
+    await userEvent.selectOptions(access, 'hcp-readonly');
+    await userEvent.click(within(entry).getByRole('button', { name: 'Configure Terraform MCP' }));
+    expect(sent).toContainEqual({ type: 'addMcpIntegration', integration: 'terraform', profile: 'hcp-readonly' });
+    expect(sent.some((message) => message.type === 'installMcpIntegration')).toBe(false);
+  });
+
+  it('connects external OpenSearch without a proxy token and offers an optional token action', async () => {
+    const search: McpServerView = {
+      ...github, id: 'opensearch', name: 'OpenSearch MCP', enabled: false, status: 'disabled',
+      hasToken: false, tools: [], url: 'https://mcp.example.test/mcp',
+      managed: { id: 'opensearch', profile: 'readonly', version: 'external-v1', endpoint: 'https://mcp.example.test/mcp' },
+    };
+    await open([search]);
+    const card = screen.getByRole('region', { name: 'OpenSearch MCP' });
+    expect(within(card).getByRole('button', { name: 'Set token (optional)' })).toBeEnabled();
+    await userEvent.click(within(card).getByRole('button', { name: 'Connect' }));
+    expect(sent).toContainEqual({ type: 'setMcpServerEnabled', id: 'opensearch', enabled: true });
+    expect(within(card).queryByRole('button', { name: 'Install dependencies' })).not.toBeInTheDocument();
   });
 
   it('can connect Context7 without a key and shows Connected only on the host status', async () => {

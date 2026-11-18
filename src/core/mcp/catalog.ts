@@ -1,5 +1,17 @@
 /** Reviewed optional integrations. This metadata never starts or installs a server. */
-export const INTEGRATION_IDS = ['playwright', 'devtools', 'github', 'context7', 'gitlab'] as const;
+import type { McpAuth } from './rules';
+
+export const INTEGRATION_IDS = [
+  'playwright',
+  'devtools',
+  'github',
+  'context7',
+  'gitlab',
+  'sentry',
+  'grafana',
+  'terraform',
+  'opensearch',
+] as const;
 export type IntegrationId = (typeof INTEGRATION_IDS)[number];
 export const INTEGRATION_PROFILES = [
   'isolated',
@@ -7,6 +19,8 @@ export const INTEGRATION_PROFILES = [
   'readonly',
   'collaboration',
   'developer',
+  'registry',
+  'hcp-readonly',
 ] as const;
 export type IntegrationProfile = (typeof INTEGRATION_PROFILES)[number];
 export interface ManagedIntegration {
@@ -15,6 +29,10 @@ export interface ManagedIntegration {
   version: string;
   browserProfile?: string;
   instanceUrl?: string;
+  /** User-installed executable on the extension host. Never a shell command line. */
+  executable?: string;
+  /** External MCP endpoint, distinct from the service's API URL. */
+  endpoint?: string;
 }
 export interface IntegrationDefinition {
   id: IntegrationId;
@@ -26,9 +44,14 @@ export interface IntegrationDefinition {
   entry?: string;
   documentation: string;
   requirements: string;
+  external?: {
+    command: string;
+    instance?: { label: string; defaultUrl: string };
+  };
   remote?: {
     url: string;
     configurableInstance?: boolean;
+    configurableEndpoint?: boolean;
     token: 'required' | 'optional';
     headers?: (profile: IntegrationProfile) => Record<string, string>;
   };
@@ -112,6 +135,77 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     defaultProfile: 'isolated',
     profiles: ['isolated'],
   },
+  {
+    id: 'sentry',
+    name: 'Sentry MCP',
+    description: 'Read Sentry issues, stack traces, projects and releases.',
+    icon: 'bug',
+    version: '0.49.0',
+    documentation: 'https://github.com/getsentry/toolkit/blob/cli%400.49.0/packages/mcp-server/README.md',
+    requirements:
+      'Install @sentry/mcp-server 0.49.0 separately on the extension host with Node.js 22.15+. Supply a Sentry API token with read access.',
+    external: {
+      command: 'sentry-mcp',
+      instance: { label: 'Sentry instance URL', defaultUrl: 'https://sentry.io' },
+    },
+    security:
+      'Only reviewed direct reads are exposed. Telemetry is disabled. Hosted OAuth and AI-powered searches are not included.',
+    defaultProfile: 'readonly',
+    profiles: ['readonly'],
+  },
+  {
+    id: 'grafana',
+    name: 'Grafana MCP',
+    description: 'Read dashboards and query Prometheus metrics and Loki logs.',
+    icon: 'dashboard',
+    version: '2.3.0',
+    documentation: 'https://github.com/grafana/mcp-grafana/tree/v2.3.0',
+    requirements:
+      'Install mcp-grafana 2.3.0 separately on the extension host. Requires Grafana 9+ and a service account token with read access to the selected data sources.',
+    external: {
+      command: 'mcp-grafana',
+      instance: { label: 'Grafana instance URL', defaultUrl: 'http://localhost:3000' },
+    },
+    security:
+      'Writes and usage statistics are disabled. Queries use the permissions of your Grafana service account.',
+    defaultProfile: 'readonly',
+    profiles: ['readonly'],
+  },
+  {
+    id: 'terraform',
+    name: 'Terraform MCP',
+    description:
+      'Look up Registry providers and modules, or read HCP Terraform and Terraform Enterprise workspaces and runs.',
+    icon: 'server-environment',
+    version: '1.4.1',
+    documentation: 'https://github.com/hashicorp/terraform-mcp-server/tree/v1.4.1',
+    requirements:
+      'Install terraform-mcp-server 1.4.1 separately on the extension host. Public Registry needs no token. HCP/TFE reads require an API token.',
+    external: {
+      command: 'terraform-mcp-server',
+      instance: { label: 'HCP Terraform / Terraform Enterprise URL', defaultUrl: 'https://app.terraform.io' },
+    },
+    security: 'Only reviewed reads are exposed. Workspace mutations, apply and destroy are excluded.',
+    defaultProfile: 'registry',
+    profiles: ['registry', 'hcp-readonly'],
+  },
+  {
+    id: 'opensearch',
+    name: 'OpenSearch MCP',
+    description:
+      'Connect to an external OpenSearch MCP server for index searches, mappings and cluster health.',
+    icon: 'search',
+    version: 'external-v1',
+    documentation:
+      'https://github.com/opensearch-project/opensearch-mcp-server-py/blob/ec714bb377372cb66f140143d8376fb452ab7975/USER_GUIDE.md',
+    requirements:
+      'An existing Streamable HTTP MCP endpoint, with a cluster configured by its operator and OPENSEARCH_DYNAMIC_CONNECTION=false. Optional bearer token for the MCP proxy.',
+    remote: { url: '', configurableEndpoint: true, token: 'optional' },
+    security:
+      'Cluster credentials, IAM and TLS are configured on the external server. Sovran blocks per-call connection overrides and exposes only reviewed reads.',
+    defaultProfile: 'readonly',
+    profiles: ['readonly'],
+  },
 ];
 export function integration(id: IntegrationId): IntegrationDefinition {
   return INTEGRATIONS.find((item) => item.id === id)!;
@@ -134,9 +228,39 @@ export function integrationArguments(managed: ManagedIntegration): string[] {
   if (managed.id === 'gitlab') {
     if (!managed.instanceUrl || normalizeGitLabInstance(managed.instanceUrl) !== managed.instanceUrl)
       throw new Error('Enter a valid HTTPS GitLab instance URL.');
+  } else if (item.external) {
+    if (!managed.executable || !validIntegrationExecutable(managed.executable))
+      throw new Error('Enter an executable name or full path, without arguments or variables.');
+    const needsInstance = managed.id !== 'terraform' || managed.profile === 'hcp-readonly';
+    if (needsInstance) {
+      if (
+        !managed.instanceUrl ||
+        normalizeIntegrationUrl(managed.instanceUrl, managed.id === 'sentry') !== managed.instanceUrl
+      )
+        throw new Error('Enter a valid service instance URL.');
+    } else if (managed.instanceUrl !== undefined)
+      throw new Error('Public Registry does not use a service instance URL.');
   } else if (managed.instanceUrl !== undefined) {
     throw new Error('This integration has a fixed endpoint.');
   }
+  if (!item.external && managed.executable !== undefined)
+    throw new Error('This integration does not use an external executable.');
+  if (item.remote?.configurableEndpoint) {
+    if (!managed.endpoint || normalizeIntegrationUrl(managed.endpoint) !== managed.endpoint)
+      throw new Error('Enter the full Streamable HTTP MCP endpoint URL.');
+  } else if (managed.endpoint !== undefined)
+    throw new Error('This integration does not use a configurable MCP endpoint.');
+  if (managed.id === 'sentry') return ['mcp', '--skills', 'inspect'];
+  if (managed.id === 'grafana')
+    return [
+      '-t',
+      'stdio',
+      '--disable-write',
+      '--usage-stats=disabled',
+      '--enabled-tools',
+      'datasource,search,dashboard,prometheus,loki',
+    ];
+  if (managed.id === 'terraform') return ['stdio', `--tools=${terraformTools(managed.profile).join(',')}`];
   if (managed.id === 'playwright') {
     if (managed.profile === 'extension' && !/^[a-zA-Z0-9 _-]{1,80}$/.test(managed.browserProfile ?? ''))
       throw new Error('Choose an explicit local Chrome profile before using the browser extension.');
@@ -197,7 +321,95 @@ export function normalizeGitLabInstance(input: string): string {
 
 export function integrationEndpoint(managed: ManagedIntegration): string | undefined {
   if (managed.id === 'gitlab') return `${normalizeGitLabInstance(managed.instanceUrl ?? '')}/api/v4/mcp`;
+  if (managed.id === 'opensearch') return normalizeIntegrationUrl(managed.endpoint ?? '');
   return integration(managed.id).remote?.url;
+}
+
+/** No URL credentials, variables, query or fragment; HTTP is limited to literal loopback hosts. */
+export function normalizeIntegrationUrl(input: string, originOnly = false): string {
+  const value = input.trim();
+  const problem = 'Use HTTPS (or HTTP on localhost), without credentials, query, fragment or variables.';
+  try {
+    if (
+      value.length > 1900 ||
+      !/^https?:\/\//i.test(value) ||
+      /[\\\s${}?#]/.test(value) ||
+      value.split('/').some((p) => p === '.' || p === '..')
+    )
+      throw new Error();
+    const url = new URL(value);
+    if (
+      url.username ||
+      url.password ||
+      (url.protocol !== 'https:' &&
+        !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
+    )
+      throw new Error();
+    if (originOnly && url.pathname !== '/') throw new Error();
+    return url.href.replace(/\/$/, '');
+  } catch {
+    throw new Error(originOnly ? `${problem} Enter only the service origin, without a path.` : problem);
+  }
+}
+
+export function validIntegrationExecutable(value: string): boolean {
+  return (
+    value === value.trim() &&
+    value.length > 0 &&
+    value.length <= 1000 &&
+    !/[\r\n\0${}]/.test(value) &&
+    (/^[a-zA-Z0-9_.-]+$/.test(value) || value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value))
+  );
+}
+
+export interface IntegrationConnection {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  auth: McpAuth;
+}
+
+/** Canonical persisted connection. Used by setup and checked again before requesting any secret. */
+export function integrationConnection(managed: ManagedIntegration): IntegrationConnection {
+  const args = integrationArguments(managed);
+  const item = integration(managed.id);
+  if (item.remote)
+    return {
+      url: integrationEndpoint(managed),
+      headers: item.remote.headers?.(managed.profile),
+      auth: { type: 'bearer' },
+    };
+  switch (managed.id) {
+    case 'sentry':
+      return {
+        command: managed.executable,
+        args,
+        env: { SENTRY_HOST: managed.instanceUrl!, SENTRY_CLI_NO_TELEMETRY: '1', DO_NOT_TRACK: '1' },
+        auth: { type: 'env', envName: 'SENTRY_AUTH_TOKEN' },
+      };
+    case 'grafana':
+      return {
+        command: managed.executable,
+        args,
+        env: { GRAFANA_URL: managed.instanceUrl!, DO_NOT_TRACK: '1' },
+        auth: { type: 'env', envName: 'GRAFANA_SERVICE_ACCOUNT_TOKEN' },
+      };
+    case 'terraform':
+      return {
+        command: managed.executable,
+        args,
+        env: {
+          ...(managed.profile === 'hcp-readonly' ? { TFE_ADDRESS: managed.instanceUrl! } : {}),
+          OTEL_METRICS_ENABLED: 'false',
+          ENABLE_TF_OPERATIONS: 'false',
+        },
+        auth: managed.profile === 'hcp-readonly' ? { type: 'env', envName: 'TFE_TOKEN' } : { type: 'none' },
+      };
+    default:
+      return { command: 'node', args: [], auth: { type: 'none' } };
+  }
 }
 
 export function integrationHeaders(profile: IntegrationProfile = 'readonly'): Record<string, string> {
@@ -316,6 +528,84 @@ const DEVTOOLS_TOOLS = [
   'performance_stop_trace',
   'performance_analyze_insight',
 ];
+const SENTRY_READ_TOOLS = [
+  'find_organizations',
+  'find_projects',
+  'find_teams',
+  'find_releases',
+  'get_release_details',
+  'get_issue_details',
+  'get_event_stacktrace',
+  'get_issue_activity',
+  'get_issue_breadcrumbs',
+  'get_issue_tag_values',
+  'get_issue_user_reports',
+  'get_trace_details',
+  'get_span_details',
+  'search_issues',
+];
+const GRAFANA_READ_TOOLS = [
+  'list_datasources',
+  'get_datasource',
+  'search_dashboards',
+  'get_dashboard_summary',
+  'get_dashboard_property',
+  'get_dashboard_panel_queries',
+  'list_prometheus_metric_metadata',
+  'list_prometheus_metric_names',
+  'list_prometheus_label_names',
+  'list_prometheus_label_values',
+  'query_prometheus',
+  'list_loki_label_names',
+  'list_loki_label_values',
+  'query_loki_logs',
+  'query_loki_stats',
+];
+const TERRAFORM_REGISTRY_TOOLS = [
+  'search_provider_docs',
+  'get_provider_details',
+  'get_latest_provider_version',
+  'search_modules',
+  'get_module_details',
+  'get_latest_module_version',
+  'search_policies',
+  'get_policy_details',
+  'get_provider_capabilities',
+];
+const TERRAFORM_HCP_READ_TOOLS = [
+  'list_workspaces',
+  'get_workspace_details',
+  'list_runs',
+  'get_run_details',
+  'get_plan_details',
+  'get_plan_logs',
+];
+const terraformTools = (profile: IntegrationProfile) =>
+  profile === 'hcp-readonly'
+    ? [...TERRAFORM_REGISTRY_TOOLS, ...TERRAFORM_HCP_READ_TOOLS]
+    : TERRAFORM_REGISTRY_TOOLS;
+const OPENSEARCH_READ_TOOLS = [
+  'ListIndexTool',
+  'IndexMappingTool',
+  'SearchIndexTool',
+  'CountTool',
+  'MsearchTool',
+  'ClusterHealthTool',
+  'GetShardsTool',
+];
+
+/** Terraform can initialize with only Registry tools when its TFE client setup fails. */
+export function integrationDiscoveryProblem(
+  managed: ManagedIntegration | undefined,
+  tools: readonly string[],
+): string | undefined {
+  if (
+    managed?.id === 'terraform' &&
+    managed.profile === 'hcp-readonly' &&
+    !tools.some((name) => TERRAFORM_HCP_READ_TOOLS.includes(name))
+  )
+    return 'HCP/TFE read tools are unavailable. Check the stored token, service URL, certificate trust and account access, then reconnect. Public Registry is available as a separate profile.';
+}
 /** An upper bound for managed profiles, independently of server annotations and per-tool Allow choices. */
 export function integrationToolAllowed(managed: ManagedIntegration | undefined, tool: string): boolean {
   if (!managed) return true;
@@ -335,6 +625,14 @@ export function integrationToolAllowed(managed: ManagedIntegration | undefined, 
       return githubTools(managed.profile).includes(tool);
     case 'gitlab':
       return gitlabTools(managed.profile).includes(tool);
+    case 'sentry':
+      return SENTRY_READ_TOOLS.includes(tool);
+    case 'grafana':
+      return GRAFANA_READ_TOOLS.includes(tool);
+    case 'terraform':
+      return terraformTools(managed.profile).includes(tool);
+    case 'opensearch':
+      return OPENSEARCH_READ_TOOLS.includes(tool);
   }
 }
 
@@ -342,6 +640,8 @@ export function reviewedToolDescription(
   managed: ManagedIntegration | undefined,
   tool: string,
 ): string | undefined {
+  if (managed?.id === 'sentry' && tool === 'search_issues')
+    return 'Search Sentry issues using Sentry search syntax, for example is:unresolved release:latest. Scope the project, time window and result limit. Natural-language AI search is not configured.';
   return managed?.id === 'context7' && Object.hasOwn(CONTEXT7_TOOLS, tool) ? CONTEXT7_TOOLS[tool] : undefined;
 }
 /** Managed browser tools return text; saving a result to a caller-selected host path is outside these profiles. */
@@ -351,13 +651,18 @@ export function integrationCallProblem(
   args: Record<string, unknown>,
 ): string | undefined {
   if (
+    managed?.id === 'opensearch' &&
+    Object.keys(args).some((key) => /^(opensearch_|aws_)/i.test(key) && key !== 'opensearch_cluster_name')
+  )
+    return 'OpenSearch connection and credential overrides are unavailable. Configure the cluster on the external MCP server.';
+  if (
     managed?.id === 'github' &&
     managed.profile === 'developer' &&
     tool === 'merge_pull_request' &&
     (typeof args.expectedHeadSha !== 'string' || !/^[0-9a-f]{40}$/i.test(args.expectedHeadSha))
   )
     return 'Read the pull request first and provide its full head commit SHA as expectedHeadSha.';
-  if (!managed || integration(managed.id).remote) return;
+  if (!managed || !['playwright', 'devtools'].includes(managed.id)) return;
   if (['filename', 'filePath'].some((key) => args[key] !== undefined))
     return 'Managed browser tools cannot save results to a caller-selected path. Request an inline result instead.';
   if (['browser_navigate', 'new_page'].includes(tool)) {
@@ -376,9 +681,14 @@ export const PROFILE_LABELS: Record<IntegrationProfile, string> = {
   readonly: 'Read issues and pull requests',
   collaboration: 'Issues and pull requests with optional writes',
   developer: 'Repositories, reviews and Actions',
+  registry: 'Public Registry documentation',
+  'hcp-readonly': 'Registry and HCP/TFE workspace and run reads',
 };
 
 export function integrationProfileLabel(id: IntegrationId, profile: IntegrationProfile): string {
+  if (id === 'sentry') return 'Read issues, events, projects and releases';
+  if (id === 'grafana') return 'Read dashboards, metrics and logs';
+  if (id === 'opensearch') return 'Read indexes and cluster health';
   if (id === 'gitlab')
     return profile === 'collaboration'
       ? 'Merge requests and issues with writes'
@@ -387,7 +697,7 @@ export function integrationProfileLabel(id: IntegrationId, profile: IntegrationP
 }
 export interface InstallationState {
   id: IntegrationId;
-  status: 'missing' | 'installing' | 'ready' | 'remote' | 'error';
+  status: 'missing' | 'installing' | 'ready' | 'remote' | 'external' | 'error';
   error?: string;
 }
 export interface IntegrationCatalogView {

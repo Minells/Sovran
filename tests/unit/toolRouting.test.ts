@@ -9,6 +9,21 @@ const route = (text: string, loadable = LOADABLE) =>
   routeToolUnits(text, loadable, { servers: ROUTING_SERVERS }).map((r) => r.unit);
 
 describe('request routing corpus', () => {
+  it.each([
+    ['sentry', 'Cerca la release su Sentry'],
+    ['grafana', 'Controlla le metriche Prometheus'],
+    ['terraform', 'Read the TFE workspace runs'],
+    ['opensearch', 'Cerca nei log OpenSearch'],
+  ] as const)('loads a connected %s integration from its domain terms', (integration, text) => {
+    expect(
+      routeToolUnits(text, ['mcp:production'], {
+        servers: [{ id: 'production', name: 'Production', integration }],
+      }),
+    ).toEqual([{ unit: 'mcp:production', reason: expect.any(String) }]);
+    expect(
+      routeToolUnits(text, [], { servers: [{ id: 'production', name: 'Production', integration }] }),
+    ).toEqual([]);
+  });
   const outcomes = ROUTING_CORPUS.map(([text, expected]) => ({ text, expected, actual: route(text) }));
 
   /** Precision and recall per unit, with the requests behind every miss and overreach. */

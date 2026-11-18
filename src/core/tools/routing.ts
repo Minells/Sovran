@@ -167,6 +167,10 @@ const NATIVE_RULES: readonly { unit: string; pattern: RegExp }[] = [
 
 /** Words that ask for a catalog integration, beyond its name. Every integration needs an entry. */
 const INTEGRATION_RULES: Readonly<Record<IntegrationId, RegExp>> = {
+  sentry: words('sentry'),
+  grafana: words('grafana', 'prometheus', 'loki', 'promql', 'logql'),
+  terraform: words('terraform', 'hcp', 'tfe', 'hashicorp'),
+  opensearch: words('opensearch', 'open search'),
   github: words('github', 'pull requests?', 'PRs?', 'PR ?#?\\d+'),
   gitlab: words('gitlab', 'merge requests?', 'MRs?', 'CI/CD', '(?:CI|gitlab) pipelines?', 'pipelines? (?:CI|gitlab)'),
   playwright: words(

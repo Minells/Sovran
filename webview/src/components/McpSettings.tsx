@@ -191,7 +191,7 @@ function ServerCard({
 }) {
   const status = STATUS[s.status];
   const item = s.managed && integration(s.managed.id);
-  const keyLabel = item?.remote?.token === 'optional' ? 'API key' : 'token';
+  const keyLabel = item?.id === 'context7' ? 'API key' : 'token';
   const needsToken = s.auth.type !== 'none' && !s.hasToken && item?.remote?.token !== 'optional';
   const busy = s.status === 'starting';
   const managed = s.managed;
@@ -240,7 +240,11 @@ function ServerCard({
         <div className="sv-approval__actions">
           {needsToken || (item?.remote?.token === 'optional' && !s.hasToken) ? (
             <Button icon="key" onClick={configureToken}>
-              {keyLabel === 'API key' ? 'Set API key (optional)' : 'Set token'}
+              {keyLabel === 'API key'
+                ? 'Set API key (optional)'
+                : item?.remote?.token === 'optional'
+                  ? 'Set token (optional)'
+                  : 'Set token'}
             </Button>
           ) : null}
           {localIntegration && needsInstall && managed ? (
@@ -838,6 +842,7 @@ function CatalogEntry({
       <p className="sv-field__help">
         {item.requirements}
         {item.package ? ' No account required.' : ''}
+        {item.external ? ' Installed separately; Sovran verifies the version when connecting.' : ''}
         {installation?.status === 'ready' ? ' Dependencies installed.' : ''}
       </p>
       <SettingsDisclosure title="Advanced settings">
@@ -848,7 +853,7 @@ function CatalogEntry({
         ) : null}
         {item.profiles.length > 1 ? (
           <label className="sv-field">
-            {item.remote ? 'Access mode' : 'Browser profile'}
+            {item.remote || item.external ? 'Access mode' : 'Browser profile'}
             <select
               value={profile}
               onChange={(event) => setProfile(event.target.value as IntegrationProfile)}

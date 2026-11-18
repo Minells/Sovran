@@ -17,6 +17,7 @@ import {
 import { z } from 'zod';
 import {
   integrationCallProblem,
+  integrationDiscoveryProblem,
   integrationToolAllowed,
   integrationToolRequiresApproval,
   reviewedToolDescription,
@@ -247,6 +248,11 @@ export class McpHub implements ToolSource {
         ? (await client.listTools(undefined, { timeout: config.timeoutSeconds * 1000 })).tools
         : [];
       if (this.stale(conn, generation)) return void client.close().catch(() => undefined);
+      const discoveryProblem = integrationDiscoveryProblem(
+        config.managed,
+        tools.map((tool) => tool.name),
+      );
+      if (discoveryProblem) throw new McpConfigError(discoveryProblem);
       const info = client.getServerVersion();
       conn.server = info ? { name: info.name, version: info.version } : undefined;
       conn.tools = tools.filter((tool) => integrationToolAllowed(config.managed, tool.name));
@@ -312,6 +318,17 @@ export class McpHub implements ToolSource {
       return this.deps.logger.warn(
         `MCP ${conn.config.id}: could not refresh the tool list: ${this.clean(error.message)}`,
       );
+    const problem = integrationDiscoveryProblem(
+      conn.config.managed,
+      (tools ?? []).map((tool) => tool.name),
+    );
+    if (problem) {
+      void this.stop(conn);
+      conn.status = 'error';
+      conn.error = problem;
+      this.changed();
+      return;
+    }
     conn.tools = (tools ?? []).filter((tool) => integrationToolAllowed(conn.config.managed, tool.name));
     this.deps.logger.info(`MCP ${conn.config.id}: tool list changed · ${conn.tools.length} tools`);
     this.changed();

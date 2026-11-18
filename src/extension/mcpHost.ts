@@ -11,9 +11,12 @@ import {
   integration,
   integrationArguments,
   integrationEndpoint,
+  integrationConnection,
   integrationProfileLabel,
   integrationToolRequiresApproval,
   normalizeGitLabInstance,
+  normalizeIntegrationUrl,
+  validIntegrationExecutable,
   type ManagedIntegration,
   type IntegrationId,
   type IntegrationProfile,
@@ -41,6 +44,10 @@ import type { HostLogger, McpSecrets } from './services';
 
 /** Bind managed GitLab credentials to both the connection and its approved destination. */
 function credentialKey(server: McpServerConfig): string {
+  if (server.managed && ['sentry', 'grafana', 'terraform', 'opensearch'].includes(server.managed.id)) {
+    const destination = createHash('sha256').update(connectionKey(server)).digest('hex');
+    return `${server.id}.${server.managed.id}.${destination}`;
+  }
   if (server.managed?.id !== 'gitlab') return server.id;
   const destination = createHash('sha256')
     .update(server.managed.instanceUrl ?? '')
@@ -377,7 +384,9 @@ export class McpHost implements vscode.Disposable {
       ? [
           item.remote
             ? `Connects to ${integrationEndpoint(managed)}.`
-            : `Runs ${item.package}@${item.version} on ${host}.`,
+            : item.external
+              ? `Runs ${managed.executable} (${item.name} ${item.version}) on ${host}.${managed.instanceUrl ? ` Service: ${managed.instanceUrl}.` : ''}`
+              : `Runs ${item.package}@${item.version} on ${host}.`,
           item.id === 'context7' ? undefined : `${integrationProfileLabel(item.id, managed.profile)}.`,
           item.security,
           managed.profile === 'extension'
@@ -518,6 +527,40 @@ export class McpHost implements vscode.Disposable {
       if (value === undefined) return;
       managed.instanceUrl = normalizeGitLabInstance(value);
     }
+    if (item.remote?.configurableEndpoint) {
+      const endpoint = await this.promptIntegrationUrl(
+        'OpenSearch MCP endpoint',
+        'Enter the full Streamable HTTP endpoint (usually /mcp), not the OpenSearch REST API URL.',
+        'http://localhost:8000/mcp',
+      );
+      if (endpoint === undefined) return;
+      managed.endpoint = endpoint;
+    }
+    if (item.external) {
+      const executable = await vscode.window.showInputBox({
+        title: `${item.name} executable`,
+        prompt: `Install version ${item.version} separately on ${this.deps.managed?.host ?? 'the extension host'}. Enter its executable name or full path, without arguments.`,
+        value: item.external.command,
+        ignoreFocusOut: true,
+        validateInput: (value) =>
+          validIntegrationExecutable(value)
+            ? undefined
+            : 'Enter an executable name or full path, without arguments or variables.',
+      });
+      if (executable === undefined) return;
+      managed.executable = executable;
+      if (item.external.instance && (id !== 'terraform' || profile === 'hcp-readonly')) {
+        const instance = item.external.instance;
+        const value = await this.promptIntegrationUrl(
+          instance.label,
+          'Enter the service URL. This is not an MCP endpoint. HTTP is supported only on localhost.',
+          instance.defaultUrl,
+          id === 'sentry',
+        );
+        if (value === undefined) return;
+        managed.instanceUrl = value;
+      }
+    }
     if (profile === 'extension') {
       if (this.deps.managed?.remote)
         throw new Error(
@@ -540,21 +583,40 @@ export class McpHost implements vscode.Disposable {
     await this.mutate((servers) => {
       const server = fromEntry({
         id: newServerId(item.name, new Set(servers.map((s) => s.id))),
-        name: managed.instanceUrl
-          ? `GitLab MCP · ${managed.instanceUrl.slice('https://'.length)}`.slice(0, 80)
-          : item.name,
+        name:
+          id === 'gitlab' && managed.instanceUrl
+            ? `GitLab MCP · ${managed.instanceUrl.slice('https://'.length)}`.slice(0, 80)
+            : managed.instanceUrl || managed.endpoint
+              ? `${item.name} · ${new URL(managed.instanceUrl ?? managed.endpoint!).host}`.slice(0, 80)
+              : item.name,
         enabled: false,
         managed,
-        ...(item.remote
-          ? {
-              url: integrationEndpoint(managed),
-              headers: item.remote.headers?.(profile),
-              auth: { type: 'bearer' as const },
-            }
-          : { command: 'node', args: [], auth: { type: 'none' as const } }),
+        ...integrationConnection(managed),
       });
       return { servers: [...servers, server], result: true };
     });
+  }
+
+  private async promptIntegrationUrl(
+    title: string,
+    prompt: string,
+    value: string,
+    originOnly = false,
+  ): Promise<string | undefined> {
+    const input = await vscode.window.showInputBox({
+      title,
+      prompt,
+      value,
+      ignoreFocusOut: true,
+      validateInput: (text) => {
+        try {
+          normalizeIntegrationUrl(text, originOnly);
+        } catch (error) {
+          return error instanceof Error ? error.message : 'Enter a valid URL.';
+        }
+      },
+    });
+    return input === undefined ? undefined : normalizeIntegrationUrl(input, originOnly);
   }
 
   async installIntegration(id: IntegrationId): Promise<void> {

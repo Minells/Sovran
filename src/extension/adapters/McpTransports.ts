@@ -32,11 +32,15 @@ export class NodeMcpTransports implements McpTransportFactory {
   constructor(private readonly deps: McpTransportDeps) {}
 
   async create(server: McpServerConfig, log: (line: string) => void): Promise<Transport> {
+    // Credentials are bound to persisted settings, before a managed launcher resolves
+    // executable paths and cwd. Validate the managed launch before looking up that secret.
+    const credentialServer = server;
     if (server.managed) {
-      if (!this.deps.managedLaunch) throw new McpConfigError('Managed integrations are unavailable in this host.');
+      if (!this.deps.managedLaunch)
+        throw new McpConfigError('Managed integrations are unavailable in this host.');
       server = await this.deps.managedLaunch(server);
     }
-    const token = server.auth.type === 'none' ? undefined : await this.deps.token(server);
+    const token = server.auth.type === 'none' ? undefined : await this.deps.token(credentialServer);
     const launch = resolveLaunch(server, this.deps.variables(), token);
     if (launch.kind === 'http') {
       // The SDK follows a redirect only within the same origin, so headers and tokens never reach another host

@@ -741,7 +741,11 @@
                         "devtools",
                         "github",
                         "context7",
-                        "gitlab"
+                        "gitlab",
+                        "sentry",
+                        "grafana",
+                        "terraform",
+                        "opensearch"
                       ]
                     },
                     "profile": {
@@ -751,7 +755,9 @@
                         "extension",
                         "readonly",
                         "collaboration",
-                        "developer"
+                        "developer",
+                        "registry",
+                        "hcp-readonly"
                       ]
                     },
                     "version": {
@@ -761,11 +767,21 @@
                     },
                     "instanceUrl": {
                       "type": "string",
-                      "description": "Base HTTPS URL for the managed GitLab instance, including any relative root."
+                      "description": "Service instance URL for GitLab, Sentry, Grafana or HCP/TFE; distinct from an external MCP endpoint."
                     },
                     "browserProfile": {
                       "type": "string",
                       "pattern": "^[a-zA-Z0-9 _-]{1,80}$"
+                    },
+                    "executable": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1000,
+                      "description": "Separately installed executable name or full path on the extension host."
+                    },
+                    "endpoint": {
+                      "type": "string",
+                      "description": "Full Streamable HTTP endpoint for the external OpenSearch MCP server."
                     }
                   }
                 }
