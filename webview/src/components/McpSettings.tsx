@@ -19,6 +19,7 @@ import {
   INTEGRATIONS,
   integration,
   integrationProfileLabel,
+  integrationProfileRequiresApproval,
   type IntegrationDefinition,
   type IntegrationProfile,
   type InstallationState,
@@ -53,6 +54,11 @@ const HINT_LABEL: Record<McpToolView['hints'][number], { label: string; title: s
   destructive: {
     label: 'can change data',
     title: 'The server says this tool can change or delete data.',
+    tone: 'warn',
+  },
+  'managed-write': {
+    label: 'can change data',
+    title: 'Sovran classifies this reviewed tool as a write. Every use requires approval.',
     tone: 'warn',
   },
   'open-world': {
@@ -872,9 +878,9 @@ function CatalogEntry({
             signed-in accounts.
           </p>
         ) : null}
-        {profile === 'developer' || (item.id === 'gitlab' && profile === 'collaboration') ? (
+        {integrationProfileRequiresApproval(item.id, profile) ? (
           <p className="sv-field__help">
-            Each write requires approval. Limit your token to the projects and permissions you need.
+            Each write requires approval. Limit credentials to the resources and permissions you need.
           </p>
         ) : profile === 'collaboration' ? (
           <p className="sv-field__help">

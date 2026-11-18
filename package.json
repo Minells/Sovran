@@ -757,7 +757,9 @@
                         "collaboration",
                         "developer",
                         "registry",
-                        "hcp-readonly"
+                        "hcp-readonly",
+                        "hcp-operations",
+                        "operations"
                       ]
                     },
                     "version": {

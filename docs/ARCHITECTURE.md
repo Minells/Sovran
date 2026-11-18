@@ -494,9 +494,18 @@ it neither installs a runtime nor inspects Chrome. The transport looks up secret
 connection, before runtime path/cwd substitutions. New integration credentials bind to a hash of that connection;
 GitLab retains its existing instance binding. Tool allowlists remain enforced at discovery, refresh and dispatch.
 OpenSearch per-call connection overrides are rejected; cluster auth stays server-side. Terraform separates public
-Registry from HCP/TFE reads and rejects an HCP connection that discovers only Registry tools. OAuth, additional
-data source groups, generic upstream executors and infrastructure mutations are outside these presets.
+Registry from HCP/TFE reads and rejects an HCP connection that discovers only Registry tools. Optional write profiles
+add Sentry triage, Grafana dashboards/annotations, HCP workspace/run operations and bounded OpenSearch index/document
+writes. `writes.ts` owns reviewed write names, argument boundaries, schema restrictions and descriptions. The hub
+checks arguments before approval and at dispatch, and rejects a selected profile when required write tools are absent.
+`integrationToolRequiresApproval` enforces Ask even for imported Allow settings. A host `managed-write` hint overrides
+misleading upstream read-only annotations without attributing that classification to the server. Operation targets
+appear before potentially truncated payloads in approval previews. Existing approval, trust, group exclusion and stale
+connection checks remain authoritative. OpenSearch's generic upstream tool is exposed only with constrained routes,
+methods and options; arbitrary endpoints/headers/connection overrides stay blocked. Terraform requires explicit run
+types, manual apply and no workspace auto-apply. OAuth and other datasource groups remain outside these presets.
 See the [implementation and validation plan](plans/2026-11-18-mcp-observability-terraform.md).
+Write contracts and validation are recorded in the [write profile plan](plans/2026-11-18-mcp-write-profiles.md).
 
 Tool discovery and transport stay behind the hub. A future tool lookup or Code Mode can use the existing registry and
 controlled dispatch boundary, including live workspace trust, approvals, group exclusions and cancellation. The

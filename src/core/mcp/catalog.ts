@@ -1,5 +1,10 @@
 /** Reviewed optional integrations. This metadata never starts or installs a server. */
 import type { McpAuth } from './rules';
+import {
+  integrationWriteTools,
+  integrationWriteProblem,
+  reviewedWriteDescription,
+} from './writes';
 
 export const INTEGRATION_IDS = [
   'playwright',
@@ -21,6 +26,8 @@ export const INTEGRATION_PROFILES = [
   'developer',
   'registry',
   'hcp-readonly',
+  'hcp-operations',
+  'operations',
 ] as const;
 export type IntegrationProfile = (typeof INTEGRATION_PROFILES)[number];
 export interface ManagedIntegration {
@@ -138,73 +145,74 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
   {
     id: 'sentry',
     name: 'Sentry MCP',
-    description: 'Read Sentry issues, stack traces, projects and releases.',
+    description: 'Investigate Sentry issues and optionally update their status, assignment and notes.',
     icon: 'bug',
     version: '0.49.0',
     documentation: 'https://github.com/getsentry/toolkit/blob/cli%400.49.0/packages/mcp-server/README.md',
     requirements:
-      'Install @sentry/mcp-server 0.49.0 separately on the extension host with Node.js 22.15+. Supply a Sentry API token with read access.',
+      'Install @sentry/mcp-server 0.49.0 separately on the extension host with Node.js 22.15+. Supply a Sentry API token; collaboration also requires event:write.',
     external: {
       command: 'sentry-mcp',
       instance: { label: 'Sentry instance URL', defaultUrl: 'https://sentry.io' },
     },
     security:
-      'Only reviewed direct reads are exposed. Telemetry is disabled. Hosted OAuth and AI-powered searches are not included.',
+      'Read-only by default. Collaboration adds approved issue updates and notes. Telemetry is disabled; hosted OAuth and AI-powered searches are not included.',
     defaultProfile: 'readonly',
-    profiles: ['readonly'],
+    profiles: ['readonly', 'collaboration'],
   },
   {
     id: 'grafana',
     name: 'Grafana MCP',
-    description: 'Read dashboards and query Prometheus metrics and Loki logs.',
+    description: 'Query metrics and logs, and optionally create or update dashboards and annotations.',
     icon: 'dashboard',
     version: '2.3.0',
     documentation: 'https://github.com/grafana/mcp-grafana/tree/v2.3.0',
     requirements:
-      'Install mcp-grafana 2.3.0 separately on the extension host. Requires Grafana 9+ and a service account token with read access to the selected data sources.',
+      'Install mcp-grafana 2.3.0 separately on the extension host. Requires Grafana 9+ and a service account token; collaboration needs dashboard and annotation write permissions.',
     external: {
       command: 'mcp-grafana',
       instance: { label: 'Grafana instance URL', defaultUrl: 'http://localhost:3000' },
     },
     security:
-      'Writes and usage statistics are disabled. Queries use the permissions of your Grafana service account.',
+      'Read-only by default; collaboration enables selected writes with approval each time. Usage statistics remain disabled. Queries use your service account permissions.',
     defaultProfile: 'readonly',
-    profiles: ['readonly'],
+    profiles: ['readonly', 'collaboration'],
   },
   {
     id: 'terraform',
     name: 'Terraform MCP',
     description:
-      'Look up Registry providers and modules, or read HCP Terraform and Terraform Enterprise workspaces and runs.',
+      'Look up Registry documentation, inspect HCP/TFE workspaces and optionally manage workspaces and runs.',
     icon: 'server-environment',
     version: '1.4.1',
     documentation: 'https://github.com/hashicorp/terraform-mcp-server/tree/v1.4.1',
     requirements:
-      'Install terraform-mcp-server 1.4.1 separately on the extension host. Public Registry needs no token. HCP/TFE reads require an API token.',
+      'Install terraform-mcp-server 1.4.1 separately on the extension host. Public Registry needs no token. HCP/TFE profiles require an API token with the chosen operation permissions.',
     external: {
       command: 'terraform-mcp-server',
       instance: { label: 'HCP Terraform / Terraform Enterprise URL', defaultUrl: 'https://app.terraform.io' },
     },
-    security: 'Only reviewed reads are exposed. Workspace mutations, apply and destroy are excluded.',
+    security:
+      'Operations allow approved workspace changes, plan runs and apply/cancel/discard of one run. Automatic apply and creation of destroy runs are excluded. Review the run plan before applying.',
     defaultProfile: 'registry',
-    profiles: ['registry', 'hcp-readonly'],
+    profiles: ['registry', 'hcp-readonly', 'hcp-operations'],
   },
   {
     id: 'opensearch',
     name: 'OpenSearch MCP',
     description:
-      'Connect to an external OpenSearch MCP server for index searches, mappings and cluster health.',
+      'Search an external OpenSearch MCP server and optionally create indexes or modify individual documents.',
     icon: 'search',
     version: 'external-v1',
     documentation:
       'https://github.com/opensearch-project/opensearch-mcp-server-py/blob/ec714bb377372cb66f140143d8376fb452ab7975/USER_GUIDE.md',
     requirements:
-      'An existing Streamable HTTP MCP endpoint, with a cluster configured by its operator and OPENSEARCH_DYNAMIC_CONNECTION=false. Optional bearer token for the MCP proxy.',
+      'An existing Streamable HTTP MCP endpoint with an operator-configured cluster and OPENSEARCH_DYNAMIC_CONNECTION=false. Operations also require OPENSEARCH_SETTINGS_ALLOW_WRITE=true on the server. Optional MCP proxy bearer token.',
     remote: { url: '', configurableEndpoint: true, token: 'optional' },
     security:
-      'Cluster credentials, IAM and TLS are configured on the external server. Sovran blocks per-call connection overrides and exposes only reviewed reads.',
+      'Cluster credentials, IAM and TLS stay on the external server. Operations require approval and are restricted to explicit index/document routes; connection overrides, scripted document updates, bulk and index deletion are blocked.',
     defaultProfile: 'readonly',
-    profiles: ['readonly'],
+    profiles: ['readonly', 'operations'],
   },
 ];
 export function integration(id: IntegrationId): IntegrationDefinition {
@@ -231,7 +239,7 @@ export function integrationArguments(managed: ManagedIntegration): string[] {
   } else if (item.external) {
     if (!managed.executable || !validIntegrationExecutable(managed.executable))
       throw new Error('Enter an executable name or full path, without arguments or variables.');
-    const needsInstance = managed.id !== 'terraform' || managed.profile === 'hcp-readonly';
+    const needsInstance = managed.id !== 'terraform' || managed.profile !== 'registry';
     if (needsInstance) {
       if (
         !managed.instanceUrl ||
@@ -250,15 +258,16 @@ export function integrationArguments(managed: ManagedIntegration): string[] {
       throw new Error('Enter the full Streamable HTTP MCP endpoint URL.');
   } else if (managed.endpoint !== undefined)
     throw new Error('This integration does not use a configurable MCP endpoint.');
-  if (managed.id === 'sentry') return ['mcp', '--skills', 'inspect'];
+  if (managed.id === 'sentry')
+    return ['mcp', '--skills', managed.profile === 'collaboration' ? 'inspect,triage' : 'inspect'];
   if (managed.id === 'grafana')
     return [
       '-t',
       'stdio',
-      '--disable-write',
+      ...(managed.profile === 'collaboration' ? ['--disable-write=false'] : ['--disable-write']),
       '--usage-stats=disabled',
       '--enabled-tools',
-      'datasource,search,dashboard,prometheus,loki',
+      `datasource,search,dashboard,prometheus,loki${managed.profile === 'collaboration' ? ',annotations' : ''}`,
     ];
   if (managed.id === 'terraform') return ['stdio', `--tools=${terraformTools(managed.profile).join(',')}`];
   if (managed.id === 'playwright') {
@@ -401,11 +410,11 @@ export function integrationConnection(managed: ManagedIntegration): IntegrationC
         command: managed.executable,
         args,
         env: {
-          ...(managed.profile === 'hcp-readonly' ? { TFE_ADDRESS: managed.instanceUrl! } : {}),
+          ...(managed.profile !== 'registry' ? { TFE_ADDRESS: managed.instanceUrl! } : {}),
           OTEL_METRICS_ENABLED: 'false',
-          ENABLE_TF_OPERATIONS: 'false',
+          ENABLE_TF_OPERATIONS: managed.profile === 'hcp-operations' ? 'true' : 'false',
         },
-        auth: managed.profile === 'hcp-readonly' ? { type: 'env', envName: 'TFE_TOKEN' } : { type: 'none' },
+        auth: managed.profile !== 'registry' ? { type: 'env', envName: 'TFE_TOKEN' } : { type: 'none' },
       };
     default:
       return { command: 'node', args: [], auth: { type: 'none' } };
@@ -487,7 +496,16 @@ export function integrationToolRequiresApproval(
     (managed?.id === 'gitlab' && GITLAB_WRITE_TOOLS.includes(tool)) ||
     (managed?.id === 'github' &&
       managed.profile === 'developer' &&
-      [...GITHUB_WRITE_TOOLS, ...GITHUB_DEVELOPER_WRITE].includes(tool))
+      [...GITHUB_WRITE_TOOLS, ...GITHUB_DEVELOPER_WRITE].includes(tool)) ||
+    (!!managed && integrationWriteTools(managed.id, managed.profile).includes(tool))
+  );
+}
+
+export function integrationProfileRequiresApproval(id: IntegrationId, profile: IntegrationProfile): boolean {
+  return (
+    (id === 'gitlab' && profile === 'collaboration') ||
+    (id === 'github' && profile === 'developer') ||
+    integrationWriteTools(id, profile).length > 0
   );
 }
 const CONTEXT7_TOOLS: Readonly<Record<string, string>> = {
@@ -581,8 +599,14 @@ const TERRAFORM_HCP_READ_TOOLS = [
   'get_plan_logs',
 ];
 const terraformTools = (profile: IntegrationProfile) =>
-  profile === 'hcp-readonly'
-    ? [...TERRAFORM_REGISTRY_TOOLS, ...TERRAFORM_HCP_READ_TOOLS]
+  profile === 'hcp-readonly' || profile === 'hcp-operations'
+    ? [
+        ...TERRAFORM_REGISTRY_TOOLS,
+        ...TERRAFORM_HCP_READ_TOOLS,
+        ...(profile === 'hcp-operations'
+          ? ['get_apply_details', 'get_apply_logs', ...integrationWriteTools('terraform', profile)]
+          : []),
+      ]
     : TERRAFORM_REGISTRY_TOOLS;
 const OPENSEARCH_READ_TOOLS = [
   'ListIndexTool',
@@ -599,9 +623,11 @@ export function integrationDiscoveryProblem(
   managed: ManagedIntegration | undefined,
   tools: readonly string[],
 ): string | undefined {
+  if (managed && integrationWriteTools(managed.id, managed.profile).some((name) => !tools.includes(name)))
+    return `${integration(managed.id).name} does not offer all writes required by the selected profile. Check the token permissions and server configuration${managed.id === 'opensearch' ? ' (including OPENSEARCH_SETTINGS_ALLOW_WRITE=true)' : ''}, then reconnect. No write access was added to existing read profiles.`;
   if (
     managed?.id === 'terraform' &&
-    managed.profile === 'hcp-readonly' &&
+    (managed.profile === 'hcp-readonly' || managed.profile === 'hcp-operations') &&
     !tools.some((name) => TERRAFORM_HCP_READ_TOOLS.includes(name))
   )
     return 'HCP/TFE read tools are unavailable. Check the stored token, service URL, certificate trust and account access, then reconnect. Public Registry is available as a separate profile.';
@@ -626,13 +652,19 @@ export function integrationToolAllowed(managed: ManagedIntegration | undefined, 
     case 'gitlab':
       return gitlabTools(managed.profile).includes(tool);
     case 'sentry':
-      return SENTRY_READ_TOOLS.includes(tool);
+      return [...SENTRY_READ_TOOLS, ...integrationWriteTools(managed.id, managed.profile)].includes(tool);
     case 'grafana':
-      return GRAFANA_READ_TOOLS.includes(tool);
+      return [
+        ...GRAFANA_READ_TOOLS,
+        ...(managed.profile === 'collaboration'
+          ? ['get_dashboard_by_uid', 'get_annotations', 'get_annotation_tags']
+          : []),
+        ...integrationWriteTools(managed.id, managed.profile),
+      ].includes(tool);
     case 'terraform':
       return terraformTools(managed.profile).includes(tool);
     case 'opensearch':
-      return OPENSEARCH_READ_TOOLS.includes(tool);
+      return [...OPENSEARCH_READ_TOOLS, ...integrationWriteTools(managed.id, managed.profile)].includes(tool);
   }
 }
 
@@ -640,6 +672,8 @@ export function reviewedToolDescription(
   managed: ManagedIntegration | undefined,
   tool: string,
 ): string | undefined {
+  const writeDescription = reviewedWriteDescription(managed, tool);
+  if (writeDescription) return writeDescription;
   if (managed?.id === 'sentry' && tool === 'search_issues')
     return 'Search Sentry issues using Sentry search syntax, for example is:unresolved release:latest. Scope the project, time window and result limit. Natural-language AI search is not configured.';
   return managed?.id === 'context7' && Object.hasOwn(CONTEXT7_TOOLS, tool) ? CONTEXT7_TOOLS[tool] : undefined;
@@ -655,6 +689,8 @@ export function integrationCallProblem(
     Object.keys(args).some((key) => /^(opensearch_|aws_)/i.test(key) && key !== 'opensearch_cluster_name')
   )
     return 'OpenSearch connection and credential overrides are unavailable. Configure the cluster on the external MCP server.';
+  const writeProblem = integrationWriteProblem(managed, tool, args);
+  if (writeProblem) return writeProblem;
   if (
     managed?.id === 'github' &&
     managed.profile === 'developer' &&
@@ -683,12 +719,20 @@ export const PROFILE_LABELS: Record<IntegrationProfile, string> = {
   developer: 'Repositories, reviews and Actions',
   registry: 'Public Registry documentation',
   'hcp-readonly': 'Registry and HCP/TFE workspace and run reads',
+  'hcp-operations': 'HCP/TFE workspace and run operations (approval required)',
+  operations: 'Index and document operations (approval required)',
 };
 
 export function integrationProfileLabel(id: IntegrationId, profile: IntegrationProfile): string {
-  if (id === 'sentry') return 'Read issues, events, projects and releases';
-  if (id === 'grafana') return 'Read dashboards, metrics and logs';
-  if (id === 'opensearch') return 'Read indexes and cluster health';
+  if (id === 'sentry')
+    return profile === 'collaboration'
+      ? 'Issue triage and notes (approval required)'
+      : 'Read issues, events, projects and releases';
+  if (id === 'grafana')
+    return profile === 'collaboration'
+      ? 'Dashboards and annotations with writes (approval required)'
+      : 'Read dashboards, metrics and logs';
+  if (id === 'opensearch' && profile === 'readonly') return 'Read indexes and cluster health';
   if (id === 'gitlab')
     return profile === 'collaboration'
       ? 'Merge requests and issues with writes'

@@ -2519,6 +2519,38 @@ describe('MCP servers', () => {
     expect(within(card).queryByRole('button', { name: 'Install dependencies' })).not.toBeInTheDocument();
   });
 
+  it.each([
+    ['Sentry MCP', 'sentry', 'collaboration'],
+    ['Grafana MCP', 'grafana', 'collaboration'],
+    ['Terraform MCP', 'terraform', 'hcp-operations'],
+    ['OpenSearch MCP', 'opensearch', 'operations'],
+  ] as const)('requires explicit selection of %s write access', async (name, integration, profile) => {
+    await open([]);
+    await clickButton(/^Browse Catalog$/);
+    const entry = screen.getByRole('listitem', { name });
+    await userEvent.click(within(entry).getByRole('button', { name: 'Advanced settings' }));
+    const access = within(entry).getByLabelText('Access mode');
+    expect(access).toHaveValue(integration === 'terraform' ? 'registry' : 'readonly');
+    await userEvent.selectOptions(access, profile);
+    expect(within(entry).getByText(/Each write requires approval/)).toBeVisible();
+    await userEvent.click(within(entry).getByRole('button', { name: `Configure ${name}` }));
+    expect(sent).toContainEqual({ type: 'addMcpIntegration', integration, profile });
+    expect(sent.some((message) => message.type === 'setMcpServerEnabled')).toBe(false);
+  });
+
+  it('does not offer Always Allow for a managed write even when saved settings say Allow', async () => {
+    await open([{
+      ...github, id: 'sentry', name: 'Sentry MCP',
+      managed: { id: 'sentry', profile: 'collaboration', version: '0.49.0', executable: 'sentry-mcp', instanceUrl: 'https://sentry.io' },
+      tools: [{ name: 'add_issue_note', modelName: 'mcp__sentry__add_issue_note', description: 'Add a note', policy: 'ask', hints: ['managed-write'], requiresApproval: true }],
+    }]);
+    await clickButton(/^Tool permissions/);
+    const choice = screen.getByRole('radiogroup', { name: 'add_issue_note: when the agent uses it' });
+    expect(within(choice).queryByRole('radio', { name: 'Allow' })).not.toBeInTheDocument();
+    expect(within(choice).getByRole('radio', { name: 'Ask' })).toBeInTheDocument();
+    expect(screen.getByText('can change data')).toBeVisible();
+  });
+
   it('can connect Context7 without a key and shows Connected only on the host status', async () => {
     const context7: McpServerView = {
       ...github,

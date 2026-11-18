@@ -118,21 +118,33 @@ describe('Streamable HTTP transport', { timeout: 30_000 }, () => {
   let web: http.Server;
   let base = '';
   const seen: http.IncomingHttpHeaders[] = [];
+  const mutations: unknown[] = [];
   const handler = createMcpHandler(() => {
     const s = new McpServer({ name: 'web', version: '2.0.0' });
-    for (const name of [
-      'echo',
-      'query-docs',
-      'resolve-library-id',
-      'SearchIndexTool',
-      'GenericOpenSearchApiTool',
-    ]) {
+    for (const name of ['echo', 'query-docs', 'resolve-library-id', 'SearchIndexTool']) {
       s.registerTool(
         name,
         { description: 'Echoes.', inputSchema: z.object({ text: z.string() }) },
         async ({ text }) => ({ content: [{ type: 'text', text }] }),
       );
     }
+    s.registerTool(
+      'GenericOpenSearchApiTool',
+      {
+        inputSchema: z.object({
+          method: z.string(),
+          path: z.string(),
+          body: z.record(z.string(), z.unknown()).optional(),
+        }),
+      },
+      async (args) => {
+        mutations.push(args);
+        return {
+          content: [{ type: 'text', text: args.body?.fail ? 'upstream denied' : 'document created' }],
+          isError: args.body?.fail === true,
+        };
+      },
+    );
     return s;
   });
 
@@ -235,6 +247,43 @@ describe('Streamable HTTP transport', { timeout: 30_000 }, () => {
       expect(seen).toHaveLength(count);
     },
   );
+
+  it('dispatches only bounded OpenSearch writes over HTTP and preserves upstream failures', async () => {
+    mutations.length = 0;
+    const h = makeHub('operation-proxy-token');
+    const managed = {
+      id: 'opensearch',
+      version: 'external-v1',
+      profile: 'operations',
+      endpoint: `${base}/mcp`,
+    } as const;
+    h.update([fromEntry({ id: 'opensearch', managed, ...integrationConnection(managed) })], true);
+    await until(() => h.states()[0]?.status !== 'starting', 10_000);
+    expect(h.states()[0]?.status).toBe('connected');
+    const tool = h.tools().find((tool) => tool.name.endsWith('__GenericOpenSearchApiTool'))!;
+    expect(tool.parameters).toMatchObject({ additionalProperties: false, required: ['method', 'path'] });
+    const args = { method: 'PUT', path: '/orders/_doc/one', body: { name: 'sample' } };
+    expect(await h.callTool('opensearch', 'GenericOpenSearchApiTool', args, signal())).toMatchObject({
+      content: 'document created',
+      isError: false,
+    });
+    expect(mutations).toEqual([args]);
+    const count = seen.length;
+    for (const edit of [
+      { path: '/_cluster/settings' },
+      { headers: { Authorization: 'other' } },
+      { aws_profile: 'other' },
+      { method: 'DELETE', path: '/orders' },
+    ])
+      await expect(
+        h.callTool('opensearch', 'GenericOpenSearchApiTool', { ...args, ...edit }, signal()),
+      ).rejects.toThrow();
+    expect(seen).toHaveLength(count);
+    expect(
+      await h.callTool('opensearch', 'GenericOpenSearchApiTool', { ...args, body: { fail: true } }, signal()),
+    ).toMatchObject({ content: 'upstream denied', isError: true });
+    expect(seen.at(-1)?.authorization).toBe('Bearer operation-proxy-token');
+  });
 
   it('does not follow a redirect to another origin, and explains a refused token', async () => {
     seen.length = 0;

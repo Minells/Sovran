@@ -53,6 +53,7 @@ there is no SOVRAN backend, account, or telemetry. Code and context you attach a
 - **Tools:** built-in permissions and per-chat group selection with definition cost estimates. Optional Playwright,
   Chrome DevTools, GitHub, GitLab, Context7, Sentry, Grafana and Terraform integrations, an external OpenSearch MCP
   connection, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
+  Sentry, Grafana, Terraform and OpenSearch also offer optional write profiles with approval for every mutation.
 - **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
   history that can persist across restarts.
 

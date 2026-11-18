@@ -193,13 +193,13 @@ export type ApprovalDetail =
       title?: string;
       /** The arguments, as indented JSON. */
       arguments: string;
-      /** What the server says about the tool (MCP annotations). Only claims the server made explicitly. */
+      /** Server annotations, plus an explicit host classification for reviewed managed writes. */
       hints: McpToolHint[];
       requiresApproval?: true;
     };
 
-/** MCP tool annotations as the user reads them. They come from the server, so they are claims, not guarantees. */
-export type McpToolHint = 'read-only' | 'destructive' | 'open-world';
+/** Server hints are claims, not guarantees. managed-write is Sovran's reviewed classification. */
+export type McpToolHint = 'read-only' | 'destructive' | 'open-world' | 'managed-write';
 
 export interface ApprovalRequest {
   id: string;

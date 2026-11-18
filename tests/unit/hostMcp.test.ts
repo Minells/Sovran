@@ -215,6 +215,15 @@ describe('integration catalog host lifecycle', () => {
     ['sentry', 'readonly', 'sentry-mcp', 'https://sentry.io', 'SENTRY_AUTH_TOKEN'],
     ['grafana', 'readonly', 'mcp-grafana', 'https://grafana.example.test', 'GRAFANA_SERVICE_ACCOUNT_TOKEN'],
     ['terraform', 'hcp-readonly', 'terraform-mcp-server', 'https://tfe.example.test', 'TFE_TOKEN'],
+    ['sentry', 'collaboration', 'sentry-mcp', 'https://sentry.io', 'SENTRY_AUTH_TOKEN'],
+    [
+      'grafana',
+      'collaboration',
+      'mcp-grafana',
+      'https://grafana.example.test',
+      'GRAFANA_SERVICE_ACCOUNT_TOKEN',
+    ],
+    ['terraform', 'hcp-operations', 'terraform-mcp-server', 'https://tfe.example.test', 'TFE_TOKEN'],
   ] as const)(
     'configures %s disconnected and binds its token to the destination',
     async (id, profile, executable, instanceUrl, envName) => {
@@ -232,6 +241,12 @@ describe('integration catalog host lifecycle', () => {
       expect(mcp.view().servers.at(-1)?.hasToken).toBe(true);
       expect(JSON.stringify(servers())).not.toContain('private-token-fixture');
       expect(JSON.stringify(sidebar)).not.toContain('private-token-fixture');
+      const mutation =
+        id === 'sentry' ? 'add_issue_note' : id === 'grafana' ? 'update_dashboard' : 'create_run';
+      if (profile === 'collaboration' || profile === 'hcp-operations')
+        await expect(mcp.setToolPolicy(config.id as string, mutation, 'allow')).rejects.toThrow(
+          /requires approval/,
+        );
       config.managed = { ...(config.managed as object), instanceUrl: 'https://elsewhere.example.test' };
       for (const listener of h.configListeners) await listener({ affectsConfiguration: () => true });
       expect(mcp.view().servers.at(-1)?.hasToken).toBe(false);

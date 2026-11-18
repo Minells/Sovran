@@ -13,6 +13,7 @@ import {
   integrationEndpoint,
   integrationConnection,
   integrationProfileLabel,
+  integrationProfileRequiresApproval,
   integrationToolRequiresApproval,
   normalizeGitLabInstance,
   normalizeIntegrationUrl,
@@ -392,7 +393,7 @@ export class McpHost implements vscode.Disposable {
           managed.profile === 'extension'
             ? `Chrome profile ${managed.browserProfile} uses the Playwright companion extension. Approved tabs can expose signed-in accounts.`
             : undefined,
-          item.id === 'gitlab' || managed.profile === 'developer'
+          integrationProfileRequiresApproval(item.id, managed.profile)
             ? 'Each write requires approval.'
             : managed.profile === 'collaboration'
               ? 'Issue and pull request writes start on Ask.'
@@ -549,7 +550,7 @@ export class McpHost implements vscode.Disposable {
       });
       if (executable === undefined) return;
       managed.executable = executable;
-      if (item.external.instance && (id !== 'terraform' || profile === 'hcp-readonly')) {
+      if (item.external.instance && (id !== 'terraform' || profile !== 'registry')) {
         const instance = item.external.instance;
         const value = await this.promptIntegrationUrl(
           instance.label,

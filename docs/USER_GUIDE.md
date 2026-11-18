@@ -494,20 +494,32 @@ after MCP initialization and tool discovery complete.
   or `https://sentry.example.com`), then **Set token** and **Connect**. The API token needs read access to the
   organizations, projects and events you want to inspect. Sovran exposes direct issue/event, project and release
   reads, with telemetry disabled. `search_issues` uses Sentry query syntax; an extra LLM provider is not configured.
-  Generic tool execution, mutations, Seer and hosted OAuth login are outside this profile.
+  The optional **Issue triage and notes** access mode adds `update_issue` and `add_issue_note` with approval
+  for every call; the token also needs `event:write`. Generic tool execution, Seer and hosted OAuth are excluded.
   [Sentry stdio setup](https://github.com/getsentry/toolkit/blob/cli%400.49.0/packages/mcp-server/README.md)
 - **Grafana MCP** uses the separately installed **mcp-grafana 2.3.0** binary and Grafana **9+**. Configure the binary
   and the Grafana service URL, then store a service account token with the needed dashboard/data source read and
   query permissions. The profile includes data source discovery, dashboard summaries/properties, Prometheus and
-  Loki queries. Writes and upstream usage statistics are disabled. Other data sources, including Grafana's
+  Loki queries. The optional **Dashboards and annotations with writes** mode adds `update_dashboard`,
+  `create_annotation`, `update_annotation` and `delete_annotation`, plus full dashboard and annotation reads.
+  Use a token with dashboard/annotation write permissions. Read the dashboard first; prefer targeted patches
+  and preserve its schema/version for full updates. Forced overwrite is blocked. Upstream usage statistics
+  remain disabled in both profiles. Other data sources, including Grafana's
   Elasticsearch/OpenSearch group, are not exposed by this initial profile.
   [Grafana setup](https://github.com/grafana/mcp-grafana/tree/v2.3.0)
 - **Terraform MCP** uses the separately installed **terraform-mcp-server 1.4.1** binary. The default **Public Registry
   documentation** profile needs no token and reads provider, module and policy documentation. In the catalog's
   **Advanced settings → Access mode**, choose **Registry and HCP/TFE workspace and run reads** to add workspace,
   run and plan reads. Configure the HCP/TFE service URL and use **Set token** for its API token. A connection that
-  offers no HCP/TFE read tools is shown as failed, rather than silently falling back to Registry. Workspace mutations,
-  apply and destroy are not exposed. Plans and logs can contain sensitive infrastructure information; use an
+  offers no HCP/TFE read tools is shown as failed, rather than silently falling back to Registry. The optional
+  **HCP/TFE workspace and run operations** mode adds `create_workspace`, `update_workspace`, `create_run`
+  and `action_run`, plus apply details/logs. Workspace changes require `auto_apply: "false"`. Run creation
+  requires an explicit `plan_only` or `plan_and_apply`; the latter queues a plan with automatic apply disabled.
+  Read the run and its plan, explain the changes, then request separate approval to `apply`, `cancel` or
+  `discard` that exact run ID. Apply success means the action was requested; follow up with run details.
+  An approved plan can create, modify or delete infrastructure. Destroy-run creation, workspace deletion,
+  forced unlock, variables/secrets and unrestricted local CLI operations are excluded.
+  Plans and logs can contain sensitive infrastructure information; use an
   appropriately scoped token. [Terraform setup](https://github.com/hashicorp/terraform-mcp-server/tree/v1.4.1)
 - **OpenSearch MCP** connects to an **existing external Streamable HTTP MCP endpoint**, such as
   `https://search-mcp.example.com/mcp`. Enter the MCP URL, not the cluster REST API URL or a legacy `/sse` endpoint.
@@ -518,7 +530,24 @@ after MCP initialization and tool discovery complete.
   `ClusterHealthTool` and `GetShardsTool`. Per-call connection/authentication overrides are rejected even if the
   upstream schema hides them. A registered `opensearch_cluster_name` can select an operator-configured cluster.
   Start with explicit indexes, time filters, small result sizes and server-side aggregations.
+  The optional **Index and document operations** mode exposes a constrained `GenericOpenSearchApiTool`.
+  Its allowed method/path combinations are `PUT /index` (settings/mappings), `PUT /index/_mapping`,
+  `PUT /index/_doc/id`, `POST /index/_doc`, `POST /index/_update/id` (a `doc` object and optional boolean
+  `doc_as_upsert`) and `DELETE /index/_doc/id`. Names must target one concrete non-system index/document;
+  wildcard targets, encoded paths, custom headers, scripted updates, bulk operations and index deletion are rejected.
+  Document options support `refresh`, `op_type: "create"`, or paired integer `if_seq_no`/`if_primary_term`
+  for optimistic concurrency. The operator must enable `OPENSEARCH_SETTINGS_ALLOW_WRITE=true` on the MCP
+  server and grant the cluster identity the required index/document permissions. A visible tool alone does
+  not prove that the cluster permits writes; upstream errors remain errors in Sovran.
   [External server setup](https://github.com/opensearch-project/opensearch-mcp-server-py/blob/ec714bb377372cb66f140143d8376fb452ab7975/USER_GUIDE.md)
+
+Write access is opt-in: select the access mode under **Browse Catalog → Advanced settings**, then configure
+the new connection, token and **Connect**. Existing connections retain their read profiles; **Configure another**
+adds a separate connection. Every mutation in these four write profiles requires approval in all approval modes,
+and cannot be changed to **Allow**. **Off** still blocks a tool. Sovran classifies these tools as writes independently of upstream
+annotations, and shows the operation target before large payloads in the approval preview. Trust revocation,
+disconnecting, changing profiles or turning a tool Off while approval is open prevents execution.
+Missing required write tools fail connection setup with instructions to check permissions/server configuration.
 
 Sentry, Grafana and Terraform executables are installed and updated separately by the user, outside workspace
 folders. Sovran verifies the exact reviewed version when connecting; it does not run `npx latest`, download these

@@ -28,10 +28,14 @@ const coversCommand = (entry: string, command: string) => {
   return e.length > 0 && (c === e || c.startsWith(`${e} `));
 };
 
-/** MCP annotations, phrased as the server's claims: Sovran cannot check them. */
+/** Server claims are separate from Sovran's reviewed managed-write classification. */
 const MCP_HINTS: Record<McpToolHint, { icon: string; text: string }> = {
   'read-only': { icon: 'eye', text: 'The server says this tool only reads data.' },
   destructive: { icon: 'warning', text: 'The server says this tool can change or delete data.' },
+  'managed-write': {
+    icon: 'warning',
+    text: 'This reviewed tool can change or delete data. Sovran requires approval for every use.',
+  },
   'open-world': { icon: 'globe', text: 'The server says this tool reaches services outside your machine.' },
 };
 
@@ -285,9 +289,16 @@ export function ApprovalBar({ approval }: { approval: ApprovalView }) {
       ) : d.kind === 'mcp' ? (
         <>
           {d.hints.length ? (
-            <ul className="sv-approval__hints" aria-label="What the server says about this tool">
+            <ul
+              className="sv-approval__hints"
+              aria-label={
+                d.hints.includes('managed-write')
+                  ? 'Tool effects and review requirements'
+                  : 'What the server says about this tool'
+              }
+            >
               {d.hints.map((h) => (
-                <li key={h} data-tone={h === 'destructive' ? 'warn' : undefined}>
+                <li key={h} data-tone={h === 'destructive' || h === 'managed-write' ? 'warn' : undefined}>
                   <Icon name={MCP_HINTS[h].icon} />
                   {MCP_HINTS[h].text}
                 </li>
