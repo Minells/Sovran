@@ -35,25 +35,16 @@ import { MemoryTransports, until } from '../fixtures/mcp';
 
 const profiles: ManagedIntegration[] = [
   {
-    id: 'sentry',
-    profile: 'collaboration',
-    version: '0.49.0',
-    executable: 'sentry-mcp',
-    instanceUrl: 'https://sentry.io',
-  },
-  {
     id: 'grafana',
     profile: 'collaboration',
-    version: '2.3.0',
-    executable: 'mcp-grafana',
-    instanceUrl: 'https://grafana.example.test',
+    version: 'remote-v1',
+    endpoint: 'https://grafana-mcp.example.test/mcp',
   },
   {
     id: 'terraform',
     profile: 'hcp-operations',
-    version: '1.4.1',
-    executable: 'terraform-mcp-server',
-    instanceUrl: 'https://tfe.example.test',
+    version: 'remote-v1',
+    endpoint: 'https://terraform-mcp.example.test/mcp',
   },
   {
     id: 'opensearch',
@@ -93,27 +84,20 @@ describe('managed write contracts', () => {
     ).toBe(false);
   });
 
-  it('uses the upstream opt-ins without broadening the original launch flags', () => {
-    expect(integrationArguments(profiles[0]!)).toEqual(['mcp', '--skills', 'inspect,triage']);
-    const grafana = integrationArguments(profiles[1]!);
-    expect(grafana).toContain('--disable-write=false');
-    expect(grafana).toContain('--usage-stats=disabled');
-    expect(grafana).not.toContain('--disable-write');
-    expect(grafana.at(-1)).toContain(',annotations');
-    expect(integrationArguments(readProfile(profiles[1]!))).toContain('--disable-write');
-    const terraform = integrationConnection(profiles[2]!);
-    expect(terraform.env).toMatchObject({
-      TFE_ADDRESS: 'https://tfe.example.test',
-      ENABLE_TF_OPERATIONS: 'true',
-      OTEL_METRICS_ENABLED: 'false',
-    });
-    expect(terraform.auth).toEqual({ type: 'env', envName: 'TFE_TOKEN' });
-    expect(terraform.args?.join(' ')).toContain('action_run');
-    expect(integrationConnection(readProfile(profiles[2]!)).env?.ENABLE_TF_OPERATIONS).toBe('false');
+  it('uses only MCP endpoints and gateway credentials for remote write profiles', () => {
+    for (const managed of profiles) {
+      expect(integrationArguments(managed)).toEqual([]);
+      expect(integrationConnection(managed)).toMatchObject({
+        url: managed.endpoint,
+        auth: { type: 'bearer' },
+      });
+      expect(integrationConnection(managed).env).toBeUndefined();
+      expect(integrationConnection(managed).command).toBeUndefined();
+    }
   });
 
   it('narrows broader upstream schemas and hides headers and credential overrides', () => {
-    const schema = reviewedWriteParameters(profiles[3], 'GenericOpenSearchApiTool', {
+    const schema = reviewedWriteParameters(profiles[2], 'GenericOpenSearchApiTool', {
       properties: { headers: {}, opensearch_password: {} },
     })!;
     expect(schema).toMatchObject({
@@ -124,13 +108,13 @@ describe('managed write contracts', () => {
     expect(schema.properties).not.toHaveProperty('headers');
     expect(schema.properties).not.toHaveProperty('opensearch_password');
     expect(
-      reviewedWriteParameters(profiles[2], 'create_run', { required: ['workspace_name'] }),
+      reviewedWriteParameters(profiles[1], 'create_run', { required: ['workspace_name'] }),
     ).toMatchObject({
       required: ['workspace_name', 'run_type'],
       properties: { run_type: { enum: ['plan_only', 'plan_and_apply'] } },
     });
     expect(
-      reviewedWriteParameters(readProfile(profiles[3]!), 'GenericOpenSearchApiTool', {}),
+      reviewedWriteParameters(readProfile(profiles[2]!), 'GenericOpenSearchApiTool', {}),
     ).toBeUndefined();
   });
   it('puts the full dashboard identity before large JSON without changing the actual arguments', () => {
@@ -139,7 +123,7 @@ describe('managed write contracts', () => {
       dashboard: { panels: [{ payload: 'x'.repeat(10000) }], uid: 'dash-one', title: 'Payments', version: 5 },
     };
     const original = structuredClone(args);
-    const display = reviewedWriteApprovalArguments(profiles[1], 'update_dashboard', args);
+    const display = reviewedWriteApprovalArguments(profiles[0], 'update_dashboard', args);
     expect(
       JSON.stringify(display).startsWith('{"dashboard":{"uid":"dash-one","title":"Payments","version":5,'),
     ).toBe(true);
@@ -149,7 +133,7 @@ describe('managed write contracts', () => {
 });
 
 describe('OpenSearch operation boundaries', () => {
-  const managed = profiles[3]!;
+  const managed = profiles[2]!;
   const check = (args: Record<string, unknown>) =>
     integrationCallProblem(managed, 'GenericOpenSearchApiTool', args);
   it.each([
@@ -242,7 +226,7 @@ describe('Terraform and Grafana operation arguments', () => {
     'rejects implicit or unsupported Terraform run type %s',
     (run_type) => {
       expect(
-        integrationCallProblem(profiles[2], 'create_run', {
+        integrationCallProblem(profiles[1], 'create_run', {
           terraform_org_name: 'org',
           workspace_name: 'test',
           run_type,
@@ -252,14 +236,14 @@ describe('Terraform and Grafana operation arguments', () => {
   );
   it('requires manual apply and an explicit run target', () => {
     expect(
-      integrationCallProblem(profiles[2], 'create_run', {
+      integrationCallProblem(profiles[1], 'create_run', {
         terraform_org_name: 'org',
         workspace_name: 'test',
         run_type: 'plan_only',
       }),
     ).toBeUndefined();
     expect(
-      integrationCallProblem(profiles[2], 'create_run', {
+      integrationCallProblem(profiles[1], 'create_run', {
         terraform_org_name: 'org',
         workspace_name: 'test',
         run_type: 'plan_and_apply',
@@ -268,22 +252,22 @@ describe('Terraform and Grafana operation arguments', () => {
     ).toBeTruthy();
     for (const tool of ['create_workspace', 'update_workspace']) {
       for (const auto_apply of [undefined, true, 'true', 'FALSE', ['false']])
-        expect(integrationCallProblem(profiles[2], tool, { auto_apply })).toBeTruthy();
-      expect(integrationCallProblem(profiles[2], tool, { auto_apply: 'false' })).toBeUndefined();
+        expect(integrationCallProblem(profiles[1], tool, { auto_apply })).toBeTruthy();
+      expect(integrationCallProblem(profiles[1], tool, { auto_apply: 'false' })).toBeUndefined();
     }
     for (const run_action of ['apply', 'cancel', 'discard'])
       expect(
-        integrationCallProblem(profiles[2], 'action_run', { run_action, run_id: 'run-abc123' }),
+        integrationCallProblem(profiles[1], 'action_run', { run_action, run_id: 'run-abc123' }),
       ).toBeUndefined();
     expect(
-      integrationCallProblem(profiles[2], 'action_run', { run_action: ['apply'], run_id: 'run-abc123' }),
+      integrationCallProblem(profiles[1], 'action_run', { run_action: ['apply'], run_id: 'run-abc123' }),
     ).toBeTruthy();
     expect(
-      integrationCallProblem(profiles[2], 'action_run', { run_action: 'apply', run_id: '/runs/one' }),
+      integrationCallProblem(profiles[1], 'action_run', { run_action: 'apply', run_id: '/runs/one' }),
     ).toBeTruthy();
-    expect(integrationCallProblem(profiles[1], 'update_dashboard', { overwrite: true })).toMatch(/overwrite/);
+    expect(integrationCallProblem(profiles[0], 'update_dashboard', { overwrite: true })).toMatch(/overwrite/);
     expect(
-      integrationCallProblem(profiles[1], 'update_dashboard', {
+      integrationCallProblem(profiles[0], 'update_dashboard', {
         uid: 'one',
         operations: [],
         overwrite: false,
@@ -300,11 +284,10 @@ const settings: AgentSettings = {
   defaultMaxOutputTokens: 4096,
 };
 const examples: Array<[ManagedIntegration, string, Record<string, unknown>]> = [
-  [profiles[0]!, 'add_issue_note', { organizationSlug: 'org', issueId: 'APP-1', text: 'Investigating' }],
-  [profiles[1]!, 'create_annotation', { dashboardUid: 'one', text: 'Release deployed' }],
-  [profiles[2]!, 'create_run', { terraform_org_name: 'org', workspace_name: 'test', run_type: 'plan_only' }],
+  [profiles[0]!, 'create_annotation', { dashboardUid: 'one', text: 'Release deployed' }],
+  [profiles[1]!, 'create_run', { terraform_org_name: 'org', workspace_name: 'test', run_type: 'plan_only' }],
   [
-    profiles[3]!,
+    profiles[2]!,
     'GenericOpenSearchApiTool',
     { method: 'PUT', path: '/orders/_doc/one', body: { name: 'sample' } },
   ],
@@ -439,14 +422,14 @@ describe('managed mutations in the agent loop', () => {
     },
   );
   it('rejects OpenSearch connection overrides before asking or dispatching', async () => {
-    const [managed, tool, args] = examples[3]!;
+    const [managed, tool, args] = examples[2]!;
     const run = await agentRun(managed, tool, { ...args, headers: { Authorization: 'other' } }, true);
     expect(run.approvals.requests).toHaveLength(0);
     expect(run.calls).not.toHaveBeenCalled();
     expect(run.result?.status).toBe('error');
   });
   it('keeps the exact OpenSearch target visible before a truncated large body', async () => {
-    const [managed, tool] = examples[3]!;
+    const [managed, tool] = examples[2]!;
     const args = { body: { payload: 'x'.repeat(10000) }, path: '/orders/_doc/one', method: 'PUT' };
     const run = await agentRun(managed, tool, args, true);
     const detail = run.approvals.requests[0]?.detail;

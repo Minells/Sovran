@@ -211,60 +211,92 @@ beforeEach(async () => {
 });
 
 describe('integration catalog host lifecycle', () => {
+  it('keeps retired and local legacy entries visible, disabled and removable without reconnecting', async () => {
+    const legacy = [
+      { id: 'sentry' as const, version: '0.49.0' },
+      { id: 'grafana' as const, version: '2.3.0' },
+      { id: 'terraform' as const, version: '1.4.1' },
+    ].map(({ id, version }) => ({
+      id,
+      name: `${id} legacy`,
+      enabled: true,
+      command: `${id}-old`,
+      managed: {
+        id,
+        version,
+        profile: 'readonly',
+        executable: `${id}-old`,
+        instanceUrl: 'https://old.example.test',
+      },
+      auth: { type: 'env', envName: 'OLD_TOKEN' },
+    }));
+    h.config['sovran.mcp.servers'] = [...servers(), ...legacy];
+    for (const listener of h.configListeners) await listener({ affectsConfiguration: () => true });
+    for (const entry of legacy) {
+      expect(mcp.view().servers.find((s) => s.id === entry.id)).toMatchObject({
+        enabled: false,
+        hasToken: false,
+        status: 'error',
+        tools: [],
+      });
+      await expect(mcp.setEnabled(entry.id, true)).rejects.toThrow(/removed|remote/);
+      await expect(mcp.promptToken(entry.id)).rejects.toThrow(/removed|remote/);
+      await expect(mcp.restart(entry.id)).rejects.toThrow(/removed|remote/);
+    }
+    expect(servers().slice(-3)).toEqual(legacy);
+    h.warningAnswer = 'Remove';
+    await mcp.remove('sentry');
+    expect(servers().some((entry) => entry.id === 'sentry')).toBe(false);
+    expect(servers().find((entry) => entry.id === 'grafana')).toMatchObject({
+      enabled: false,
+      command: 'grafana-old',
+    });
+  });
+
   it.each([
-    ['sentry', 'readonly', 'sentry-mcp', 'https://sentry.io', 'SENTRY_AUTH_TOKEN'],
-    ['grafana', 'readonly', 'mcp-grafana', 'https://grafana.example.test', 'GRAFANA_SERVICE_ACCOUNT_TOKEN'],
-    ['terraform', 'hcp-readonly', 'terraform-mcp-server', 'https://tfe.example.test', 'TFE_TOKEN'],
-    ['sentry', 'collaboration', 'sentry-mcp', 'https://sentry.io', 'SENTRY_AUTH_TOKEN'],
-    [
-      'grafana',
-      'collaboration',
-      'mcp-grafana',
-      'https://grafana.example.test',
-      'GRAFANA_SERVICE_ACCOUNT_TOKEN',
-    ],
-    ['terraform', 'hcp-operations', 'terraform-mcp-server', 'https://tfe.example.test', 'TFE_TOKEN'],
+    ['grafana', 'readonly'],
+    ['terraform', 'registry'],
+    ['terraform', 'hcp-readonly'],
+    ['grafana', 'collaboration'],
+    ['terraform', 'hcp-operations'],
   ] as const)(
-    'configures %s disconnected and binds its token to the destination',
-    async (id, profile, executable, instanceUrl, envName) => {
-      h.inputAnswers = [executable, instanceUrl];
+    'configures remote %s/%s disconnected and binds its gateway token to the endpoint',
+    async (id, profile) => {
+      const endpoint = `https://${id}-mcp.example.test/mcp`;
+      h.inputAnswers = [endpoint];
       await mcp.addIntegration(id, profile);
       const config = servers().at(-1)!;
       expect(config).toMatchObject({
         enabled: false,
-        command: executable,
-        managed: { id, profile, executable, instanceUrl },
-        auth: { type: 'env', envName },
+        url: endpoint,
+        managed: { id, profile, version: 'remote-v1', endpoint },
+        auth: { type: 'bearer' },
       });
+      expect(config.command).toBeUndefined();
+      expect(config.env).toBeUndefined();
       h.inputAnswer = 'private-token-fixture';
       await mcp.promptToken(config.id as string);
       expect(mcp.view().servers.at(-1)?.hasToken).toBe(true);
       expect(JSON.stringify(servers())).not.toContain('private-token-fixture');
       expect(JSON.stringify(sidebar)).not.toContain('private-token-fixture');
-      const mutation =
-        id === 'sentry' ? 'add_issue_note' : id === 'grafana' ? 'update_dashboard' : 'create_run';
+      const mutation = id === 'grafana' ? 'update_dashboard' : 'create_run';
       if (profile === 'collaboration' || profile === 'hcp-operations')
         await expect(mcp.setToolPolicy(config.id as string, mutation, 'allow')).rejects.toThrow(
           /requires approval/,
         );
-      config.managed = { ...(config.managed as object), instanceUrl: 'https://elsewhere.example.test' };
+      config.managed = { ...(config.managed as object), endpoint: 'https://elsewhere.example.test/mcp' };
+      config.url = 'https://elsewhere.example.test/mcp';
       for (const listener of h.configListeners) await listener({ affectsConfiguration: () => true });
       expect(mcp.view().servers.at(-1)?.hasToken).toBe(false);
     },
   );
 
-  it('configures public Terraform Registry without token or service URL and cancels incomplete setup', async () => {
-    h.inputAnswer = 'terraform-mcp-server';
-    await mcp.addIntegration('terraform', 'registry');
-    expect(servers().at(-1)).toMatchObject({
-      enabled: false,
-      managed: { id: 'terraform', profile: 'registry' },
-    });
-    expect(servers().at(-1)!.auth).toBeUndefined();
+  it('cancels incomplete endpoint setup and refuses to add retired Sentry', async () => {
     const before = structuredClone(servers());
-    h.inputAnswers = ['sentry-mcp', undefined];
-    await mcp.addIntegration('sentry', 'readonly');
+    h.inputAnswer = undefined;
+    await mcp.addIntegration('terraform', 'registry');
     expect(servers()).toEqual(before);
+    await expect(mcp.addIntegration('sentry', 'readonly')).rejects.toThrow(/removed/);
   });
 
   it('configures external OpenSearch without a cluster credential and scopes its optional proxy token', async () => {

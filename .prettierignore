@@ -4,3 +4,7 @@ node_modules
 .vscode-test
 *.vsix
 package-lock.json
+
+# Generated legal files use deterministic generator formatting.
+THIRD_PARTY_NOTICES.md
+MCP_THIRD_PARTY_NOTICES.md

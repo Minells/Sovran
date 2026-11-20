@@ -17,7 +17,8 @@
 | `npm test` | Vitest: core unit tests, provider integration tests, webview component tests |
 | `npm run test:coverage` | The same tests with coverage (core target ≥ 85 % lines) |
 | `npm run test:extension` | Smoke tests in a real VS Code instance (`@vscode/test-electron`; needs network to download VS Code) |
-| `npm run check` | typecheck + lint + test (the CI gate) |
+| `npm run check` | MCP license inventory + typecheck + lint + test (the CI gate) |
+| `npm run notices:mcp` / `npm run check:licenses` | Generate/verify optional MCP lock inventory; actual downloaded notices are collected on installation |
 | `npm run package` | Build a VSIX with `vsce` |
 
 Press **F5** in VS Code ("Run SOVRAN") to build and launch an Extension Development Host.
@@ -131,3 +132,5 @@ also set `SOVRAN_TEST_UPGRADE_VSIX=/absolute/path/to/previous.vsix`: the previou
 custom/managed entries and native overrides, then the replacement activates and checks their preservation before
 running the full smoke suite. Installed artifacts run in VS Code Test mode to confine config.yaml to the test profile.
 No developer profile is modified. PAT/browser authentication and real Secret Storage migration remain manual gates.
+
+Bundled dependency notices are regenerated with `node scripts/third-party-notices.mjs` after production dependency changes. The generator retains separate LICENSE, COPYING, NOTICE and supplied third-party notices. Review license changes rather than treating generated metadata as legal approval.

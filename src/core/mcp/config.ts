@@ -8,7 +8,8 @@
 import { z } from 'zod';
 import {
   integration,
-  INTEGRATION_IDS,
+  MANAGED_INTEGRATION_IDS,
+  integrationMigrationProblem,
   INTEGRATION_PROFILES,
   integrationToolRequiresApproval,
   type ManagedIntegration,
@@ -111,7 +112,7 @@ export const mcpServerEntrySchema = z
     disabledTools: toolNames.optional(),
     managed: z
       .object({
-        id: z.enum(INTEGRATION_IDS),
+        id: z.enum(MANAGED_INTEGRATION_IDS),
         profile: z.enum(INTEGRATION_PROFILES),
         version: z.string().min(1).max(40),
         browserProfile: z
@@ -136,7 +137,7 @@ export function fromEntry(e: McpServerEntry): McpServerConfig {
     id: e.id,
     ...(e.managed ? { managed: e.managed } : {}),
     name: e.name ?? e.id,
-    enabled: e.enabled ?? true,
+    enabled: integrationMigrationProblem(e.managed) ? false : (e.enabled ?? true),
     ...(e.command ? { command: e.command } : {}),
     ...(e.args?.length ? { args: e.args } : {}),
     ...(e.env && Object.keys(e.env).length ? { env: e.env } : {}),

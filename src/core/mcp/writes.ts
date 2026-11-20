@@ -1,7 +1,6 @@
 /** Reviewed mutation contracts for the optional service integrations. No transport or credentials here. */
 import type { IntegrationId, IntegrationProfile, ManagedIntegration } from './catalog';
 
-export const SENTRY_WRITE_TOOLS = ['update_issue', 'add_issue_note'] as const;
 export const GRAFANA_WRITE_TOOLS = [
   'update_dashboard',
   'create_annotation',
@@ -17,7 +16,6 @@ export const TERRAFORM_WRITE_TOOLS = [
 export const OPENSEARCH_WRITE_TOOLS = ['GenericOpenSearchApiTool'] as const;
 
 export function integrationWriteTools(id: IntegrationId, profile: IntegrationProfile): readonly string[] {
-  if (id === 'sentry' && profile === 'collaboration') return SENTRY_WRITE_TOOLS;
   if (id === 'grafana' && profile === 'collaboration') return GRAFANA_WRITE_TOOLS;
   if (id === 'terraform' && profile === 'hcp-operations') return TERRAFORM_WRITE_TOOLS;
   if (id === 'opensearch' && profile === 'operations') return OPENSEARCH_WRITE_TOOLS;
@@ -45,9 +43,6 @@ export function reviewedWriteApprovalArguments(
     'workspace_name',
     'run_type',
     'auto_apply',
-    'organizationSlug',
-    'issueId',
-    'issueUrl',
     'uid',
     'id',
     'dashboardUid',

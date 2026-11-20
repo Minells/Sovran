@@ -17,7 +17,7 @@ import {
   integrationToolRequiresApproval,
   normalizeGitLabInstance,
   normalizeIntegrationUrl,
-  validIntegrationExecutable,
+  integrationMigrationProblem,
   type ManagedIntegration,
   type IntegrationId,
   type IntegrationProfile,
@@ -34,6 +34,7 @@ import {
   type McpServerConfig,
   type McpToolPolicy,
 } from '../core/mcp/config';
+import { integrationLegalSummary, MCP_DATA_DISCLOSURE } from '../core/mcp/legal';
 import { McpHub, type McpServerState, type McpTransportFactory } from '../core/mcp/hub';
 import { normalizeApiKey } from '../core/providers/connection';
 import { redact } from '../core/security/redact';
@@ -43,7 +44,7 @@ import { NodeMcpTransports } from './adapters/McpTransports';
 import { readMcpServers, writeMcpServers } from './config';
 import type { HostLogger, McpSecrets } from './services';
 
-/** Bind managed GitLab credentials to both the connection and its approved destination. */
+/** Bind managed credentials to their approved destination and connection. */
 function credentialKey(server: McpServerConfig): string {
   if (server.managed && ['sentry', 'grafana', 'terraform', 'opensearch'].includes(server.managed.id)) {
     const destination = createHash('sha256').update(connectionKey(server)).digest('hex');
@@ -145,7 +146,12 @@ export class McpHost implements vscode.Disposable {
     const tokens = await Promise.all(
       servers.map(
         async (s) =>
-          [s.id, s.auth.type === 'none' ? undefined : await this.deps.secrets.get(credentialKey(s))] as const,
+          [
+            s.id,
+            s.auth.type === 'none' || integrationMigrationProblem(s.managed)
+              ? undefined
+              : await this.deps.secrets.get(credentialKey(s)),
+          ] as const,
       ),
     );
     this.servers = servers;
@@ -191,6 +197,7 @@ export class McpHost implements vscode.Disposable {
   }
 
   private serverView({ config: c, status, error, server, tools }: McpServerState): McpServerView {
+    const migration = integrationMigrationProblem(c.managed);
     const offered = tools.filter((t) => t.policy !== 'off');
     return {
       id: c.id,
@@ -208,8 +215,8 @@ export class McpHost implements vscode.Disposable {
       hasToken: this.tokens.has(c.id),
       insecure: !!c.url && sendsKeyInsecurely(c.url, c.auth.type === 'env' ? 'none' : c.auth.type),
       timeoutSeconds: c.timeoutSeconds,
-      status,
-      ...(error ? { error } : {}),
+      status: migration ? 'error' : status,
+      ...(migration || error ? { error: migration ?? error } : {}),
       ...(server ? { server } : {}),
       tools: tools.map((t) => ({
         name: t.name,
@@ -359,6 +366,8 @@ export class McpHost implements vscode.Disposable {
     if (!selected || selected.enabled === enabled) return;
     if (enabled) {
       this.requireTrust();
+      const migration = integrationMigrationProblem(selected.managed);
+      if (migration) throw new Error(migration);
       if (requiresToken(selected) && !this.tokens.has(id))
         throw new Error('Set the server token before connecting.');
       if ((selected.managed || selected.command) && !(await this.confirmConnection(selected))) return;
@@ -385,11 +394,11 @@ export class McpHost implements vscode.Disposable {
       ? [
           item.remote
             ? `Connects to ${integrationEndpoint(managed)}.`
-            : item.external
-              ? `Runs ${managed.executable} (${item.name} ${item.version}) on ${host}.${managed.instanceUrl ? ` Service: ${managed.instanceUrl}.` : ''}`
-              : `Runs ${item.package}@${item.version} on ${host}.`,
+            : `Runs ${item.package}@${item.version} on ${host}.`,
           item.id === 'context7' ? undefined : `${integrationProfileLabel(item.id, managed.profile)}.`,
           item.security,
+          integrationLegalSummary(item.id),
+          MCP_DATA_DISCLOSURE,
           managed.profile === 'extension'
             ? `Chrome profile ${managed.browserProfile} uses the Playwright companion extension. Approved tabs can expose signed-in accounts.`
             : undefined,
@@ -449,6 +458,8 @@ export class McpHost implements vscode.Disposable {
   }
 
   async restart(id: string): Promise<void> {
+    const migration = integrationMigrationProblem(this.servers.find((s) => s.id === id)?.managed);
+    if (migration) throw new Error(migration);
     await this.hub.restart(id);
   }
 
@@ -456,6 +467,8 @@ export class McpHost implements vscode.Disposable {
   async promptToken(id: string): Promise<void> {
     const server = this.servers.find((s) => s.id === id);
     if (!server || server.auth.type === 'none') return;
+    const migration = integrationMigrationProblem(server.managed);
+    if (migration) throw new Error(migration);
     const where =
       server.auth.type === 'bearer'
         ? 'Sent as "Authorization: Bearer <token>". Paste the token only.'
@@ -464,7 +477,7 @@ export class McpHost implements vscode.Disposable {
           : `Given to the server as the ${server.auth.envName} environment variable.`;
     const value = await vscode.window.showInputBox({
       title: `Token for ${server.name}`,
-      prompt: `${where} Stored in VS Code Secret Storage, never in settings. Leave empty and press Enter to remove it.`,
+      prompt: `${server.managed && ['grafana', 'terraform'].includes(server.managed.id) ? 'Use the MCP caller/gateway token, not the Grafana/TFE product API token. ' : ''}${where} Stored in VS Code Secret Storage, never in settings. Leave empty and press Enter to remove it.`,
       password: true,
       ignoreFocusOut: true,
     });
@@ -509,6 +522,7 @@ export class McpHost implements vscode.Disposable {
 
   async addIntegration(id: IntegrationId, profile: IntegrationProfile): Promise<void> {
     const item = integration(id);
+    if (id === 'sentry') throw new Error(item.requirements);
     const managed: ManagedIntegration = { id, profile, version: item.version };
     if (!item.profiles.includes(profile)) throw new Error('This integration profile is unavailable.');
     if (item.remote?.configurableInstance) {
@@ -530,37 +544,12 @@ export class McpHost implements vscode.Disposable {
     }
     if (item.remote?.configurableEndpoint) {
       const endpoint = await this.promptIntegrationUrl(
-        'OpenSearch MCP endpoint',
-        'Enter the full Streamable HTTP endpoint (usually /mcp), not the OpenSearch REST API URL.',
-        'http://localhost:8000/mcp',
+        `${item.name} endpoint`,
+        'Enter the full Streamable HTTP MCP endpoint provided by your administrator, not the product website or REST API URL. Use the MCP gateway token, not a product API token.',
+        '',
       );
       if (endpoint === undefined) return;
       managed.endpoint = endpoint;
-    }
-    if (item.external) {
-      const executable = await vscode.window.showInputBox({
-        title: `${item.name} executable`,
-        prompt: `Install version ${item.version} separately on ${this.deps.managed?.host ?? 'the extension host'}. Enter its executable name or full path, without arguments.`,
-        value: item.external.command,
-        ignoreFocusOut: true,
-        validateInput: (value) =>
-          validIntegrationExecutable(value)
-            ? undefined
-            : 'Enter an executable name or full path, without arguments or variables.',
-      });
-      if (executable === undefined) return;
-      managed.executable = executable;
-      if (item.external.instance && (id !== 'terraform' || profile !== 'registry')) {
-        const instance = item.external.instance;
-        const value = await this.promptIntegrationUrl(
-          instance.label,
-          'Enter the service URL. This is not an MCP endpoint. HTTP is supported only on localhost.',
-          instance.defaultUrl,
-          id === 'sentry',
-        );
-        if (value === undefined) return;
-        managed.instanceUrl = value;
-      }
     }
     if (profile === 'extension') {
       if (this.deps.managed?.remote)
@@ -631,7 +620,7 @@ export class McpHost implements vscode.Disposable {
       `Install ${item.name} dependencies?`,
       {
         modal: true,
-        detail: `Downloads ${item.package}@${item.version} and its locked dependencies from npm to extension storage on ${this.deps.managed?.host}. npm install scripts are disabled. No browser is downloaded and nothing connects.`,
+        detail: `Downloads ${item.package}@${item.version} and its locked dependencies from npm to extension storage on ${this.deps.managed?.host}. npm install scripts are disabled. No browser is downloaded and nothing connects.\n\n${integrationLegalSummary(id)}\n\nLicense/NOTICE files are preserved. A package inventory and legal notices are saved with the installation.`,
       },
       'Install',
     );

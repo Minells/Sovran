@@ -145,6 +145,26 @@ describe('Streamable HTTP transport', { timeout: 30_000 }, () => {
         };
       },
     );
+    for (const name of [
+      'query_loki_logs',
+      'get_workspace_details',
+      'update_dashboard',
+      'create_annotation',
+      'update_annotation',
+      'delete_annotation',
+      'create_workspace',
+      'update_workspace',
+      'create_run',
+      'action_run',
+    ])
+      s.registerTool(
+        name,
+        { inputSchema: z.object({}).passthrough(), annotations: { readOnlyHint: true } },
+        async (args) => {
+          mutations.push(args);
+          return { content: [{ type: 'text', text: 'remote operation completed' }] };
+        },
+      );
     return s;
   });
 
@@ -203,6 +223,62 @@ describe('Streamable HTTP transport', { timeout: 30_000 }, () => {
     });
     expect(seen.at(-1)).toMatchObject({ authorization: 'Bearer web-token-987654', 'x-team': 'core' });
   });
+
+  it.each([
+    {
+      id: 'grafana' as const,
+      profile: 'collaboration' as const,
+      tool: 'create_annotation',
+      args: { text: 'Release' },
+    },
+    {
+      id: 'terraform' as const,
+      profile: 'hcp-operations' as const,
+      tool: 'create_run',
+      args: { terraform_org_name: 'acme', workspace_name: 'test', run_type: 'plan_only' },
+    },
+  ])(
+    'validates and dispatches managed $id writes over HTTP with gateway auth and no local runtime',
+    async ({ id, profile, tool, args }) => {
+      const managed = { id, profile, version: 'remote-v1', endpoint: `${base}/mcp` };
+      const packages = new ManagedMcpPackages({
+        resources: '',
+        storage: '',
+        roots: () => [],
+        authorize() {},
+        changed() {},
+      });
+      const h = (hub = new McpHub({
+        transports: new NodeMcpTransports({
+          managedLaunch: (s) => packages.launch(s),
+          variables: () => ({ userHome: os.tmpdir(), env: {} }),
+          token: async () => 'gateway-token',
+        }),
+        logger: nullLogger,
+        client: { name: 'sovran', version: '0' },
+      }));
+      h.update([fromEntry({ id, managed, ...integrationConnection(managed), allowedTools: [tool] })], true);
+      await until(() => h.states()[0]?.status !== 'starting', 10_000);
+      expect(h.states()[0]?.error).toBeUndefined();
+      expect(h.states()[0]?.tools.find((t) => t.name === tool)).toMatchObject({
+        policy: 'ask',
+        requiresApproval: true,
+      });
+      expect(await h.callTool(id, tool, args, signal())).toMatchObject({
+        content: 'remote operation completed',
+      });
+      expect(seen.at(-1)?.authorization).toBe('Bearer gateway-token');
+      const count = seen.length;
+      await expect(
+        h.callTool(id, id === 'grafana' ? 'create_run' : 'create_annotation', {}, signal()),
+      ).rejects.toThrow(/no longer offered/);
+      if (id === 'terraform')
+        await expect(h.callTool(id, tool, { ...args, run_type: 'destroy' }, signal())).rejects.toThrow(
+          /run_type/,
+        );
+      expect(seen).toHaveLength(count);
+    },
+  );
 
   it.each([undefined, 'opensearch-proxy-fixture'])(
     'validates and connects an external OpenSearch endpoint (%s)',
