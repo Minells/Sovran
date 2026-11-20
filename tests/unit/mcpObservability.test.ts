@@ -13,16 +13,10 @@ import {
   normalizeIntegrationUrl,
   type ManagedIntegration,
 } from '../../src/core/mcp/catalog';
-import {
-  fromEntry,
-  parseMcpServers,
-  requiresToken,
-  toEntry,
-  type McpServerConfig,
-} from '../../src/core/mcp/config';
+import { fromEntry, parseMcpServers, requiresToken, toEntry } from '../../src/core/mcp/config';
 import { McpHub } from '../../src/core/mcp/hub';
 import { resolveLaunch } from '../../src/core/mcp/launch';
-import { nullLogger, type FileProcessResult } from '../../src/core/ports';
+import { nullLogger } from '../../src/core/ports';
 import { ManagedMcpPackages } from '../../src/extension/adapters/ManagedMcpPackages';
 import { NodeMcpTransports } from '../../src/extension/adapters/McpTransports';
 import { MemoryTransports, until } from '../fixtures/mcp';
@@ -36,26 +30,22 @@ afterEach(async () => {
 });
 const configs: ManagedIntegration[] = [
   {
-    id: 'sentry',
-    profile: 'readonly',
-    version: '0.49.0',
-    executable: 'sentry-mcp',
-    instanceUrl: 'https://sentry.io',
-  },
-  {
     id: 'grafana',
     profile: 'readonly',
-    version: '2.3.0',
-    executable: 'mcp-grafana',
-    instanceUrl: 'http://localhost:3000',
+    version: 'remote-v1',
+    endpoint: 'https://grafana-mcp.example.test/mcp',
   },
-  { id: 'terraform', profile: 'registry', version: '1.4.1', executable: 'terraform-mcp-server' },
+  {
+    id: 'terraform',
+    profile: 'registry',
+    version: 'remote-v1',
+    endpoint: 'https://terraform-mcp.example.test/mcp',
+  },
   {
     id: 'terraform',
     profile: 'hcp-readonly',
-    version: '1.4.1',
-    executable: 'terraform-mcp-server',
-    instanceUrl: 'https://tfe.example.test',
+    version: 'remote-v1',
+    endpoint: 'https://terraform-mcp.example.test/mcp',
   },
   {
     id: 'opensearch',
@@ -71,14 +61,14 @@ describe('observability and Terraform catalog connections', () => {
   it.each(configs)('round trips $id/$profile and puts credentials only in the launch', (managed) => {
     const config = configured(managed);
     expect(parseMcpServers([toEntry(config)]).servers).toEqual([config]);
-    expect(requiresToken(config)).toBe(managed.id !== 'opensearch' && managed.profile !== 'registry');
+    expect(requiresToken(config)).toBe(managed.id !== 'opensearch');
     const launch = resolveLaunch(config, { userHome: '/user', env: {} }, 'secret-fixture');
     expect(JSON.stringify(config)).not.toContain('secret-fixture');
     if (launch.kind === 'stdio') {
       expect(launch.args.join(' ')).not.toContain('secret-fixture');
       if (config.auth.type === 'env') expect(launch.env[config.auth.envName]).toBe('secret-fixture');
     } else expect(launch.headers.Authorization).toBe('Bearer secret-fixture');
-    expect(() => integrationArguments({ ...managed, version: 'old-version' })).toThrow(/version/);
+    expect(() => integrationArguments({ ...managed, version: 'old-version' })).toThrow(/version|remote/);
     expect(integrationToolAllowed({ ...managed, profile: 'developer' }, 'read_anything')).toBe(false);
   });
 
@@ -98,14 +88,12 @@ describe('observability and Terraform catalog connections', () => {
       'https://mcp.example.test:8443/prefix/mcp',
     );
     expect(normalizeIntegrationUrl('http://[::1]:8000/mcp')).toBe('http://[::1]:8000/mcp');
-    expect(() => normalizeIntegrationUrl('https://sentry.example.test/path', true)).toThrow(/origin/);
-    expect(() => integrationArguments({ ...configs[2]!, instanceUrl: 'https://tfe.test' })).toThrow(
-      /Registry/,
-    );
+    expect(() => normalizeIntegrationUrl('https://service.example.test/path', true)).toThrow(/origin/);
+    expect(() => integrationArguments({ ...configs[1]!, instanceUrl: 'https://tfe.test' })).toThrow(/remote/);
   });
 
   it('rejects every OpenSearch connection override even when null or hidden from the upstream schema', () => {
-    const managed = configs[4]!;
+    const managed = configs[3]!;
     for (const key of [
       'opensearch_url',
       'opensearch_username',
@@ -132,130 +120,98 @@ describe('observability and Terraform catalog connections', () => {
   });
 });
 
-async function fixture(managed: ManagedIntegration) {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sovran-preinstalled-'));
+async function fixture() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'sovran-remote-'));
   dirs.push(dir);
-  const executable = path.join(dir, process.platform === 'win32' ? 'server.exe' : 'server');
-  await fs.writeFile(executable, 'fixture', { mode: 0o755 });
-  let stdout =
-    managed.id === 'terraform'
-      ? `Terraform MCP Server\nVersion: ${managed.version}\n`
-      : `${managed.version}\n`;
-  let roots: string[] = [];
-  const run = vi.fn<typeof runFileProcess>(async (_exe, _args, options): Promise<FileProcessResult> => {
-    options.beforeSpawn?.();
-    return {
-      stdout,
-      stderr: '',
-      output: stdout,
-      exitCode: 0,
-      signal: null,
-      durationMs: 1,
-      timedOut: false,
-      cancelled: false,
-      truncated: false,
-    };
-  });
+  const run = vi.fn<typeof runFileProcess>();
   const browser = vi.fn(async () => undefined);
   const manager = new ManagedMcpPackages({
-    resources: path.resolve('resources/mcp'),
+    resources: path.join(dir, 'no-resources'),
     storage: path.join(dir, 'storage'),
-    roots: () => roots,
+    roots: () => [],
     authorize() {},
     changed() {},
     browser,
     run,
   });
-  return {
-    dir,
-    manager,
-    run,
-    browser,
-    config: configured({ ...managed, executable }),
-    setVersion: (value: string) => {
-      stdout = value;
-    },
-    setRoots: (value: string[]) => {
-      roots = value;
-    },
-  };
+  return { dir, manager, run, browser };
 }
 
-describe('preinstalled launch validation', () => {
-  it.each(configs.slice(0, 4))(
-    'launches $id/$profile without npm, Chrome or credentials in version checks',
+describe('remote managed launch validation', () => {
+  it.each(configs)(
+    'validates $id/$profile without resources, npm, browser or executable checks',
     async (managed) => {
-      const f = await fixture(managed);
-      const launch = await f.manager.launch(f.config);
-      expect(launch.cwd).toBe(path.join(f.dir, 'storage'));
-      expect(launch.args).toEqual(f.config.args);
-      expect(f.run).toHaveBeenCalledTimes(1);
-      expect(f.run.mock.calls[0]![1]).toEqual(['--version']);
-      expect(f.run.mock.calls[0]![2].env).toEqual(f.config.env);
+      const f = await fixture();
+      const config = configured(managed);
+      expect(await f.manager.launch(config)).toBe(config);
+      expect(f.manager.states()).toContainEqual({ id: managed.id, status: 'remote' });
+      expect(f.run).not.toHaveBeenCalled();
       expect(f.browser).not.toHaveBeenCalled();
-      expect(f.manager.states()).toContainEqual({ id: managed.id, status: 'external' });
     },
   );
 
-  it('rejects wrong versions, missing executables and executables inside workspace roots', async () => {
-    const f = await fixture(configs[1]!);
-    f.setVersion('2.3.1');
-    await expect(f.manager.launch(f.config)).rejects.toThrow(/reviewed version 2.3.0/);
-    f.run.mockClear();
-    f.setRoots([f.dir]);
-    await expect(f.manager.launch(f.config)).rejects.toThrow(/outside the workspace/);
-    expect(f.run).not.toHaveBeenCalled();
-    f.setRoots([]);
-    await fs.unlink(f.config.command!);
-    await expect(f.manager.launch(f.config)).rejects.toThrow(/not found/);
-  });
-
-  it('rejects changed arguments, environment, auth and destination before reading any token', async () => {
-    const f = await fixture(configs[0]!);
-    const token = vi.fn(async () => 'should-not-be-read');
+  it.each(configs)('rejects modified $id settings before retrieving a credential', async (managed) => {
+    const f = await fixture();
+    const config = configured(managed);
+    const token = vi.fn(async () => 'must-not-be-read');
     const transport = new NodeMcpTransports({
       managedLaunch: (s) => f.manager.launch(s),
       variables: () => ({ userHome: f.dir, env: {} }),
       token,
     });
     for (const edit of [
-      { args: ['--all-skills'] },
-      { env: { SENTRY_HOST: 'https://evil.test' } },
+      { args: ['--all-tools'] },
+      { env: { TFE_TOKEN: 'secret' } },
       { auth: { type: 'env', envName: 'EVIL' } as const },
+      { auth: { type: 'none' } as const },
       { command: '/evil' },
       { cwd: '/workspace' },
+      { url: 'https://evil.test/mcp' },
+      { headers: { Authorization: 'secret' } },
     ])
-      await expect(transport.create({ ...f.config, ...edit }, () => {})).rejects.toThrow(
-        /configuration changed/,
-      );
+      await expect(transport.create({ ...config, ...edit }, () => {})).rejects.toThrow(/endpoint|filters/);
     expect(token).not.toHaveBeenCalled();
     expect(f.run).not.toHaveBeenCalled();
   });
 
-  it('looks up the credential against persisted settings after resolving the runtime launch', async () => {
-    const f = await fixture(configs[0]!);
-    const token = vi.fn(async (_server: McpServerConfig) => 'bound-secret-fixture');
-    const transports = new NodeMcpTransports({
+  it('preserves legacy settings, disables them, and refuses their launch before reading a token', async () => {
+    const f = await fixture();
+    const token = vi.fn(async () => 'old-service-token');
+    const transport = new NodeMcpTransports({
       managedLaunch: (s) => f.manager.launch(s),
       variables: () => ({ userHome: f.dir, env: {} }),
       token,
     });
-    const transport = await transports.create(f.config, () => {});
-    expect(token).toHaveBeenCalledExactlyOnceWith(f.config);
-    expect(token.mock.calls[0]?.[0].cwd).toBeUndefined();
-    await transport.close();
-  });
-
-  it('validates external OpenSearch endpoint and headers without any local runtime', async () => {
-    const f = await fixture(configs[0]!);
-    const config = configured(configs[4]!);
-    expect(await f.manager.launch(config)).toBe(config);
-    await expect(f.manager.launch({ ...config, url: 'https://evil.test/mcp' })).rejects.toThrow(/endpoint/);
-    await expect(f.manager.launch({ ...config, headers: { Authorization: 'secret' } })).rejects.toThrow(
-      /filters/,
-    );
+    for (const [id, version] of [
+      ['sentry', '0.49.0'],
+      ['grafana', '2.3.0'],
+      ['terraform', '1.4.1'],
+    ] as const) {
+      const entry = {
+        id,
+        enabled: true,
+        command: `${id}-old`,
+        managed: {
+          id,
+          version,
+          profile: 'readonly' as const,
+          executable: `${id}-old`,
+          instanceUrl: 'https://old.test',
+        },
+        auth: { type: 'env' as const, envName: 'OLD_TOKEN' },
+      };
+      const { servers, problems } = parseMcpServers([entry]);
+      expect(problems).toEqual([]);
+      const config = servers[0]!;
+      expect(config.enabled).toBe(false);
+      expect(toEntry(config)).toMatchObject({ ...entry, enabled: false });
+      await expect(transport.create({ ...config, enabled: true }, () => {})).rejects.toThrow(
+        /removed|remote/,
+      );
+      expect(integrationToolAllowed(config.managed, 'anything')).toBe(false);
+    }
+    expect(token).not.toHaveBeenCalled();
     expect(f.run).not.toHaveBeenCalled();
-    expect(f.browser).not.toHaveBeenCalled();
   });
 });
 
@@ -270,17 +226,16 @@ describe('reviewed tools across discovery and dispatch', () => {
     });
     const hub = new McpHub({ transports, logger: nullLogger, client: { name: 'sovran', version: '0' } });
     hubs.push(hub);
-    hub.update([configured(configs[3]!)], true);
+    hub.update([configured(configs[2]!)], true);
     await until(() => hub.states()[0]?.status === 'error');
     expect(hub.states()[0]?.error).toMatch(/HCP\/TFE read tools are unavailable/);
     expect(hub.tools()).toEqual([]);
   });
   it.each([
-    [configs[0]!, 'get_issue_details', 'execute_sentry_tool'],
-    [configs[1]!, 'query_loki_logs', 'grafana_api_request'],
-    [configs[2]!, 'search_modules', 'get_workspace_details'],
-    [configs[3]!, 'get_workspace_details', 'create_run'],
-    [configs[4]!, 'SearchIndexTool', 'GenericOpenSearchApiTool'],
+    [configs[0]!, 'query_loki_logs', 'grafana_api_request'],
+    [configs[1]!, 'search_modules', 'get_workspace_details'],
+    [configs[2]!, 'get_workspace_details', 'create_run'],
+    [configs[3]!, 'SearchIndexTool', 'GenericOpenSearchApiTool'],
   ] as const)(
     'filters $0.id tools through changes, reconnect and direct calls',
     async (managed, allowed, forbidden) => {

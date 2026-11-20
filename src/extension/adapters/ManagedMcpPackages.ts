@@ -1,3 +1,4 @@
+import { writeMcpPackageNotices } from './McpPackageNotices';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -16,7 +17,6 @@ import type { McpServerConfig } from '../../core/mcp/config';
 import { isInside } from '../../core/security/paths';
 import { MCP_INHERITED_ENV } from '../../core/mcp/launch';
 import { runFileProcess } from './processExecution';
-import { launchPreinstalledIntegration } from './PreinstalledMcp';
 
 interface Installed {
   digest: string;
@@ -44,7 +44,7 @@ export class ManagedMcpPackages {
       (item) =>
         this.state.get(item.id) ?? {
           id: item.id,
-          status: item.package ? 'missing' : item.external ? 'external' : 'remote',
+          status: item.package ? 'missing' : 'remote',
         },
     );
   }
@@ -204,6 +204,9 @@ export class ManagedMcpPackages {
         );
       this.options.authorize();
       combined.throwIfAborted();
+      await writeMcpPackageNotices(staging, manifest.lock);
+      this.options.authorize();
+      combined.throwIfAborted();
       await fs.writeFile(
         path.join(staging, 'ready.json'),
         JSON.stringify({ digest: manifest.digest, node, nodeVersion } satisfies Installed),
@@ -230,7 +233,6 @@ export class ManagedMcpPackages {
     const args = integrationArguments(managed);
     this.options.authorize();
     const item = integration(managed.id);
-    if (item.external) return launchPreinstalledIntegration(server, this.options);
     if (item.remote) {
       const expected = integrationConnection(managed);
       const headers = item.remote.headers?.(managed.profile) ?? {};

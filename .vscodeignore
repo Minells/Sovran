@@ -14,5 +14,6 @@
 !LICENSE
 !SECURITY.md
 !THIRD_PARTY_NOTICES.md
+!MCP_THIRD_PARTY_NOTICES.md
 !resources/mcp/**/package.json
 !resources/mcp/**/package-lock.json

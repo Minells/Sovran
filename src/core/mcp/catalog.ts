@@ -1,10 +1,6 @@
 /** Reviewed optional integrations. This metadata never starts or installs a server. */
 import type { McpAuth } from './rules';
-import {
-  integrationWriteTools,
-  integrationWriteProblem,
-  reviewedWriteDescription,
-} from './writes';
+import { integrationWriteTools, integrationWriteProblem, reviewedWriteDescription } from './writes';
 
 export const INTEGRATION_IDS = [
   'playwright',
@@ -12,12 +8,13 @@ export const INTEGRATION_IDS = [
   'github',
   'context7',
   'gitlab',
-  'sentry',
   'grafana',
   'terraform',
   'opensearch',
 ] as const;
-export type IntegrationId = (typeof INTEGRATION_IDS)[number];
+/** Retired IDs are accepted only to preserve and disable old user settings. */
+export const MANAGED_INTEGRATION_IDS = [...INTEGRATION_IDS, 'sentry'] as const;
+export type IntegrationId = (typeof MANAGED_INTEGRATION_IDS)[number];
 export const INTEGRATION_PROFILES = [
   'isolated',
   'extension',
@@ -36,7 +33,7 @@ export interface ManagedIntegration {
   version: string;
   browserProfile?: string;
   instanceUrl?: string;
-  /** User-installed executable on the extension host. Never a shell command line. */
+  /** Legacy local configuration only; never executed by current catalog entries. */
   executable?: string;
   /** External MCP endpoint, distinct from the service's API URL. */
   endpoint?: string;
@@ -51,10 +48,6 @@ export interface IntegrationDefinition {
   entry?: string;
   documentation: string;
   requirements: string;
-  external?: {
-    command: string;
-    instance?: { label: string; defaultUrl: string };
-  };
   remote?: {
     url: string;
     configurableInstance?: boolean;
@@ -143,38 +136,17 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     profiles: ['isolated'],
   },
   {
-    id: 'sentry',
-    name: 'Sentry MCP',
-    description: 'Investigate Sentry issues and optionally update their status, assignment and notes.',
-    icon: 'bug',
-    version: '0.49.0',
-    documentation: 'https://github.com/getsentry/toolkit/blob/cli%400.49.0/packages/mcp-server/README.md',
-    requirements:
-      'Install @sentry/mcp-server 0.49.0 separately on the extension host with Node.js 22.15+. Supply a Sentry API token; collaboration also requires event:write.',
-    external: {
-      command: 'sentry-mcp',
-      instance: { label: 'Sentry instance URL', defaultUrl: 'https://sentry.io' },
-    },
-    security:
-      'Read-only by default. Collaboration adds approved issue updates and notes. Telemetry is disabled; hosted OAuth and AI-powered searches are not included.',
-    defaultProfile: 'readonly',
-    profiles: ['readonly', 'collaboration'],
-  },
-  {
     id: 'grafana',
     name: 'Grafana MCP',
     description: 'Query metrics and logs, and optionally create or update dashboards and annotations.',
     icon: 'dashboard',
-    version: '2.3.0',
+    version: 'remote-v1',
     documentation: 'https://github.com/grafana/mcp-grafana/tree/v2.3.0',
     requirements:
-      'Install mcp-grafana 2.3.0 separately on the extension host. Requires Grafana 9+ and a service account token; collaboration needs dashboard and annotation write permissions.',
-    external: {
-      command: 'mcp-grafana',
-      instance: { label: 'Grafana instance URL', defaultUrl: 'http://localhost:3000' },
-    },
+      'An operator-managed Streamable HTTP MCP endpoint, compatible with mcp-grafana 2.3.0. Configure Grafana URL and service account permissions on that server. No local installation.',
+    remote: { url: '', configurableEndpoint: true, token: 'required' },
     security:
-      'Read-only by default; collaboration enables selected writes with approval each time. Usage statistics remain disabled. Queries use your service account permissions.',
+      'Use an MCP caller bearer token, not the Grafana service account token. The operator controls Grafana credentials, TLS and telemetry. Writes require approval; forced dashboard overwrite is blocked.',
     defaultProfile: 'readonly',
     profiles: ['readonly', 'collaboration'],
   },
@@ -184,16 +156,13 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     description:
       'Look up Registry documentation, inspect HCP/TFE workspaces and optionally manage workspaces and runs.',
     icon: 'server-environment',
-    version: '1.4.1',
+    version: 'remote-v1',
     documentation: 'https://github.com/hashicorp/terraform-mcp-server/tree/v1.4.1',
     requirements:
-      'Install terraform-mcp-server 1.4.1 separately on the extension host. Public Registry needs no token. HCP/TFE profiles require an API token with the chosen operation permissions.',
-    external: {
-      command: 'terraform-mcp-server',
-      instance: { label: 'HCP Terraform / Terraform Enterprise URL', defaultUrl: 'https://app.terraform.io' },
-    },
+      'An operator-managed Streamable HTTP MCP endpoint, compatible with terraform-mcp-server 1.4.1, behind an authenticating gateway. For HCP/TFE, the gateway must authenticate callers and replace Authorization with a scoped TFE token. No local installation.',
+    remote: { url: '', configurableEndpoint: true, token: 'required' },
     security:
-      'Operations allow approved workspace changes, plan runs and apply/cancel/discard of one run. Automatic apply and creation of destroy runs are excluded. Review the run plan before applying.',
+      'Use the MCP gateway bearer token, not the TFE API token. Registry access still requires gateway authentication. The operator controls service credentials and telemetry. Workspace/run writes require approval; automatic apply and destroy-run creation are blocked.',
     defaultProfile: 'registry',
     profiles: ['registry', 'hcp-readonly', 'hcp-operations'],
   },
@@ -215,9 +184,33 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     profiles: ['readonly', 'operations'],
   },
 ];
+// A tombstone is never offered in the catalog or allowed to connect.
+const RETIRED_SENTRY: IntegrationDefinition = {
+  id: 'sentry',
+  name: 'Sentry MCP (removed)',
+  description: 'Removed from the catalog.',
+  icon: 'bug',
+  version: 'retired',
+  documentation: 'https://mcp.sentry.dev/',
+  requirements: 'Sentry was removed from the catalog. Remove this saved connection.',
+  defaultProfile: 'readonly',
+  profiles: [],
+};
 export function integration(id: IntegrationId): IntegrationDefinition {
-  return INTEGRATIONS.find((item) => item.id === id)!;
+  return id === 'sentry' ? RETIRED_SENTRY : INTEGRATIONS.find((item) => item.id === id)!;
 }
+
+/** Do not reinterpret an old executable or its API credential as an MCP gateway connection. */
+export function integrationMigrationProblem(managed: ManagedIntegration | undefined): string | undefined {
+  if (managed?.id === 'sentry') return RETIRED_SENTRY.requirements;
+  if (
+    managed &&
+    ['grafana', 'terraform'].includes(managed.id) &&
+    (managed.version !== 'remote-v1' || managed.executable !== undefined || managed.instanceUrl !== undefined)
+  )
+    return `${integration(managed.id).name} now requires a remote MCP endpoint. This saved local connection is disabled. Configure a replacement from the catalog with an MCP gateway token; existing service tokens are not transferred.`;
+}
+
 export function supportedNode(id: IntegrationId, version: string): boolean {
   const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version);
   if (!match) return false;
@@ -228,6 +221,8 @@ export function supportedNode(id: IntegrationId, version: string): boolean {
     : major >= 20;
 }
 export function integrationArguments(managed: ManagedIntegration): string[] {
+  const problem = integrationMigrationProblem(managed);
+  if (problem) throw new Error(problem);
   const item = integration(managed.id);
   if (item.version !== managed.version || !item.profiles.includes(managed.profile))
     throw new Error(
@@ -236,40 +231,16 @@ export function integrationArguments(managed: ManagedIntegration): string[] {
   if (managed.id === 'gitlab') {
     if (!managed.instanceUrl || normalizeGitLabInstance(managed.instanceUrl) !== managed.instanceUrl)
       throw new Error('Enter a valid HTTPS GitLab instance URL.');
-  } else if (item.external) {
-    if (!managed.executable || !validIntegrationExecutable(managed.executable))
-      throw new Error('Enter an executable name or full path, without arguments or variables.');
-    const needsInstance = managed.id !== 'terraform' || managed.profile !== 'registry';
-    if (needsInstance) {
-      if (
-        !managed.instanceUrl ||
-        normalizeIntegrationUrl(managed.instanceUrl, managed.id === 'sentry') !== managed.instanceUrl
-      )
-        throw new Error('Enter a valid service instance URL.');
-    } else if (managed.instanceUrl !== undefined)
-      throw new Error('Public Registry does not use a service instance URL.');
   } else if (managed.instanceUrl !== undefined) {
     throw new Error('This integration has a fixed endpoint.');
   }
-  if (!item.external && managed.executable !== undefined)
+  if (managed.executable !== undefined)
     throw new Error('This integration does not use an external executable.');
   if (item.remote?.configurableEndpoint) {
     if (!managed.endpoint || normalizeIntegrationUrl(managed.endpoint) !== managed.endpoint)
       throw new Error('Enter the full Streamable HTTP MCP endpoint URL.');
   } else if (managed.endpoint !== undefined)
     throw new Error('This integration does not use a configurable MCP endpoint.');
-  if (managed.id === 'sentry')
-    return ['mcp', '--skills', managed.profile === 'collaboration' ? 'inspect,triage' : 'inspect'];
-  if (managed.id === 'grafana')
-    return [
-      '-t',
-      'stdio',
-      ...(managed.profile === 'collaboration' ? ['--disable-write=false'] : ['--disable-write']),
-      '--usage-stats=disabled',
-      '--enabled-tools',
-      `datasource,search,dashboard,prometheus,loki${managed.profile === 'collaboration' ? ',annotations' : ''}`,
-    ];
-  if (managed.id === 'terraform') return ['stdio', `--tools=${terraformTools(managed.profile).join(',')}`];
   if (managed.id === 'playwright') {
     if (managed.profile === 'extension' && !/^[a-zA-Z0-9 _-]{1,80}$/.test(managed.browserProfile ?? ''))
       throw new Error('Choose an explicit local Chrome profile before using the browser extension.');
@@ -330,7 +301,8 @@ export function normalizeGitLabInstance(input: string): string {
 
 export function integrationEndpoint(managed: ManagedIntegration): string | undefined {
   if (managed.id === 'gitlab') return `${normalizeGitLabInstance(managed.instanceUrl ?? '')}/api/v4/mcp`;
-  if (managed.id === 'opensearch') return normalizeIntegrationUrl(managed.endpoint ?? '');
+  if (integration(managed.id).remote?.configurableEndpoint)
+    return normalizeIntegrationUrl(managed.endpoint ?? '');
   return integration(managed.id).remote?.url;
 }
 
@@ -361,16 +333,6 @@ export function normalizeIntegrationUrl(input: string, originOnly = false): stri
   }
 }
 
-export function validIntegrationExecutable(value: string): boolean {
-  return (
-    value === value.trim() &&
-    value.length > 0 &&
-    value.length <= 1000 &&
-    !/[\r\n\0${}]/.test(value) &&
-    (/^[a-zA-Z0-9_.-]+$/.test(value) || value.startsWith('/') || /^[a-zA-Z]:[\\/]/.test(value))
-  );
-}
-
 export interface IntegrationConnection {
   command?: string;
   args?: string[];
@@ -382,7 +344,7 @@ export interface IntegrationConnection {
 
 /** Canonical persisted connection. Used by setup and checked again before requesting any secret. */
 export function integrationConnection(managed: ManagedIntegration): IntegrationConnection {
-  const args = integrationArguments(managed);
+  integrationArguments(managed);
   const item = integration(managed.id);
   if (item.remote)
     return {
@@ -390,35 +352,7 @@ export function integrationConnection(managed: ManagedIntegration): IntegrationC
       headers: item.remote.headers?.(managed.profile),
       auth: { type: 'bearer' },
     };
-  switch (managed.id) {
-    case 'sentry':
-      return {
-        command: managed.executable,
-        args,
-        env: { SENTRY_HOST: managed.instanceUrl!, SENTRY_CLI_NO_TELEMETRY: '1', DO_NOT_TRACK: '1' },
-        auth: { type: 'env', envName: 'SENTRY_AUTH_TOKEN' },
-      };
-    case 'grafana':
-      return {
-        command: managed.executable,
-        args,
-        env: { GRAFANA_URL: managed.instanceUrl!, DO_NOT_TRACK: '1' },
-        auth: { type: 'env', envName: 'GRAFANA_SERVICE_ACCOUNT_TOKEN' },
-      };
-    case 'terraform':
-      return {
-        command: managed.executable,
-        args,
-        env: {
-          ...(managed.profile !== 'registry' ? { TFE_ADDRESS: managed.instanceUrl! } : {}),
-          OTEL_METRICS_ENABLED: 'false',
-          ENABLE_TF_OPERATIONS: managed.profile === 'hcp-operations' ? 'true' : 'false',
-        },
-        auth: managed.profile !== 'registry' ? { type: 'env', envName: 'TFE_TOKEN' } : { type: 'none' },
-      };
-    default:
-      return { command: 'node', args: [], auth: { type: 'none' } };
-  }
+  return { command: 'node', args: [], auth: { type: 'none' } };
 }
 
 export function integrationHeaders(profile: IntegrationProfile = 'readonly'): Record<string, string> {
@@ -546,22 +480,6 @@ const DEVTOOLS_TOOLS = [
   'performance_stop_trace',
   'performance_analyze_insight',
 ];
-const SENTRY_READ_TOOLS = [
-  'find_organizations',
-  'find_projects',
-  'find_teams',
-  'find_releases',
-  'get_release_details',
-  'get_issue_details',
-  'get_event_stacktrace',
-  'get_issue_activity',
-  'get_issue_breadcrumbs',
-  'get_issue_tag_values',
-  'get_issue_user_reports',
-  'get_trace_details',
-  'get_span_details',
-  'search_issues',
-];
 const GRAFANA_READ_TOOLS = [
   'list_datasources',
   'get_datasource',
@@ -651,8 +569,6 @@ export function integrationToolAllowed(managed: ManagedIntegration | undefined, 
       return githubTools(managed.profile).includes(tool);
     case 'gitlab':
       return gitlabTools(managed.profile).includes(tool);
-    case 'sentry':
-      return [...SENTRY_READ_TOOLS, ...integrationWriteTools(managed.id, managed.profile)].includes(tool);
     case 'grafana':
       return [
         ...GRAFANA_READ_TOOLS,
@@ -665,6 +581,8 @@ export function integrationToolAllowed(managed: ManagedIntegration | undefined, 
       return terraformTools(managed.profile).includes(tool);
     case 'opensearch':
       return [...OPENSEARCH_READ_TOOLS, ...integrationWriteTools(managed.id, managed.profile)].includes(tool);
+    case 'sentry':
+      return false;
   }
 }
 
@@ -674,8 +592,6 @@ export function reviewedToolDescription(
 ): string | undefined {
   const writeDescription = reviewedWriteDescription(managed, tool);
   if (writeDescription) return writeDescription;
-  if (managed?.id === 'sentry' && tool === 'search_issues')
-    return 'Search Sentry issues using Sentry search syntax, for example is:unresolved release:latest. Scope the project, time window and result limit. Natural-language AI search is not configured.';
   return managed?.id === 'context7' && Object.hasOwn(CONTEXT7_TOOLS, tool) ? CONTEXT7_TOOLS[tool] : undefined;
 }
 /** Managed browser tools return text; saving a result to a caller-selected host path is outside these profiles. */
@@ -724,10 +640,6 @@ export const PROFILE_LABELS: Record<IntegrationProfile, string> = {
 };
 
 export function integrationProfileLabel(id: IntegrationId, profile: IntegrationProfile): string {
-  if (id === 'sentry')
-    return profile === 'collaboration'
-      ? 'Issue triage and notes (approval required)'
-      : 'Read issues, events, projects and releases';
   if (id === 'grafana')
     return profile === 'collaboration'
       ? 'Dashboards and annotations with writes (approval required)'
@@ -741,7 +653,7 @@ export function integrationProfileLabel(id: IntegrationId, profile: IntegrationP
 }
 export interface InstallationState {
   id: IntegrationId;
-  status: 'missing' | 'installing' | 'ready' | 'remote' | 'external' | 'error';
+  status: 'missing' | 'installing' | 'ready' | 'remote' | 'error';
   error?: string;
 }
 export interface IntegrationCatalogView {

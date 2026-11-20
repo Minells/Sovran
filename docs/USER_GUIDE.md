@@ -489,38 +489,39 @@ after MCP initialization and tool discovery complete.
   If the service requires authentication or you hit the anonymous limit, choose **Set API key (optional)**. The free
   keyed plan covers public libraries and has a monthly quota. Keep credentials and private code out of lookup queries.
   [Context7 plans](https://context7.com/plans)
-- **Sentry MCP** uses the separately installed `@sentry/mcp-server` **0.49.0** (`sentry-mcp`, Node.js **22.15+**).
-  Choose **Configure**, enter the executable name or full path and the Sentry origin (for example `https://sentry.io`
-  or `https://sentry.example.com`), then **Set token** and **Connect**. The API token needs read access to the
-  organizations, projects and events you want to inspect. Sovran exposes direct issue/event, project and release
-  reads, with telemetry disabled. `search_issues` uses Sentry query syntax; an extra LLM provider is not configured.
-  The optional **Issue triage and notes** access mode adds `update_issue` and `add_issue_note` with approval
-  for every call; the token also needs `event:write`. Generic tool execution, Seer and hosted OAuth are excluded.
-  [Sentry stdio setup](https://github.com/getsentry/toolkit/blob/cli%400.49.0/packages/mcp-server/README.md)
-- **Grafana MCP** uses the separately installed **mcp-grafana 2.3.0** binary and Grafana **9+**. Configure the binary
-  and the Grafana service URL, then store a service account token with the needed dashboard/data source read and
-  query permissions. The profile includes data source discovery, dashboard summaries/properties, Prometheus and
-  Loki queries. The optional **Dashboards and annotations with writes** mode adds `update_dashboard`,
-  `create_annotation`, `update_annotation` and `delete_annotation`, plus full dashboard and annotation reads.
-  Use a token with dashboard/annotation write permissions. Read the dashboard first; prefer targeted patches
-  and preserve its schema/version for full updates. Forced overwrite is blocked. Upstream usage statistics
-  remain disabled in both profiles. Other data sources, including Grafana's
-  Elasticsearch/OpenSearch group, are not exposed by this initial profile.
-  [Grafana setup](https://github.com/grafana/mcp-grafana/tree/v2.3.0)
-- **Terraform MCP** uses the separately installed **terraform-mcp-server 1.4.1** binary. The default **Public Registry
-  documentation** profile needs no token and reads provider, module and policy documentation. In the catalog's
-  **Advanced settings → Access mode**, choose **Registry and HCP/TFE workspace and run reads** to add workspace,
-  run and plan reads. Configure the HCP/TFE service URL and use **Set token** for its API token. A connection that
-  offers no HCP/TFE read tools is shown as failed, rather than silently falling back to Registry. The optional
-  **HCP/TFE workspace and run operations** mode adds `create_workspace`, `update_workspace`, `create_run`
-  and `action_run`, plus apply details/logs. Workspace changes require `auto_apply: "false"`. Run creation
-  requires an explicit `plan_only` or `plan_and_apply`; the latter queues a plan with automatic apply disabled.
-  Read the run and its plan, explain the changes, then request separate approval to `apply`, `cancel` or
-  `discard` that exact run ID. Apply success means the action was requested; follow up with run details.
-  An approved plan can create, modify or delete infrastructure. Destroy-run creation, workspace deletion,
-  forced unlock, variables/secrets and unrestricted local CLI operations are excluded.
-  Plans and logs can contain sensitive infrastructure information; use an
-  appropriately scoped token. [Terraform setup](https://github.com/hashicorp/terraform-mcp-server/tree/v1.4.1)
+- **Grafana MCP** connects to an operator-managed **Streamable HTTP endpoint**, compatible with
+  **mcp-grafana 2.3.0**. Enter the full MCP endpoint (for example `https://grafana-mcp.example.com/mcp`),
+  not the Grafana website/API URL. Set the **MCP caller bearer token**, then Connect. No local executable,
+  Node.js or npm is required. The operator configures `GRAFANA_URL`, a scoped Grafana service account token,
+  caller authentication (`MCP_GRAFANA_SERVER_TOKEN`), TLS and telemetry on the remote server. For example,
+  the server can run with `-t streamable-http --usage-stats=disabled`; protect its endpoint with HTTPS.
+  Sovran cannot enforce telemetry settings on an external server. The read profile exposes reviewed
+  dashboard/datasource discovery and Prometheus/Loki queries. **Dashboards and annotations with writes**
+  adds reviewed dashboard/annotation reads and `update_dashboard`, `create_annotation`, `update_annotation`
+  and `delete_annotation`. Each write requires approval; forced dashboard overwrite remains blocked.
+  The operator must grant the corresponding Grafana permissions. A shared service account gives its callers
+  that account's privileges: use appropriately scoped deployments or an identity-aware gateway.
+  [Grafana deployment and caller authentication](https://github.com/grafana/mcp-grafana/tree/v2.3.0)
+- **Terraform MCP** connects to an operator-managed **Streamable HTTP endpoint**, compatible with
+  **terraform-mcp-server 1.4.1**, behind an authenticating gateway. No local executable is required.
+  Enter the MCP gateway URL, not an HCP/TFE website or REST API URL, and store its **gateway bearer token**.
+  The gateway must authenticate the caller and replace the inbound `Authorization` header with the authorized
+  user's/scoped backend TFE token before forwarding to the native server. The native server interprets HTTP
+  bearer authentication as a **TFE API token**; merely configuring `TFE_TOKEN` in its environment while forwarding
+  an unrelated gateway token does not implement this separation. Keep the native server private behind the gateway,
+  strip client-supplied credential/connection override headers, and configure `TFE_ADDRESS` and TLS server-side.
+  Preserve user/resource authorization when mapping identities to backend credentials; a shared token does not
+  provide per-user TFE permissions. The gateway must also authenticate Registry-only access.
+  The default **Public Registry documentation** profile exposes documentation reads. **Registry and HCP/TFE
+  workspace and run reads** adds reviewed workspace, run and plan reads; missing HCP tools fail setup rather than
+  silently falling back to Registry. **HCP/TFE workspace and run operations** adds `create_workspace`,
+  `update_workspace`, `create_run` and `action_run`, plus apply details/logs. The operator must enable
+  `ENABLE_TF_OPERATIONS=true` and the required tools and permissions on the server. Workspace changes require
+  `auto_apply: "false"`; create_run requires explicit `plan_only` or `plan_and_apply` with automatic apply disabled.
+  Read the plan before separately approving apply/cancel/discard for one run. An approved plan can create, modify
+  or delete infrastructure. Destroy-run creation, workspace deletion, forced unlock and variable/secret operations
+  remain excluded. The operator controls telemetry (for example `OTEL_METRICS_ENABLED=false`).
+  [Terraform HTTP deployment](https://github.com/hashicorp/terraform-mcp-server/tree/v1.4.1)
 - **OpenSearch MCP** connects to an **existing external Streamable HTTP MCP endpoint**, such as
   `https://search-mcp.example.com/mcp`. Enter the MCP URL, not the cluster REST API URL or a legacy `/sse` endpoint.
   No Python environment is installed by Sovran. The operator must configure the cluster, its credentials/IAM/TLS
@@ -543,19 +544,42 @@ after MCP initialization and tool discovery complete.
 
 Write access is opt-in: select the access mode under **Browse Catalog → Advanced settings**, then configure
 the new connection, token and **Connect**. Existing connections retain their read profiles; **Configure another**
-adds a separate connection. Every mutation in these four write profiles requires approval in all approval modes,
+adds a separate connection. Every mutation in these three write profiles requires approval in all approval modes,
 and cannot be changed to **Allow**. **Off** still blocks a tool. Sovran classifies these tools as writes independently of upstream
 annotations, and shows the operation target before large payloads in the approval preview. Trust revocation,
 disconnecting, changing profiles or turning a tool Off while approval is open prevents execution.
 Missing required write tools fail connection setup with instructions to check permissions/server configuration.
 
-Sentry, Grafana and Terraform executables are installed and updated separately by the user, outside workspace
-folders. Sovran verifies the exact reviewed version when connecting; it does not run `npx latest`, download these
-servers or require Chrome for them. Use native executable paths; Sentry's npm Windows launcher is resolved to its
-installed bundle and run through Node. The service/MCP URLs accept HTTPS, or HTTP on literal loopback hosts only,
-without credentials, query parameters or fragments. For Remote SSH/WSL/container windows, the executable, service
-reachability and `localhost` all refer to the extension host. Changing a new integration's destination or executable
-invalidates its stored credential binding, including changes made directly in settings.
+Grafana, Terraform and OpenSearch use external MCP endpoints. Sovran does not install or execute their servers;
+operators install/update them centrally. The documented reference versions describe the reviewed tool contracts,
+not a remotely verified binary version. Sovran checks offered capabilities and restricts discovery/dispatch;
+required write capabilities missing from a selected profile fail the connection.
+MCP URLs accept HTTPS, or HTTP on literal loopback hosts only, without credentials, query parameters or fragments.
+In SSH/WSL/container windows, reachability and `localhost` refer to the extension host. Destination/auth/profile
+changes invalidate the stored credential binding. Product API credentials are not transferred to new MCP gateways.
+
+**Migrating older connections:** Sentry is removed from the catalog. Existing managed Sentry entries remain visible
+with a removal message and cannot reconnect. Old local Grafana/Terraform entries are disabled, retain their saved
+fields, and offer **Configure remote replacement**. Create a new connection and set its MCP gateway token, then remove
+the old entry to delete its stored token. No old executable is launched and no old token is sent to a new destination.
+Custom servers remain available through explicit custom setup; they do not inherit catalog protections.
+
+**Licenses, permissions and data:** Browse Catalog shows the reference server license/source, provider terms and
+required permissions. The same disclosures appear in native connection/download confirmations. These integrations
+are supplied by third parties; Sovran's MIT license does not replace their licenses, trademarks, hosting agreements
+or website/account terms. Remote deployment does not waive the operator's license obligations. In particular,
+Terraform MCP's MPL-2.0 covers the MCP server, separately from Terraform products and service terms. Redistributions
+of covered executables require the applicable source-availability and notice obligations; this does not automatically
+relicense Sovran. Provider names identify compatibility and do not imply endorsement.
+Tool results may contain personal/confidential data and are sent to the configured model. Organizations should
+review account authorization, confidentiality, applicable privacy requirements, processing agreements and transfers.
+Write approval is an operational control, not a substitute for those agreements.
+
+Browser MCP downloads retain original license/NOTICE files. [Optional MCP package notices](../MCP_THIRD_PARTY_NOTICES.md)
+list locked packages separately from the VSIX's [bundled dependency notices](../THIRD_PARTY_NOTICES.md). New installations
+also save `third-party-inventory.json` and `THIRD_PARTY_NOTICES.txt` in their versioned directory under extension global
+storage. Reinstall an existing browser integration to generate these inventories. Bundled dependency declarations and
+notices are preserved when supplied upstream; their presence is not a blanket legal clearance.
 
 For the browser integrations, Node/npm and Chrome must exist on the **extension host**, which can be a Remote SSH/WSL/container machine. Missing
 components produce instructions. There is no automatic bridge to your desktop browser. Managed profile limits remain
@@ -701,10 +725,10 @@ npm run build
 npm run check
 ```
 
-`npm run check` runs typecheck, lint and tests. Press <kbd>F5</kbd> in VS Code to launch an Extension Development Host. See [docs/DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the UI dev harness and the testing strategy, and [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.
+`npm run check` verifies the MCP license inventory, typecheck, lint and tests. Press <kbd>F5</kbd> in VS Code to launch an Extension Development Host. See [docs/DEVELOPMENT.md](DEVELOPMENT.md) for the architecture, the UI dev harness and the testing strategy, and [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.
 
 Documentation: [Architecture](ARCHITECTURE.md) · [Product requirements](PRODUCT_REQUIREMENTS.md) · [Roadmap](ROADMAP.md) · [Decisions](DECISIONS.md) · [Releasing](RELEASING.md)
 
 ## License
 
-Sovran is released under the [MIT License](../LICENSE). Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+Sovran is released under the [MIT License](../LICENSE). Bundled components are listed in [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md); optional MCP downloads in [MCP_THIRD_PARTY_NOTICES.md](../MCP_THIRD_PARTY_NOTICES.md).

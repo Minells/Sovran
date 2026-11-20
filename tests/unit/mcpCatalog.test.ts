@@ -43,7 +43,6 @@ describe('optional integration catalog contracts', () => {
       'playwright',
       'context7',
       'devtools',
-      'sentry',
       'grafana',
       'terraform',
       'opensearch',
@@ -348,6 +347,17 @@ describe('managed package installation lifecycle', () => {
       managed: { id: 'playwright', version: '0.0.84', profile: 'isolated' },
     });
     const launch = await f.manager.launch(config);
+    const inventory = JSON.parse(
+      await fs.readFile(path.join(launch.cwd!, 'third-party-inventory.json'), 'utf8'),
+    );
+    expect(inventory.packages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ location: 'node_modules/@playwright/mcp', license: 'Apache-2.0' }),
+      ]),
+    );
+    expect(await fs.readFile(path.join(launch.cwd!, 'THIRD_PARTY_NOTICES.txt'), 'utf8')).toContain(
+      'not a legal clearance',
+    );
     expect(path.isAbsolute(launch.command!)).toBe(true);
     expect(launch.args?.[0]).toContain('node_modules');
     expect(launch.args).toContain('--isolated');

@@ -6,14 +6,17 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
-- Opt-in managed write profiles for Sentry issue triage/notes, Grafana dashboards/annotations, HCP/TFE workspaces
-  and runs, and bounded OpenSearch index/document operations. Each write requires approval even in Auto mode or
-  imported Allow settings. Existing read connections keep their capabilities. Host argument/schema checks reject
-  Terraform auto-apply/destroy-run creation, forced Grafana overwrites and unrestricted OpenSearch API requests.
-- Optional Sentry 0.49.0, Grafana 2.3.0 and Terraform 1.4.1 catalog integrations using separately installed
-  executables, plus external OpenSearch Streamable HTTP connections. Reviewed read profiles, destination-bound
-  SecretStorage credentials, exact executable version checks and OpenSearch connection-override guards. Terraform
-  offers public Registry without a token and a separate HCP/TFE read profile; Grafana/Sentry telemetry is disabled.
+- Remote-only Grafana and Terraform MCP catalog connections, alongside external OpenSearch. No local service
+  executables or package downloads. MCP endpoint/gateway credentials are distinct from backend credentials;
+  remote operators control deployment, authorization and telemetry. Old local entries are disabled with migration
+  guidance. Sentry is removed from the active catalog; saved managed entries remain removable and cannot reconnect.
+- Catalog license/service-term links, permission and data disclosures, destination-bound credentials, and native
+  connection/download notices. Locked browser package inventory ships separately from bundled notices; new installs
+  collect supplied LICENSE/NOTICE files and embedded package inventories without removing originals.
+- Opt-in managed write profiles for Grafana dashboards/annotations, HCP/TFE workspaces/runs and bounded OpenSearch
+  index/document operations. Each write requires approval even in Auto mode or imported Allow settings. Read
+  profiles retain their limits. Host checks reject Terraform auto-apply/destroy-run creation, forced Grafana
+  overwrites and unrestricted OpenSearch API requests. Missing required write tools fail setup.
 - **A busy server is asked again.** HTTP 429, 502, 503 and 504 no longer end the run at once: Sovran retries after
   1 s and 3 s, or after the server's `Retry-After` when it is at most 30 s, and says so in the chat. It retries only
   when nothing of the reply has arrived, and stopping the run stops the wait.

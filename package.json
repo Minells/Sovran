@@ -726,7 +726,7 @@
                 },
                 "managed": {
                   "type": "object",
-                  "description": "Catalog provenance. Managed launch uses the reviewed version and profile. Edit as a custom server to use custom launch settings.",
+                  "description": "Catalog provenance. Sentry is a retired ID accepted only for migration. Grafana and Terraform require a remote-v1 MCP endpoint. Edit as a custom server to use custom launch settings.",
                   "required": [
                     "id",
                     "profile",
@@ -769,7 +769,7 @@
                     },
                     "instanceUrl": {
                       "type": "string",
-                      "description": "Service instance URL for GitLab, Sentry, Grafana or HCP/TFE; distinct from an external MCP endpoint."
+                      "description": "GitLab service instance URL. Legacy service URLs are retained only for migration."
                     },
                     "browserProfile": {
                       "type": "string",
@@ -779,11 +779,11 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 1000,
-                      "description": "Separately installed executable name or full path on the extension host."
+                      "description": "Legacy local catalog executable, retained only for migration; current service integrations use remote endpoints."
                     },
                     "endpoint": {
                       "type": "string",
-                      "description": "Full Streamable HTTP endpoint for the external OpenSearch MCP server."
+                      "description": "Full Streamable HTTP MCP endpoint for Grafana, Terraform or OpenSearch; distinct from the product website/API URL."
                     }
                   }
                 }
@@ -871,7 +871,9 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:extension": "node scripts/test-extension.mjs",
-    "check": "npm run typecheck && npm run lint && npm run test",
+    "notices:mcp": "node scripts/mcp-third-party-notices.mjs",
+    "check:licenses": "node scripts/mcp-third-party-notices.mjs --check",
+    "check": "npm run check:licenses && npm run typecheck && npm run lint && npm run test",
     "package": "vsce package --no-dependencies",
     "vscode:prepublish": "npm run build",
     "verify:vsix": "node scripts/verify-vsix.mjs"

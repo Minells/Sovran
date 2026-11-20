@@ -18,12 +18,15 @@ import { parseMcpSnippet, type McpDraft } from '../../../src/shared/mcpImport';
 import {
   INTEGRATIONS,
   integration,
+  integrationMigrationProblem,
+  type IntegrationId,
   integrationProfileLabel,
   integrationProfileRequiresApproval,
   type IntegrationDefinition,
   type IntegrationProfile,
   type InstallationState,
 } from '../../../src/core/mcp/catalog';
+import { integrationLegal, MCP_DATA_DISCLOSURE } from '../../../src/core/mcp/legal';
 import { sendsKeyInsecurely } from '../../../src/shared/endpoints';
 import { useStore } from '../state/store';
 import { post } from '../vscode';
@@ -195,6 +198,7 @@ function ServerCard({
   onEdit: (opener: HTMLButtonElement) => void;
   active: boolean;
 }) {
+  const migration = integrationMigrationProblem(s.managed);
   const status = STATUS[s.status];
   const item = s.managed && integration(s.managed.id);
   const keyLabel = item?.id === 'context7' ? 'API key' : 'token';
@@ -218,7 +222,7 @@ function ServerCard({
           </span>
         </div>
         <Button
-          disabled={!s.enabled && (!active || needsToken || needsInstall)}
+          disabled={!!migration || (!s.enabled && (!active || needsToken || needsInstall))}
           onClick={() => post({ type: 'setMcpServerEnabled', id: s.id, enabled: !s.enabled })}
         >
           {s.enabled ? 'Disconnect' : 'Connect'}
@@ -242,7 +246,21 @@ function ServerCard({
       {s.insecure ? (
         <p className="sv-field__note">This server sends its token over unencrypted HTTP.</p>
       ) : null}
-      {needsToken || needsInstall || hasError || (item?.remote?.token === 'optional' && !s.hasToken) ? (
+      {migration && managed && managed.id !== 'sentry' ? (
+        <Button
+          onClick={() =>
+            post({
+              type: 'addMcpIntegration',
+              integration: managed.id as Exclude<IntegrationId, 'sentry'>,
+              profile: managed.profile,
+            })
+          }
+        >
+          Configure remote replacement
+        </Button>
+      ) : null}
+      {!migration &&
+      (needsToken || needsInstall || hasError || (item?.remote?.token === 'optional' && !s.hasToken)) ? (
         <div className="sv-approval__actions">
           {needsToken || (item?.remote?.token === 'optional' && !s.hasToken) ? (
             <Button icon="key" onClick={configureToken}>
@@ -256,7 +274,9 @@ function ServerCard({
           {localIntegration && needsInstall && managed ? (
             <Button
               disabled={!active || s.enabled || installation?.status === 'installing'}
-              onClick={() => post({ type: 'installMcpIntegration', integration: managed.id })}
+              onClick={() => {
+                if (managed.id !== 'sentry') post({ type: 'installMcpIntegration', integration: managed.id });
+              }}
             >
               {installation?.status === 'installing' ? 'Installing…' : 'Install dependencies'}
             </Button>
@@ -281,6 +301,7 @@ function ServerCard({
         )
       ) : null}
       <SettingsDisclosure title="Advanced settings">
+        {managed ? <IntegrationLegalDetails id={managed.id} /> : null}
         <div className="sv-field">
           <div className="sv-field__help">
             {s.transport === 'http' ? 'Remote server' : 'Local server'}
@@ -302,7 +323,7 @@ function ServerCard({
           <Button icon="edit" onClick={(event) => onEdit(event.currentTarget)}>
             {managed ? 'Edit as custom' : 'Edit'} <span className="sv-visually-hidden">{s.name}</span>
           </Button>
-          {s.auth.type !== 'none' && s.hasToken ? (
+          {!migration && s.auth.type !== 'none' && s.hasToken ? (
             <Button variant="ghost" icon="key" onClick={configureToken}>
               Replace {keyLabel}
             </Button>
@@ -808,6 +829,36 @@ function ServerForm({
 
 // --------------------------------------------------------------------------------------------- area
 
+function IntegrationLegalDetails({ id }: { id: IntegrationId }) {
+  const legal = integrationLegal(id);
+  if (!legal) return null;
+  return (
+    <div className="sv-field">
+      <p className="sv-field__help">
+        {legal.license ? `Reference server license: ${legal.license.name}.` : 'Hosted service terms apply.'}
+        {' Third-party integration; Sovran’s MIT license does not replace provider licenses or agreements.'}
+      </p>
+      <p className="sv-field__help">{legal.permissions}</p>
+      <div className="sv-approval__actions">
+        {legal.license ? (
+          <Button variant="ghost" onClick={() => post({ type: 'openExternal', url: legal.license!.url })}>
+            Server license
+          </Button>
+        ) : null}
+        {legal.terms.map((term) => (
+          <Button
+            key={term.url}
+            variant="ghost"
+            onClick={() => post({ type: 'openExternal', url: term.url })}
+          >
+            {term.name}
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CatalogEntry({
   item,
   servers,
@@ -825,6 +876,7 @@ function CatalogEntry({
   const server = servers.find((s) => s.status === 'connected') ?? servers[0];
   const status = server ? STATUS[server.status] : { label: 'Not configured', dot: 'off' };
   const add = () => {
+    if (item.id === 'sentry') return;
     post({ type: 'addMcpIntegration', integration: item.id, profile });
     onDone();
   };
@@ -848,9 +900,9 @@ function CatalogEntry({
       <p className="sv-field__help">
         {item.requirements}
         {item.package ? ' No account required.' : ''}
-        {item.external ? ' Installed separately; Sovran verifies the version when connecting.' : ''}
         {installation?.status === 'ready' ? ' Dependencies installed.' : ''}
       </p>
+      <IntegrationLegalDetails id={item.id} />
       <SettingsDisclosure title="Advanced settings">
         {item.package ? (
           <code className="sv-integration__endpoint">
@@ -859,7 +911,7 @@ function CatalogEntry({
         ) : null}
         {item.profiles.length > 1 ? (
           <label className="sv-field">
-            {item.remote || item.external ? 'Access mode' : 'Browser profile'}
+            {item.remote ? 'Access mode' : 'Browser profile'}
             <select
               value={profile}
               onChange={(event) => setProfile(event.target.value as IntegrationProfile)}
@@ -889,6 +941,7 @@ function CatalogEntry({
           </p>
         ) : null}
         {item.security ? <p className="sv-field__help">{item.security}</p> : null}
+        <p className="sv-field__help">{MCP_DATA_DISCLOSURE}</p>
         <div className="sv-approval__actions">
           {server ? <Button onClick={add}>Configure another</Button> : null}
           <Button variant="ghost" onClick={() => post({ type: 'openExternal', url: item.documentation })}>

@@ -1,6 +1,6 @@
 // Generates THIRD_PARTY_NOTICES.md from the production dependency tree (everything bundled into the VSIX).
 import { execSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const tree = JSON.parse(execSync('npm ls --omit=dev --all --long --json', { encoding: 'utf8' }));
@@ -21,14 +21,34 @@ const seen = new Map();
 
 const sections = [];
 const summary = [];
-for (const { name, version, dir } of [...seen.values()].sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))) {
+for (const { name, version, dir } of [...seen.values()].sort(
+  (a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version),
+)) {
   if (!dir) throw new Error(`npm did not return the installed location of ${name}@${version}.`);
   const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
-  const license = typeof pkg.license === 'string' ? pkg.license : pkg.license?.type ?? 'UNKNOWN';
-  const file = readdirSync(dir).find((f) => /^(licen[sc]e|copying)(\.|$)/i.test(f));
-  const raw = file && existsSync(join(dir, file)) ? readFileSync(join(dir, file), 'utf8') : '(license text not included in package)';
-  // Preserve existing CRLF license texts verbatim; avoid trailing blanks in added LF notices.
-  const text = (raw.includes('\r\n') ? raw : raw.replace(/[ \t]+$/gm, '')).trim();
+  const license = typeof pkg.license === 'string' ? pkg.license : (pkg.license?.type ?? 'UNKNOWN');
+  const files = readdirSync(dir).filter((f) =>
+    /^(licen[sc]e|copying|notice)([._-]|$)|^third[._-]?party[._-]?(notices|licenses)/i.test(f),
+  );
+  const legalFiles = [];
+  function collect(file) {
+    if (statSync(join(dir, file)).isDirectory()) {
+      for (const child of readdirSync(join(dir, file)).sort()) collect(join(file, child));
+    } else legalFiles.push(file);
+  }
+  for (const file of files.sort()) collect(file);
+  const text = legalFiles.length
+    ? legalFiles
+        .map((file) => {
+          const raw = readFileSync(join(dir, file), 'utf8');
+          // Normalize presentation whitespace; original dependency files are never modified.
+          return `File: ${file}\n\n${raw
+            .replace(/\r\n/g, '\n')
+            .replace(/[ \t]+$/gm, '')
+            .trim()}`;
+        })
+        .join('\n\n')
+    : '(license text not included in package)';
   summary.push(`| ${name} | ${version} | ${license} |`);
   sections.push(`## ${name} ${version} — ${license}\n\n\`\`\`\n${text}\n\`\`\``);
 }

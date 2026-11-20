@@ -12,6 +12,7 @@ for (const required of [
   'dist/documentWorker.js',
   'dist/webWorker.js',
   'THIRD_PARTY_NOTICES.md',
+  'MCP_THIRD_PARTY_NOTICES.md',
   'SECURITY.md',
   'package.json',
 ]) {
@@ -40,6 +41,13 @@ for (const id of ['playwright', 'devtools']) {
       `Changed managed manifest: ${relative}`,
     );
   }
+}
+for (const notice of ['THIRD_PARTY_NOTICES.md', 'MCP_THIRD_PARTY_NOTICES.md']) {
+  assert.equal(
+    strFromU8(files[`extension/${notice}`]),
+    readFileSync(new URL(`../${notice}`, import.meta.url), 'utf8'),
+    `Changed packaged notices: ${notice}`,
+  );
 }
 const manifest = JSON.parse(strFromU8(files['extension/package.json']));
 assert.equal(manifest.extensionKind[0], 'workspace');

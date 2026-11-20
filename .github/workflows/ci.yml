@@ -25,6 +25,7 @@ jobs:
       # Dependency install scripts are not needed (see docs/DEVELOPMENT.md) and npm 12 blocks them by default:
       # CI installs the same way, so it checks what developers get.
       - run: npm ci --ignore-scripts
+      - run: npm run check:licenses
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test
