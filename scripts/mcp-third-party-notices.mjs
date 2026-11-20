@@ -36,6 +36,7 @@ GitHub, GitLab and Context7 use external services. Grafana, Terraform and OpenSe
 `;
 const file = new URL('../MCP_THIRD_PARTY_NOTICES.md', import.meta.url);
 if (process.argv.includes('--check')) {
-  if (readFileSync(file, 'utf8') !== content)
+  // Git may check out Markdown with CRLF on Windows. Compare content, not checkout line endings.
+  if (readFileSync(file, 'utf8').replace(/\r\n/g, '\n') !== content)
     throw new Error('MCP notices are stale. Run npm run notices:mcp.');
 } else writeFileSync(file, content);

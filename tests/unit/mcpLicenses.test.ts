@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { INTEGRATIONS, INTEGRATION_IDS } from '../../src/core/mcp/catalog';
 import { integrationLegal, integrationLegalSummary } from '../../src/core/mcp/legal';
@@ -8,6 +9,39 @@ import { webviewMessageSchema } from '../../src/shared/protocol';
 import { writeMcpPackageNotices } from '../../src/extension/adapters/McpPackageNotices';
 
 describe('MCP licensing disclosures', () => {
+  it('accepts LF and Windows CRLF notices while rejecting stale license content', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'sovran-mcp-license-check-'));
+    try {
+      await fs.mkdir(path.join(directory, 'scripts'));
+      const script = path.join(directory, 'scripts/mcp-third-party-notices.mjs');
+      const source = await fs.readFile(path.resolve('scripts/mcp-third-party-notices.mjs'), 'utf8');
+      await fs.writeFile(script, source.replace(/\r?\n/g, '\r\n'));
+      for (const id of ['playwright', 'devtools']) {
+        const destination = path.join(directory, 'resources/mcp', id);
+        await fs.mkdir(destination, { recursive: true });
+        await fs.copyFile(
+          path.resolve('resources/mcp', id, 'package-lock.json'),
+          path.join(destination, 'package-lock.json'),
+        );
+      }
+      const file = path.join(directory, 'MCP_THIRD_PARTY_NOTICES.md');
+      const content = (await fs.readFile(path.resolve('MCP_THIRD_PARTY_NOTICES.md'), 'utf8')).replace(
+        /\r\n/g,
+        '\n',
+      );
+      const check = () =>
+        execFileSync(process.execPath, [script, '--check'], { stdio: 'pipe', timeout: 10000 });
+      await fs.writeFile(file, content);
+      expect(check).not.toThrow();
+      await fs.writeFile(file, content.replace(/\n/g, '\r\n'));
+      expect(check).not.toThrow();
+      await fs.writeFile(file, content.replace('Apache-2.0', 'CHANGED-LICENSE').replace(/\n/g, '\r\n'));
+      expect(check).toThrow(/MCP notices are stale/);
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it('covers each active integration and rejects new Sentry catalog messages', () => {
     expect(INTEGRATION_IDS).not.toContain('sentry');
     for (const item of INTEGRATIONS) {
