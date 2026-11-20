@@ -195,6 +195,16 @@ afterEach(async () => {
 });
 
 describe('listDirectory', () => {
+  it('uses literal parentheses in workspace excludes without treating ! as an exclusion of everything else', async () => {
+    await write('app/(auth)/page.tsx', 'private route');
+    await write('app/public/page.tsx', 'public route');
+    h.config['files.exclude'] = { 'app/(auth)': true, '!literal': true };
+    await controller.handle({ type: 'listDirectory', requestId: 'routes', path: 'app' });
+    expect(last('directoryListing').listing.entries.map((entry) => entry.name)).toEqual(['public']);
+    await controller.handle({ type: 'listDirectory', requestId: 'source', path: 'src' });
+    expect(last('directoryListing').listing.entries).toHaveLength(4);
+  });
+
   it('lists folders first in natural order, hides VCS and dependency folders, honours files.exclude and marks protected files', async () => {
     await controller.handle({ type: 'listDirectory', requestId: 'r1', path: '' });
     const { requestId, listing } = last('directoryListing');

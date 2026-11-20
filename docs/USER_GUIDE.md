@@ -704,6 +704,12 @@ Sovran executes actions on your behalf, so its safety controls are enforced in c
 
 Read [SECURITY.md](../SECURITY.md) for the threat model and known limitations. Choose endpoints you trust: everything the agent reads is sent to the model you configured.
 
+Workspace search filters and `files.exclude` use ordinary file globs: `*`, `**`, `?`, character classes and
+brace alternatives such as `**/*.{ts,tsx}`. Parentheses are literal, so `app/(auth)/**` matches that route folder.
+Bash extglobs and regex groups are not evaluated in these filters; use `{a,b}` instead of `@(a|b)` and note that
+leading `!` is literal. Personal `sovran.security.protectedPaths` rules retain their existing matcher syntax and
+always-review behavior.
+
 ## Known limitations
 
 - **Quality depends on the model.** Tool-trained coding models work best. Small models may need `"toolMode": "prompted"`, and some still struggle with multi-step tasks.

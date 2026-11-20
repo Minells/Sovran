@@ -60,4 +60,18 @@ describe.skipIf(!rg)('RipgrepSearch (system rg)', () => {
   it('reports regex errors', async () => {
     await expect(search({ isRegex: true, query: '(' })).rejects.toThrow(/Search failed/);
   });
+
+  it('treats parenthesized route directories as literal include paths', async () => {
+    const folder = path.join(dir, 'app/(auth)');
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, 'page.tsx'), 'export const TOKEN = true;\n');
+    try {
+      const result = await search({ include: 'app/(auth)/**/*.tsx' });
+      expect(result.matches.map((match) => path.relative(dir, match.path).split(path.sep).join('/'))).toEqual([
+        'app/(auth)/page.tsx',
+      ]);
+    } finally {
+      fs.rmSync(path.join(dir, 'app'), { recursive: true, force: true });
+    }
+  });
 });

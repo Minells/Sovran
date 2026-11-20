@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import picomatch from 'picomatch';
+import { workspaceGlob } from '../../core/security/globs';
 import type { TextSearchOptions, TextSearchResult } from '../../core/ports';
 
 /**
@@ -40,7 +40,7 @@ export class RipgrepSearch {
       o.query,
       ...roots,
     ];
-    const include = o.include && o.include !== '**/*' && o.include !== '**' ? picomatch(o.include, { dot: true }) : undefined;
+    const include = o.include && o.include !== '**/*' && o.include !== '**' ? workspaceGlob(o.include) : undefined;
     const included = (abs: string) =>
       !include || roots.some((r) => {
         const rel = path.relative(r, abs);

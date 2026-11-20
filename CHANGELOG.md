@@ -6,6 +6,9 @@ pre-releases and even minor versions are stable releases.
 ## Unreleased
 
 ### Added
+- Harden model/workspace-controlled file globs by interpreting parentheses literally and disabling Bash extglobs
+  and leading negation. Preserve ordinary globs and user-only protected-path rules. Picomatch's withdrawn advisory
+  was reviewed; no dependency version or audit suppression was introduced.
 - Remote-only Grafana and Terraform MCP catalog connections, alongside external OpenSearch. No local service
   executables or package downloads. MCP endpoint/gateway credentials are distinct from backend credentials;
   remote operators control deployment, authorization and telemetry. Old local entries are disabled with migration
