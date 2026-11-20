@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import picomatch from 'picomatch';
+import { workspaceGlob } from '../core/security/globs';
 import { AgentRunner } from '../core/agent/agentRunner';
 import {
   CheckpointRecorder,
@@ -1554,7 +1554,7 @@ export class SovranController implements vscode.Disposable {
       .filter(([, on]) => on === true)
       .map(([glob]) => glob);
     if (!globs.length) return () => false;
-    const isMatch = picomatch(globs, { dot: true });
+    const isMatch = workspaceGlob(globs);
     return (p) => isMatch(p);
   }
 

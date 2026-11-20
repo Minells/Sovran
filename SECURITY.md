@@ -137,3 +137,14 @@ with reviewed descriptions. Server schemas and returned documentation still cont
 - A converted document can carry text you never saw: white or hidden text, text behind an image, a hidden sheet or
   slide. It reaches the model like the rest of the document (hidden sheets and slides are labelled). Treat documents
   from others like any untrusted file, especially in Auto mode.
+
+## Workspace-controlled glob patterns
+
+Search include filters supplied by the model and workspace `files.exclude` entries are compiled as ordinary path
+globs, with literal parentheses/pipes, no Bash extglob interpretation and no leading-negation interpretation. This
+reduces exposure to expensive repeated extglob expressions while keeping brace alternatives and globstars.
+User-only protected-path rules retain their existing syntax and cannot be replaced by workspace settings.
+
+[GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf) was withdrawn on 2026-11-18; picomatch 4.0.7
+remains the latest published release as checked on 2026-11-20. This application hardening is not a dependency patch
+or a blanket guarantee for arbitrary regex/glob complexity. See the [assessment](docs/plans/2026-11-20-picomatch-glob-hardening.md).

@@ -215,7 +215,7 @@ export const searchFilesTool = defineTool({
     query: z.string().min(1),
     is_regex: z.boolean().default(false),
     case_sensitive: z.boolean().default(false),
-    glob: z.string().default('**/*').describe('Files to search'),
+    glob: z.string().default('**/*').describe('Files to search with standard globs, e.g. **/*.{ts,tsx}. Parentheses are literal; Bash extglobs are not supported.'),
     max_results: z.number().int().min(1).max(500).default(100),
   }),
   label: (a) => a.query,
