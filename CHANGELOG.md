@@ -3,9 +3,19 @@
 All notable changes to SOVRAN are documented here. Versions follow `major.minor.patch`; odd minor versions are
 pre-releases and even minor versions are stable releases.
 
-## Unreleased
+## [Unreleased]
+
+Nothing yet.
+
+## [0.1.0] — 2026-11-23
+
+**First public pre-release.** The VSIX is attached to the
+[GitHub Release](https://github.com/Minells/sovran/releases/tag/v0.1.0); the minor version is odd, so this is a
+pre-release build. Entries under *Added*, *Changed*, *Fixed* and *Security* describe the work done since the
+internal preview; *Foundations* lists what that preview already contained.
 
 ### Added
+
 - Harden model/workspace-controlled file globs by interpreting parentheses literally and disabling Bash extglobs
   and leading negation. Preserve ordinary globs and user-only protected-path rules. Picomatch's withdrawn advisory
   was reviewed; no dependency version or audit suppression was introduced.
@@ -95,8 +105,43 @@ pre-releases and even minor versions are stable releases.
 - **Sovran Settings** in the panel, opened from the gear in the view title: Act and Plan models, providers, approval mode for this window and for new windows, allowed commands, protected files, limits and context options.
 - **Guided setup** in three steps (choose, connect, model): Sovran saves the provider, asks for a key when needed, tests the connection and offers the models the server reports.
 - The status bar shows `auto-edit` or `auto` when Act mode runs unattended.
+- **Exploration rows** group consecutive file reads and searches (*Explored · 3 files read, 1 search*).
+- **"Latest" / "Approval needed" pill** appears when you scroll away from the end of a running conversation.
+- **Keyboard hints** under the composer, on one line that follows what the keys do right now (send, choose a suggestion, stop). It is always shown, so focusing the composer no longer shifts the layout.
+- **Undo changes.** Each response that edits files records a checkpoint, and one click restores the pre-response state. The prompt protects files you changed afterwards, and the restore is itself undoable.
+- **Retry, edit and resend.** Rewind the conversation, optionally undoing file changes from the discarded responses.
+- **Conversation compaction.** Older turns are summarized when the context is full (`sovran.context.autoCompact`), or on demand with `/compact` or the context meter.
+- **Context meter** in the composer, using an estimate first and then the token count reported by the server.
+- **`@` file mentions** with fuzzy search, and **`/` slash commands** (built-in, plus `.sovran/commands/*.md` in trusted workspaces).
+- **Separate Plan-mode model** (`sovran.planModel`).
+- **ripgrep search** through VS Code's bundled binary. It respects `.gitignore` and excludes protected paths, which are filtered again in core.
+- `SOVRAN: Compact Conversation` command.
+
+### Changed
+
+- Native tool schemas sent to the model leave out constraints that tell it nothing (`minLength: 1`, guard lengths of
+  1,000 characters or more, safe-integer bounds), about 7% fewer definition tokens. Validation is unchanged.
+- `sovran.context.maxToolResultChars` is lowered for models with small context windows, to at most about 15% of their
+  input budget, so a single result cannot crowd out the conversation and tools page sooner.
+- The sidebar shows **Sovran** instead of *Sovran: Agent*: the view is named like its container, which VS Code then shows once. `Sovran: Focus Agent` is now `Sovran: Focus Panel`.
+- **"API key" is the labelled default authentication** (sent as `Authorization: Bearer <key>`, the OpenAI standard), listed first and explained in the form; providers using a custom header show it on their card.
+- **Chat titles are written by the model by default**, with room for models that always reason (GLM, DeepSeek-R1); turn it off in Settings.
+- Build: the Vite and Vitest configs are ESM (`.mts`), which removes Vite's `configLoader` warning without making the CommonJS extension bundle an ES module. The webview bundle has a 650 kB size budget instead of Vite's 500 kB default for network-loaded pages: it is read from local disk, and the budget still warns about accidental heavy imports.
+- **Settings areas are tabs.** *Models*, *Approvals*, *Agent*, *Context* and *Data* stay at the top; the selected area is larger and highlighted, and only its settings are shown. Arrow keys, Home and End move between areas, and Settings reopens on the last area. In narrow sidebars the other areas shrink to their icon.
+- **Retry** under the last response is now a quiet icon that appears on hover or keyboard focus, next to Copy. Errors keep their visible Retry button.
+- `@` with nothing typed yet suggests the active editor and open tabs first.
+- Binary files and files larger than 5 MB are refused with a notice when attached, instead of being sent as unreadable text.
+- Settings are grouped into *Models*, *Approvals & Safety*, *Agent*, *Context* and *Chats* in the VS Code Settings editor. `sovran.approvals.fileEdits` is deprecated in favor of `sovran.approvals.mode` and is still honored when the new setting is unset.
+- The view title shows New Chat, History and Settings; providers, approvals and logs moved to the `…` menu.
+- The chip for a file Sovran does not share now says so instead of looking included.
+- The loop guard compares tool arguments structurally, so whitespace or key order no longer hide a repeated failure.
+- Provider presets are a proper list of buttons for screen readers.
+- **New Sovran brand**: `[•]` symbol, lowercase wordmark and the motto "Own your intelligence.". New Marketplace icon and banner, and an Activity Bar icon in `currentColor`.
+- **Minimal restyle**: surfaces, text and borders follow the VS Code theme. A single accent (`#FF5A36`) marks the primary action and active states as the logo's dot. Gradients and the separate Plan/Act colors are removed.
+- **Status bar**: shows `sovran · <model> · <local | host>` with the logo glyph, so it is clear where requests go.
 
 ### Fixed
+
 - **Native Git works with the Git of current LTS distributions.** A host Git without `--no-lazy-fetch` (Ubuntu 24.04
   ships 2.43) made every Git tool refuse. Such a Git is now used for ordinary repositories; only partial clones, the
   one case where a read could fetch, are still refused there.
@@ -123,8 +168,13 @@ pre-releases and even minor versions are stable releases.
 - The approval buttons can no longer end up below a long diff or be folded away with the tool row.
 - <kbd>Esc</kbd> in the empty chat input rejects a pending action instead of stopping the whole run (the Stop button still stops it).
 - A removed line that starts with `-- ` (an SQL or Lua comment) was hidden from diffs in the chat.
+- `config.yaml` saved with another program is applied within about two seconds on every system: file watching misses or delays changes to a file outside the workspace that no editor has open (Linux, macOS), so Sovran also checks the file's date and size.
+- A repeated or late file event, Sovran's own write or Reload no longer undoes a provider just changed in Settings: the sync now decides by content whether the file changed. If both change at the same moment, the file's hand edit wins and Sovran says so.
+- Emptying a limit in the provider form now removes it (it used to keep the old value).
+- Learning that a model needs prompted tools no longer drops what else Sovran learned about it.
 
 ### Security
+
 - On Windows a local MCP server given by name (`npx`, `uvx`) is started by its full path outside the workspace: a
   file of the same name in the repository can no longer run in its place. Name the path to use one in the workspace.
 - Workflow actions are pinned to commit SHAs.
@@ -150,70 +200,32 @@ pre-releases and even minor versions are stable releases.
 - `sovran.terminal.mirrorToTerminal` is user-scope only, so a workspace cannot hide the command mirror.
 - Agent commands no longer inherit `ELECTRON_RUN_AS_NODE` from the extension host.
 
-### Fixed
-- `config.yaml` saved with another program is applied within about two seconds on every system: file watching misses or delays changes to a file outside the workspace that no editor has open (Linux, macOS), so Sovran also checks the file's date and size.
-- A repeated or late file event, Sovran's own write or Reload no longer undoes a provider just changed in Settings: the sync now decides by content whether the file changed. If both change at the same moment, the file's hand edit wins and Sovran says so.
-- Emptying a limit in the provider form now removes it (it used to keep the old value).
-- Learning that a model needs prompted tools no longer drops what else Sovran learned about it.
+### Foundations
 
-### Changed
-- Native tool schemas sent to the model leave out constraints that tell it nothing (`minLength: 1`, guard lengths of
-  1,000 characters or more, safe-integer bounds), about 7% fewer definition tokens. Validation is unchanged.
-- `sovran.context.maxToolResultChars` is lowered for models with small context windows, to at most about 15% of their
-  input budget, so a single result cannot crowd out the conversation and tools page sooner.
-- The sidebar shows **Sovran** instead of *Sovran: Agent*: the view is named like its container, which VS Code then shows once. `Sovran: Focus Agent` is now `Sovran: Focus Panel`.
-- **"API key" is the labelled default authentication** (sent as `Authorization: Bearer <key>`, the OpenAI standard), listed first and explained in the form; providers using a custom header show it on their card.
-- **Chat titles are written by the model by default**, with room for models that always reason (GLM, DeepSeek-R1); turn it off in Settings.
-- Build: the Vite and Vitest configs are ESM (`.mts`), which removes Vite's `configLoader` warning without making the CommonJS extension bundle an ES module. The webview bundle has a 650 kB size budget instead of Vite's 500 kB default for network-loaded pages: it is read from local disk, and the budget still warns about accidental heavy imports.
-- **Settings areas are tabs.** *Models*, *Approvals*, *Agent*, *Context* and *Data* stay at the top; the selected area is larger and highlighted, and only its settings are shown. Arrow keys, Home and End move between areas, and Settings reopens on the last area. In narrow sidebars the other areas shrink to their icon.
-- **Retry** under the last response is now a quiet icon that appears on hover or keyboard focus, next to Copy. Errors keep their visible Retry button.
-- `@` with nothing typed yet suggests the active editor and open tabs first.
-- Binary files and files larger than 5 MB are refused with a notice when attached, instead of being sent as unreadable text.
-- Settings are grouped into *Models*, *Approvals & Safety*, *Agent*, *Context* and *Chats* in the VS Code Settings editor. `sovran.approvals.fileEdits` is deprecated in favor of `sovran.approvals.mode` and is still honored when the new setting is unset.
-- The view title shows New Chat, History and Settings; providers, approvals and logs moved to the `…` menu.
-- The chip for a file Sovran does not share now says so instead of looking included.
-- The loop guard compares tool arguments structurally, so whitespace or key order no longer hide a repeated failure.
-- Provider presets are a proper list of buttons for screen readers.
-- **New Sovran brand**: `[•]` symbol, lowercase wordmark and the motto "Own your intelligence.". New Marketplace icon and banner, and an Activity Bar icon in `currentColor`.
-- **Minimal restyle**: surfaces, text and borders follow the VS Code theme. A single accent (`#FF5A36`) marks the primary action and active states as the logo's dot. Gradients and the separate Plan/Act colors are removed.
-- **Status bar**: shows `sovran · <model> · <local | host>` with the logo glyph, so it is clear where requests go.
+The internal preview that this release builds on.
 
-### Added
-- **Exploration rows** group consecutive file reads and searches (*Explored · 3 files read, 1 search*).
-- **"Latest" / "Approval needed" pill** appears when you scroll away from the end of a running conversation.
-- **Keyboard hints** under the composer, on one line that follows what the keys do right now (send, choose a suggestion, stop). It is always shown, so focusing the composer no longer shifts the layout.
-- **Undo changes.** Each response that edits files records a checkpoint, and one click restores the pre-response state. The prompt protects files you changed afterwards, and the restore is itself undoable.
-- **Retry, edit and resend.** Rewind the conversation, optionally undoing file changes from the discarded responses.
-- **Conversation compaction.** Older turns are summarized when the context is full (`sovran.context.autoCompact`), or on demand with `/compact` or the context meter.
-- **Context meter** in the composer, using an estimate first and then the token count reported by the server.
-- **`@` file mentions** with fuzzy search, and **`/` slash commands** (built-in, plus `.sovran/commands/*.md` in trusted workspaces).
-- **Separate Plan-mode model** (`sovran.planModel`).
-- **ripgrep search** through VS Code's bundled binary. It respects `.gitignore` and excludes protected paths, which are filtered again in core.
-- `SOVRAN: Compact Conversation` command.
-
-## 0.1.0 — Preview
-
-First preview release.
-
-### Agent
+#### Agent
 - An agent loop with streaming, tool calling, an iteration cap, a loop guard and cancellation.
 - Plan mode (read-only by construction) and Act mode (edits and commands with approval).
 - Ten built-in tools: read, list, find and search files; workspace and editor context; write, edit and multi-edit files; run terminal commands.
 - Edits use exact search/replace with CRLF preservation, a staleness check and undoable `WorkspaceEdit` writes.
 
-### Providers
+#### Providers
 - Multiple OpenAI-compatible providers and models, with bearer or custom-header auth stored in Secret Storage.
 - Automatic fallback to prompted tool calling when a server rejects native tools, remembered per model.
 - Tolerant handling of non-streaming responses, `reasoning_content`, `<think>` and `<tool_call>` text.
 - Connection test, model discovery, actionable error messages and timeouts.
 
-### Experience
+#### Experience
 - An Activity Bar view with transcript, inline approvals, native diff review and a command terminal mirror.
 - Context chips for the active file or selection and for attached files; native model Quick Pick; status bar item.
 - Persistent, searchable chat history with rename and delete.
 - Themed through VS Code tokens (dark, light and high contrast), with full keyboard support.
 
-### Security
+#### Security
 - Security settings are read from user scope only, and paths are confined to the workspace (symlink-aware).
 - Protected paths, a command allow-list that rejects shell metacharacters, and a warning for invisible or bidi characters in commands.
 - Strict CSP, markdown rendered with `html:false` plus DOMPurify, and zod-validated webview messages.
+
+[Unreleased]: https://github.com/Minells/sovran/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Minells/sovran/releases/tag/v0.1.0
