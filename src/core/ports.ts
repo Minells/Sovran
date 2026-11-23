@@ -123,6 +123,7 @@ export interface ProcessResult {
   timedOut: boolean;
   cancelled: boolean;
   durationMs: number;
+  startError?: string;
 }
 
 export interface ProcessOptions {

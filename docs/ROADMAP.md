@@ -46,6 +46,7 @@ Effort assumes one engineer with an AI pair. **P** is priority (1 = highest).
 |---|---|---|---|---|
 | F6 | `@` file mentions and `/` slash commands (built-in and `.sovran/commands/*.md`) | 2 | M | Faster context and repeatable workflows |
 | F7 | A separate model for Plan and Act | 2 | S | A big model plans and a fast model executes, which makes good use of limited local hardware |
+| F16 | Opt-in inline completions with a dedicated FIM model | 2 | M | Run a fast editor model independently from the chat agent |
 
 ### Wave 3 — Extensibility & enterprise · target v0.3–v0.4
 
@@ -70,5 +71,4 @@ Effort assumes one engineer with an AI pair. **P** is priority (1 = highest).
 | Item | Reason |
 |---|---|
 | Embedding index / RAG | Costly to keep fresh. Agentic search with ripgrep covers most needs. Revisit with data |
-| Inline completions (ghost text) | A different product with strict latency requirements. Better served by dedicated FIM tools |
 | Multi-agent orchestration | Adds cost and failure modes before single-agent reliability is proven on local models |

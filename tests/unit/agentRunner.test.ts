@@ -3,7 +3,8 @@ import { AgentRunner, type AgentSettings, type RunOptions } from '../../src/core
 import type { AgentEvent } from '../../src/core/agent/events';
 import { MemoryCapabilityStore } from '../../src/core/providers/capabilities';
 import { ProviderError } from '../../src/core/providers/errors';
-import type { Session, ToolMessage } from '../../src/core/sessions/model';
+import { repairInterruptedSession, type Session, type ToolMessage } from '../../src/core/sessions/model';
+import { taskFacts, testOutcome, type TaskAction } from '../../src/core/sessions/task';
 import { createBuiltinRegistry } from '../../src/core/tools/builtin';
 import { nullLogger } from '../../src/core/ports';
 import { FakeProcess, MemoryWorkspace, ScriptedApprovals, ScriptedProvider, call, text } from '../fixtures/fakes';
@@ -16,11 +17,11 @@ const settings: AgentSettings = {
   defaultMaxOutputTokens: 4096,
 };
 
-function setup(turns: ConstructorParameters<typeof ScriptedProvider>[0], opts: { files?: Record<string, string>; approvals?: ScriptedApprovals; waits?: number[] } = {}) {
+function setup(turns: ConstructorParameters<typeof ScriptedProvider>[0], opts: { files?: Record<string, string>; approvals?: ScriptedApprovals; waits?: number[]; process?: FakeProcess } = {}) {
   const provider = new ScriptedProvider(turns);
   const workspace = new MemoryWorkspace(opts.files ?? { 'src/a.ts': 'const a = 1;\n' });
   const approvals = opts.approvals ?? new ScriptedApprovals();
-  const process = new FakeProcess();
+  const process = opts.process ?? new FakeProcess();
   const capabilities = new MemoryCapabilityStore();
   let n = 0;
   const runner = new AgentRunner({
@@ -80,6 +81,67 @@ describe('AgentRunner limits', () => {
 });
 
 describe('AgentRunner', () => {
+  it.each([[0, 'passed'], [1, 'failed'], [null, 'inconclusive']] as const)(
+    'records real verification evidence for exit %s',
+    async (exitCode, expected) => {
+      const process = new FakeProcess({ exitCode, output: 'Observed output' });
+      const t = setup([
+        [call(0, 'edit_file', { path: 'src/a.ts', old_string: 'a = 1', new_string: 'a = 2' })],
+        [call(0, 'execute_terminal', { command: 'npm test' })],
+        [text('The tests passed.')],
+      ], { process });
+      const actions: TaskAction[] = [];
+      const result = await t.run({ observeAction: async (action) => { actions.push(action); } });
+      expect(result.reason).toBe('completed');
+      expect(t.workspace.get('src/a.ts')).toContain('a = 2');
+      expect(actions.map((a) => a.status)).toEqual(['running', 'success', 'running', exitCode === 0 ? 'success' : 'error']);
+      expect(testOutcome(actions[3]!)).toBe(expected);
+      if (exitCode !== 0) expect(actions[3]!.error).toContain('Observed output');
+    },
+  );
+
+  it('keeps observed effects on provider failure and requires fresh approval on resume', async () => {
+    const approvals = new ScriptedApprovals(() => ({ approved: false }));
+    const t = setup([
+      [call(0, 'execute_terminal', { command: 'npm test' })],
+      new ProviderError('network', 'connection lost'),
+      [call(0, 'read_file', { path: 'src/a.ts' })],
+      [call(0, 'execute_terminal', { command: 'npm test' })],
+      [text('Inspected the current file.')],
+    ], { approvals });
+    const actions = new Map<string, TaskAction>();
+    const observeAction = async (action: TaskAction) => { actions.set(action.id, action); };
+    expect((await t.run({ observeAction })).reason).toBe('error');
+    expect(t.process.commands).toHaveLength(1);
+    t.workspace.set('src/a.ts', 'current user edit');
+    const result = await t.run({
+      observeAction,
+      resume: { afterMessageId: t.session.messages.at(-1)!.id, facts: taskFacts({
+        status: 'error', actions: [...actions.values()], changes: [],
+      }) },
+    });
+    expect(result.reason).toBe('completed');
+    expect(t.process.commands).toHaveLength(1);
+    expect(approvals.requests[0]?.reason).toContain('resuming');
+    expect(t.provider.requests[2]?.messages.at(-1)?.content).toContain('npm test [success, exit 0]');
+    expect(toolMsgs(t.session).some((m) => m.toolName === 'read_file' && m.content.includes('current user edit'))).toBe(true);
+  });
+
+  it('reopens a crash with an uncertain effect and keeps older session messages readable', () => {
+    const t = setup([]);
+    const user = t.session.messages[0]!;
+    if (user.role !== 'user') throw new Error('Expected user message.');
+    user.task = {
+      status: 'running', changes: [],
+      actions: [{ id: 'one', tool: 'execute_terminal', kind: 'terminal', label: 'npm test', paths: [], status: 'running' }],
+    };
+    expect(repairInterruptedSession(t.session, 1).messages[0]).toMatchObject({
+      task: { status: 'interrupted', actions: [{ status: 'unknown' }] },
+    });
+    delete user.task;
+    expect(repairInterruptedSession(t.session, 1).messages[0]).toEqual(user);
+  });
+
   it('completes a multi-step read → edit flow with approval and a native diff proposal', async () => {
     const t = setup([
       [call(0, 'read_file', { path: 'src/a.ts' })],

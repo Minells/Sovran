@@ -141,6 +141,10 @@ export const readFileTool = defineTool({
     return {
       content: `${header}\n${body}${more}${stop}`,
       summary: `${source ? `${source} · ` : ''}${partial ? `lines ${start}–${end} of ${total}` : `${total} lines`}`,
+      contextSources: [{
+        path: resolved.relative, startLine: start, endLine: end, origin: 'read-file',
+        ...(source ? { detail: source } : {}), truncated: partial || cut,
+      }],
     };
   },
 });

@@ -26,3 +26,22 @@ export function sendsKeyInsecurely(baseUrl: string, authType: 'none' | 'bearer' 
     return false;
   }
 }
+
+/** llama.cpp's native infill is a sibling of its OpenAI-compatible /v1 base. */
+export function infillEndpoint(baseUrl: string): URL | undefined {
+  try {
+    const url = new URL(baseUrl);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+      return;
+    const base = url.pathname.replace(/\/+$/, '');
+    if (!base.endsWith('/v1')) return;
+    url.pathname = `${base.slice(0, -3)}/infill`;
+    return url;
+  } catch {
+    return undefined;
+  }
+}
+
+export function supportsInfill(baseUrl: string, model: { fim?: string } | undefined): boolean {
+  return model?.fim === 'llama.cpp-infill' && !!infillEndpoint(baseUrl);
+}

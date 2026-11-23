@@ -9,6 +9,9 @@ import {
   runFileProcess,
   runProcess,
 } from '../../src/extension/adapters/processExecution';
+import { executeTerminalTool } from '../../src/core/tools/builtin/terminalTool';
+import { finishTaskAction, testOutcome, type TaskAction } from '../../src/core/sessions/task';
+import { FakeProcess, MemoryWorkspace } from '../fixtures/fakes';
 
 const folders: string[] = [];
 afterEach(async () => {
@@ -22,6 +25,41 @@ const options = (cwd = os.tmpdir()) => ({
 });
 
 describe('structured process execution', () => {
+  it('records a real failing test and its successful rerun after a fix', async () => {
+    const folder = await fs.mkdtemp(path.join(os.tmpdir(), 'sovran-verify-'));
+    folders.push(folder);
+    await fs.writeFile(path.join(folder, 'sum.cjs'), 'module.exports = (a, b) => a - b;');
+    await fs.writeFile(path.join(folder, 'sum.test.cjs'), [
+      "const { test } = require('node:test');",
+      "const assert = require('node:assert/strict');",
+      "test('adds two numbers', () => assert.equal(require('./sum.cjs')(2, 3), 5));",
+    ].join('\n'));
+    const workspace = new MemoryWorkspace();
+    const fake = new FakeProcess();
+    const ctx = {
+      workspace,
+      process: {
+        run: (_command: string, opts: Parameters<FakeProcess['runFile']>[2]) =>
+          runProcess(process.execPath, ['--test', 'sum.test.cjs'], { ...opts, cwd: folder }, { env: process.env }),
+        runFile: fake.runFile.bind(fake),
+      },
+      settings: { terminalTimeoutMs: 10_000, maxToolResultChars: 4000, protectedPaths: [] },
+      signal: new AbortController().signal,
+    };
+    const args = { command: 'node --test sum.test.cjs' };
+    const run = async () => {
+      const result = await executeTerminalTool.execute(args, ctx, await executeTerminalTool.prepare!(args, ctx));
+      const action: TaskAction = { id: 'test', tool: 'execute_terminal', kind: 'terminal', label: args.command,
+        command: args.command, paths: [], status: 'running' };
+      return finishTaskAction(action, result.isError ? 'error' : 'success', result.content, result.display, []);
+    };
+    const failing = await run();
+    expect(testOutcome(failing)).toBe('failed');
+    expect(failing.error).toContain('adds two numbers');
+    await fs.writeFile(path.join(folder, 'sum.cjs'), 'module.exports = (a, b) => a + b;');
+    expect(testOutcome(await run())).toBe('passed');
+  });
+
   it('passes shell metacharacters and spaces as literal argv and separates stdout from stderr', async () => {
     const args = ['space here', '; echo injected', '$(touch forbidden)', '`id`', '--flag', 'ä😀'];
     const result = await runFileProcess(

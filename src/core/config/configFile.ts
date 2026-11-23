@@ -76,6 +76,7 @@ const modelSchema = z.strictObject({
   temperature: z.number().min(0).max(2).optional(),
   toolMode: z.enum(['auto', 'native', 'prompted', 'none']).optional(),
   vision: z.boolean().optional(),
+  fim: z.literal('llama.cpp-infill').optional(),
 });
 
 // Cross-field checks live on the smallest schema that owns the fields: Zod skips an object's refinements when any of
@@ -190,7 +191,7 @@ const KNOWN_FIELDS = {
   file: ['providers', 'defaultModel', 'planModel', 'titleModel'],
   provider: ['id', 'name', 'baseUrl', 'auth', 'headers', 'timeoutSeconds', 'models'],
   auth: ['type', 'headerName'],
-  model: ['id', 'name', 'contextWindow', 'maxOutputTokens', 'temperature', 'toolMode', 'vision'],
+  model: ['id', 'name', 'contextWindow', 'maxOutputTokens', 'temperature', 'toolMode', 'vision', 'fim'],
 };
 
 function knownFieldsAt(path: readonly PropertyKey[]): string[] {
@@ -402,6 +403,7 @@ export function canonicalProvider(p: ProviderConfig): ProviderConfig {
       ...(m.temperature !== undefined ? { temperature: m.temperature } : {}),
       ...(m.toolMode && m.toolMode !== 'auto' ? { toolMode: m.toolMode } : {}),
       ...(m.vision !== undefined ? { vision: m.vision } : {}),
+      ...(m.fim ? { fim: m.fim } : {}),
     })),
   };
 }

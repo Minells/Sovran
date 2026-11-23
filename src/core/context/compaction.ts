@@ -1,6 +1,7 @@
 import { TaggedStreamParser } from '../agent/taggedStream';
 import type { ChatProvider, ModelConfig } from '../providers/types';
 import type { SessionMessage } from '../sessions/model';
+import { taskFacts } from '../sessions/task';
 import { truncateMiddle } from '../tools/edits';
 
 export const SUMMARY_SYSTEM_PROMPT = `You compress the history of a coding-agent conversation so the agent can continue the task with a smaller context.
@@ -32,6 +33,7 @@ export function renderForSummary(messages: readonly SessionMessage[], previousSu
     if (m.role === 'user') {
       const files = [...(m.attachments?.map((a) => a.path) ?? []), ...(m.images?.map((i) => `${i.name} (image)`) ?? [])].join(', ');
       lines.push(`USER: ${m.content}${files ? `\n(attached: ${files})` : ''}`);
+      if (m.task) lines.push(`EXTENSION-OBSERVED TASK STATE:\n${taskFacts(m.task)}`);
     } else if (m.role === 'assistant') {
       if (m.content.trim()) lines.push(`ASSISTANT: ${m.content.trim()}`);
       for (const c of m.toolCalls ?? []) lines.push(`ASSISTANT CALLED ${c.name}(${truncateMiddle(c.arguments, 300)})`);

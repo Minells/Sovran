@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { planCompaction, renderForSummary, summarize } from '../context/compaction';
 import type { DocumentReader } from '../documents/reader';
 import { buildContext, CHARS_PER_TOKEN, estimateTokens } from '../context/contextManager';
+import { automaticFile, selectTargetedContext, type ExcludedFile } from '../context/targetedContext';
 import { commandPathRisks } from '../permissions/commands';
 import { decide, type AgentMode, type PolicySettings, type SessionGrants } from '../permissions/policy';
 import type { ApprovalPort, Logger, ProcessPort, WorkspacePort } from '../ports';
@@ -16,9 +17,12 @@ import { ProviderError, errorFromException } from '../providers/errors';
 import type { ChatProvider, ModelConfig, ResolvedToolMode } from '../providers/types';
 import { PathError } from '../security/paths';
 import { redact, redactKnown } from '../security/redact';
+import { finishTaskAction, type TaskAction } from '../sessions/task';
 import {
   messagesForModel,
   type AssistantMessage,
+  type ContextAttachment,
+  type ContextSource,
   type ErrorInfo,
   type Session,
   type ToolCall,
@@ -95,6 +99,7 @@ export interface RunOptions {
   signal: AbortSignal;
   emit: (event: AgentEvent) => void;
   projectInstructions?: string;
+  projectInstructionsSource?: ContextSource;
   /** Secrets to scrub from any error text (e.g. the provider API key). */
   secrets?: readonly (string | undefined)[];
   /** Summarize older turns instead of dropping them when the context window is full. */
@@ -108,6 +113,10 @@ export interface RunOptions {
   images?: ReadonlyMap<string, string>;
   /** What on-demand loading can know about the request beyond its text: its slash command and the MCP servers. */
   routing?: RoutingHints;
+  /** Persist effect intent before dispatch and the observed result afterwards. */
+  observeAction?: (action: TaskAction) => Promise<void>;
+  resume?: { afterMessageId: string; facts: string };
+  targetedContext?: { excluded: ExcludedFile };
 }
 
 export type CompactOptions = Pick<
@@ -181,6 +190,38 @@ export class AgentRunner {
     }
 
     this.prepareToolUnits(o);
+    const target = o.targetedContext;
+    const allowed = (name: string) => {
+      const tool = this.deps.registry.get(name);
+      const policy = o.policy?.() ?? o.settings.policy;
+      return !!tool && !policy.forceAskTools?.includes(name) && !this.deps.registry.unavailable(tool, o.mode, {
+        ...policy,
+        excludedToolGroups: o.session.excludedToolGroups,
+        workspaceTrusted: this.deps.workspace.isTrusted(),
+      });
+    };
+    const lastFailure = () => latest?.task?.actions.findLast((a) => a.kind === 'terminal' && !!a.error);
+    let failed = lastFailure();
+    const changedPaths = o.resume && latest?.task ? [...new Set([
+      ...latest.task.changes.map((file) => file.path),
+      ...latest.task.actions.flatMap((action) => action.paths),
+    ])] : [];
+    const collect = (failedOutput: string | undefined) => latest && target ? selectTargetedContext({
+      prompt: latest.content,
+      failedOutput,
+      changedPaths,
+      activePath: latest.attachments?.find((a) => a.origin === 'editor')?.path,
+      excluded: target.excluded,
+      allowed,
+      secrets: o.secrets,
+      tool: {
+        workspace: this.deps.workspace,
+        process: this.deps.process,
+        signal: AbortSignal.any([o.signal, AbortSignal.timeout(1200)]),
+        settings: { ...this.toolSettings(o), protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths },
+      },
+    }).catch(() => []) : Promise.resolve([]);
+    let selected = await collect(failed?.error);
 
     while (iteration < o.settings.maxIterations) {
       if (o.signal.aborted) return { reason: 'cancelled' };
@@ -203,13 +244,29 @@ export class AgentRunner {
       let offered: ReadonlyMap<string, AnyTool>;
       let loadable: readonly LoadableUnit[];
       try {
-        let built = this.buildRequest(o, toolMode, vision);
+        const failure = lastFailure();
+        if (failure !== failed) {
+          failed = failure;
+          selected = await collect(failed?.error);
+        }
+        const checked: ContextAttachment[] = [];
+        if (target && allowed('read_file') && this.deps.workspace.isTrusted()) {
+          const policy = o.policy?.() ?? o.settings.policy;
+          for (const attachment of selected) {
+            if (o.signal.aborted || !allowed('read_file')) break;
+            if (await automaticFile(attachment.path, this.deps.workspace, policy.protectedPaths, target.excluded)) {
+              checked.push(attachment);
+            }
+          }
+        }
+        const targeted = latest && checked.length ? { messageId: latest.id, attachments: checked } : undefined;
+        let built = this.buildRequest(o, toolMode, vision, targeted);
         if (built.droppedTurns > 0 && o.autoCompact && !compactedThisRun) {
           compactedThisRun = true;
           if (await this.compact(o)) {
             // The prompt changed from the start: a good moment to drop tools the conversation no longer uses.
             this.prepareToolUnits(o);
-            built = this.buildRequest(o, toolMode, vision);
+            built = this.buildRequest(o, toolMode, vision, targeted);
           }
           if (o.signal.aborted) return { reason: 'cancelled' };
         }
@@ -226,6 +283,7 @@ export class AgentRunner {
           budgetTokens: built.budgetTokens,
           contextWindow: built.contextWindow,
           breakdown: built.breakdown,
+          sources: [...(o.projectInstructionsSource ? [o.projectInstructionsSource] : []), ...built.sources],
         });
         const request = built.request;
         offered = built.offered;
@@ -364,7 +422,10 @@ export class AgentRunner {
     return { reason: 'max_iterations' };
   }
 
-  private buildRequest(o: RunOptions, toolMode: ResolvedToolMode, vision = false) {
+  private buildRequest(
+    o: RunOptions, toolMode: ResolvedToolMode, vision: boolean,
+    targeted?: { messageId: string; attachments: readonly ContextAttachment[] },
+  ) {
     const available = toolMode === 'none' ? [] : this.availableTools(o);
     const offer =
       o.settings.toolLoading === 'auto'
@@ -395,9 +456,24 @@ export class AgentRunner {
     // Prompted tools are described inside the system prompt; the breakdown still counts them as tools.
     const promptedToolTokens =
       toolMode === 'prompted' && schemas.length ? estimateTokens(renderToolInstructions(schemas)) : 0;
+    const messages = messagesForModel(o.session);
+    const resume = o.resume;
+    const anchor = resume ? messages.findIndex((m) => m.id === resume.afterMessageId) : -1;
+    const original = anchor >= 0 ? messages.slice(0, anchor + 1).findLast((m) => m.role === 'user') : undefined;
+    const continueId = resume && anchor >= 0 ? `${resume.afterMessageId}-resume` : undefined;
     const ctx = buildContext({
       systemPrompt,
-      messages: messagesForModel(o.session),
+      messages: resume && continueId
+        ? [
+            ...messages.slice(0, anchor + 1).filter((m, i) => i !== anchor || m !== original).map((m) => m === original
+              ? { ...m, attachments: undefined, images: undefined } : m),
+            {
+              role: 'user', id: continueId, content: resume.facts, createdAt: 0,
+              attachments: original?.attachments, images: original?.images,
+            },
+            ...messages.slice(anchor + 1),
+          ]
+        : messages,
       toolMode,
       budgetTokens,
       toolSchemaTokens: schemaTokens,
@@ -405,6 +481,8 @@ export class AgentRunner {
       summary: o.session.compaction?.summary,
       images: o.images,
       vision,
+      targeted: targeted && continueId ? { ...targeted, messageId: continueId } : targeted,
+      secrets: o.secrets,
     });
     return {
       offered: new Map(tools.map((tool) => [tool.name, tool])),
@@ -425,6 +503,7 @@ export class AgentRunner {
       },
       budgetTokens,
       contextWindow,
+      sources: ctx.sources,
     };
   }
 
@@ -785,7 +864,7 @@ export class AgentRunner {
               roots: this.deps.workspace.roots().map((r) => r.path),
             })
           : [];
-      return decide({
+      const decision = decide({
         toolName: tool.name,
         risk: tool.risk,
         mode: o.mode,
@@ -798,6 +877,10 @@ export class AgentRunner {
         settings: policy,
         grants: o.grants,
       });
+      if (o.resume && (tool.risk !== 'read' || mcp) && decision.action === 'allow') {
+        return { action: 'ask' as const, reason: 'Review actions with side effects while resuming this task.' };
+      }
+      return decision;
     };
     const decision = evaluate();
     if (decision.action === 'deny') return result('denied', decision.reason, { summary: label });
@@ -837,19 +920,46 @@ export class AgentRunner {
       if (response.grant === 'session-edits') o.grants.edits = true;
     }
 
+    const observed = o.observeAction && (tool.risk !== 'read' || prepared.mcp)
+      ? {
+          id: this.newId(),
+          tool: tool.name,
+          kind: prepared.mcp ? 'mcp' : prepared.command ? 'terminal' : tool.group === 'git' ? 'git' : tool.risk === 'write' ? 'edit' : 'external',
+          label: redact(label, o.secrets),
+          paths: prepared.paths.map((p) => redact(p, o.secrets)),
+          status: 'running',
+          ...(prepared.approval?.kind === 'command' ? {
+            command: redact(prepared.approval.command, o.secrets),
+            cwd: redact(prepared.approval.cwd, o.secrets),
+          } : {}),
+        } satisfies TaskAction
+      : undefined;
+    const finish = async (message: ToolMessage): Promise<ToolMessage> => {
+      if (observed) {
+        await o.observeAction?.(finishTaskAction(observed, message.status, message.content, message.display, o.secrets ?? []));
+      }
+      return message;
+    };
+    if (observed) {
+      try {
+        await o.observeAction?.(observed);
+      } catch {
+        return result('error', 'The action could not be recorded before dispatch. It was not run.');
+      }
+    }
     o.emit({ type: 'tool_phase', callId: call.id, toolName: tool.name, label, phase: 'running' });
     // No await between this final check and dispatch. UI event listeners may also change policy or cancel.
-    if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.', { summary: label });
+    if (o.signal.aborted) return finish(result('cancelled', 'Cancelled before dispatch.', { summary: label }));
     const finalUnavailable = unavailable();
-    if (finalUnavailable) return result('denied', finalUnavailable, { summary: label });
+    if (finalUnavailable) return finish(result('denied', finalUnavailable, { summary: label }));
     const finalDecision = evaluate();
-    if (finalDecision.action === 'deny') return result('denied', finalDecision.reason, { summary: label });
+    if (finalDecision.action === 'deny') return finish(result('denied', finalDecision.reason, { summary: label }));
     if (finalDecision.action === 'ask' && approvedReason !== finalDecision.reason) {
-      return result(
+      return finish(result(
         'denied',
         'Permissions changed before execution. Request this action again for approval.',
         { summary: label },
-      );
+      ));
     }
     ctx.settings = { ...ctx.settings, protectedPaths: (o.policy?.() ?? o.settings.policy).protectedPaths };
     const audit =
@@ -871,21 +981,23 @@ export class AgentRunner {
     try {
       const r = await tool.execute(args, ctx, prepared);
       if (o.signal.aborted && tool.risk !== 'write') {
-        return result('cancelled', r.content || 'Cancelled.', {
+        return finish(result('cancelled', r.content || 'Cancelled.', {
           summary: r.summary ?? label,
           display: r.display,
           ...audit,
-        });
+        }));
       }
-      return result(r.isError ? 'error' : 'success', r.content, {
+      return finish(result(r.isError ? 'error' : 'success', r.content, {
         summary: r.summary ?? label,
         display: r.display,
+        ...(r.contextSources && r.content.length <= this.toolSettings(o).maxToolResultChars
+          ? { contextSources: r.contextSources } : {}),
         ...audit,
-      });
+      }));
     } catch (e) {
-      if (o.signal.aborted) return result('cancelled', 'Cancelled by the user.', { summary: label });
+      if (o.signal.aborted) return finish(result('cancelled', 'Cancelled by the user.', { summary: label }));
       this.deps.logger.warn(`Tool ${tool.name} failed: ${e instanceof Error ? e.message : String(e)}`);
-      return result('error', describeToolFailure(e), { summary: label });
+      return finish(result('error', describeToolFailure(e), { summary: label }));
     }
   }
 

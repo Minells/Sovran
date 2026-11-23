@@ -57,6 +57,7 @@ export interface ModelView {
   /** What the server reports for the model, when it does. */
   serverLimits?: { contextWindow?: number; maxOutputTokens?: number };
   toolMode: ToolMode;
+  fim?: 'llama.cpp-infill';
   /** What Sovran learned at runtime (e.g. downgraded to prompted tools). */
   learnedToolMode?: 'native' | 'prompted';
 }
@@ -225,6 +226,7 @@ export interface LiveSessionView {
 
 /** User-scope settings edited from the Settings view. Effective values; see `overriddenByWorkspace`. */
 export interface SettingsView {
+  autocompleteEnabled?: boolean;
   /** Approval mode a new window starts in (`sovran.approvals.mode`). */
   defaultApprovalMode: ApprovalMode;
   allowedCommands: string[];
@@ -308,6 +310,8 @@ export interface AppState {
   planModel: SelectedModel | null;
   /** Model that names new chats when titles are generated; null means "the chat's model". */
   titleModel: SelectedModel | null;
+  /** Configured providerId/modelId override. An empty string follows the Act model. */
+  autocompleteModel?: string;
   mode: AgentMode;
   /** How much Act mode may do without asking, for this window. */
   approvalMode: ApprovalMode;
@@ -448,6 +452,7 @@ export const providerInputSchema = z.object({
         contextWindow: z.number().int().min(1024).max(10_000_000).optional(),
         maxOutputTokens: z.number().int().min(64).max(1_000_000).optional(),
         toolMode: z.enum(['auto', 'native', 'prompted', 'none']).optional(),
+        fim: z.literal('llama.cpp-infill').optional(),
       }),
     )
     .max(200),
@@ -499,6 +504,7 @@ export const settingUpdateSchema = z.discriminatedUnion('key', [
   z.object({ key: z.literal('sessions.persist'), value: z.boolean() }),
   z.object({ key: z.literal('sessions.generateTitles'), value: z.boolean() }),
   z.object({ key: z.literal('tools.loading'), value: z.enum(['auto', 'all']) }),
+  z.object({ key: z.literal('autocomplete.enabled'), value: z.boolean() }),
 ]);
 export type SettingUpdate = z.infer<typeof settingUpdateSchema>;
 export type SettingKey = SettingUpdate['key'];
@@ -541,7 +547,7 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   /** Sets the Act, Plan or title model explicitly; a Plan or title model without ids means "same as the chat's". */
   z.object({
     type: z.literal('setModel'),
-    role: z.enum(['act', 'plan', 'title']),
+    role: z.enum(['act', 'plan', 'title', 'autocomplete']),
     providerId: providerId.optional(),
     modelId: z.string().min(1).max(200).optional(),
   }),
@@ -608,6 +614,7 @@ export const webviewMessageSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('setMcpToken'), id: mcpId }),
   z.object({ type: z.literal('restoreCheckpoint'), messageId: id }),
   z.object({ type: z.literal('retry') }),
+  z.object({ type: z.literal('resumeTask'), messageId: id }),
   z.object({ type: z.literal('editMessage'), messageId: id, text: z.string().min(1).max(200_000) }),
   z.object({ type: z.literal('compact') }),
   z.object({ type: z.literal('suggestFiles'), requestId: id, query: z.string().max(200) }),

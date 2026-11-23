@@ -10,6 +10,21 @@ export interface OpenAICompatibleOptions {
   fetch?: typeof fetch;
 }
 
+export async function providerHeaders(
+  { config, getApiKey }: OpenAICompatibleOptions,
+  json: boolean,
+  accept = 'application/json, text/event-stream',
+): Promise<{ headers: Record<string, string>; secret?: string; auth: AuthSent }> {
+  const headers: Record<string, string> = { Accept: accept, ...config.headers };
+  if (json) headers['Content-Type'] = 'application/json';
+  const auth = config.auth ?? { type: 'bearer' };
+  if (auth.type === 'none') return { headers, auth: { type: 'none', keySent: false } };
+  const secret = await getApiKey();
+  const header = auth.type === 'header' ? auth.headerName?.trim() || 'api-key' : 'Authorization';
+  if (secret) headers[header] = auth.type === 'header' ? secret : `Bearer ${secret}`;
+  return { headers, secret, auth: { type: auth.type, header, keySent: !!secret } };
+}
+
 /** Aborts when the external signal aborts or when no progress happens within `ms`. */
 class Watchdog {
   readonly controller = new AbortController();
@@ -68,17 +83,7 @@ export class OpenAICompatibleProvider implements ChatProvider {
   }
 
   private async headers(json: boolean): Promise<{ headers: Record<string, string>; secret?: string; auth: AuthSent }> {
-    const headers: Record<string, string> = {
-      Accept: 'application/json, text/event-stream',
-      ...(this.options.config.headers ?? {}),
-    };
-    if (json) headers['Content-Type'] = 'application/json';
-    const auth = this.options.config.auth ?? { type: 'bearer' };
-    if (auth.type === 'none') return { headers, auth: { type: 'none', keySent: false } };
-    const secret = await this.options.getApiKey();
-    const header = auth.type === 'header' ? auth.headerName?.trim() || 'api-key' : 'Authorization';
-    if (secret) headers[header] = auth.type === 'header' ? secret : `Bearer ${secret}`;
-    return { headers, secret, auth: { type: auth.type, header, keySent: !!secret } };
+    return providerHeaders(this.options, json);
   }
 
   /** GET `path` and parse JSON, with the same headers, timeout, redirect policy and error mapping as every request. */

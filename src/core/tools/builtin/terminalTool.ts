@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { commandPathRisks, commandRiskHints } from '../../permissions/commands';
 import { resolveAndVerify } from '../../security/paths';
+import { isTestCommand } from '../../sessions/task';
 import { ToolError, defineTool } from '../types';
 
 interface TerminalState {
@@ -17,6 +18,7 @@ export const executeTerminalTool = defineTool({
     command: z.string().min(1).max(4000),
     cwd: z.string().optional().describe('Workspace-relative working directory (default: workspace root)'),
     timeout_seconds: z.number().int().min(1).max(3600).optional(),
+    verification: z.boolean().optional().describe('Set when the command verifies the task, such as lint or typecheck.'),
   }),
   label: (a) => a.command,
   async prepare(a, ctx) {
@@ -56,9 +58,13 @@ export const executeTerminalTool = defineTool({
     const output = r.output.trim() || '(no output)';
     return {
       content: `$ ${a.command}\n[${status}${r.truncated ? ', output truncated' : ''}]\n${output}`,
-      isError: r.cancelled || r.timedOut || (r.exitCode !== null && r.exitCode !== 0),
+      isError: r.cancelled || r.timedOut || r.exitCode !== 0,
       summary: r.timedOut ? 'timed out' : r.cancelled ? 'cancelled' : `exit ${r.exitCode ?? '?'} · ${(r.durationMs / 1000).toFixed(1)}s`,
-      display: { kind: 'command', command: a.command, cwd: cwdRelative, output: r.output, exitCode: r.exitCode, timedOut: r.timedOut },
+      display: {
+        kind: 'command', command: a.command, cwd: cwdRelative, output: r.output,
+        exitCode: r.exitCode, timedOut: r.timedOut, cancelled: r.cancelled, signal: r.signal,
+        startError: r.startError, verification: a.verification || isTestCommand(a.command),
+      },
     };
   },
 });

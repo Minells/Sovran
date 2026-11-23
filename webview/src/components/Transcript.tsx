@@ -7,6 +7,8 @@ import { post } from '../vscode';
 import { useStore } from '../state/store';
 import { ApprovalDetail, approvalAnchor } from './Approval';
 import { DiffView } from './Diff';
+import { canResume, testOutcome, type TaskAction, type TaskState } from '../../../src/core/sessions/task';
+import type { ContextOrigin, ContextSource } from '../../../src/core/sessions/model';
 import { StickyPrompt } from './StickyPrompt';
 import { Button, Icon, IconButton, Mark } from './primitives';
 
@@ -547,6 +549,96 @@ function CopyButton({ text }: { text: string }) {
  * Under a response: the files it changed (always visible, with Undo), and a quiet toolbar that appears on hover or
  * keyboard focus. Retry lives there, as an icon, because regenerating a response is a rare move.
  */
+const TASK_STATUS: Record<TaskState['status'], string> = {
+  running: 'In progress', completed: 'Completed', cancelled: 'Stopped',
+  max_iterations: 'Step limit reached', error: 'Stopped with an error', interrupted: 'Interrupted',
+};
+
+const CONTEXT_ORIGIN: Record<ContextOrigin, string> = {
+  attachment: 'Attachment', editor: 'Active editor', stack: 'Stack trace', definition: 'Definition',
+  reference: 'Reference', diagnostics: 'Diagnostics', search: 'Text search', git: 'Git diff', path: 'Mentioned file',
+  'read-file': 'File read', instructions: 'Project instructions',
+};
+
+function SentContext({ sources }: { sources: ContextSource[] }) {
+  if (sources.length === 0) return null;
+  return (
+    <details className="sv-compaction">
+      <summary><Icon name="files" /> Context sent in the last request · {sources.length} excerpt{sources.length === 1 ? '' : 's'}</summary>
+      <ul className="sv-compaction__body">
+        {sources.map((source, i) => {
+          const location = source.startLine === undefined ? source.detail : `lines ${source.startLine}–${source.endLine ?? source.startLine}`;
+          return (
+            <li key={`${source.path}:${source.startLine}:${i}`}>
+              {source.external ? <code>{source.path}</code> : (
+                <Button variant="ghost" onClick={() => post({ type: 'openFile', path: source.path, line: source.startLine })}>
+                  {source.path}
+                </Button>
+              )}
+              {' · '}{CONTEXT_ORIGIN[source.origin ?? 'attachment']}{location ? ` · ${location}` : ''}
+              {source.truncated ? ' · limited' : ''}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  );
+}
+
+function actionOutcome(action: TaskAction): string {
+  const test = testOutcome(action);
+  if (test === 'passed') return 'Tests passed';
+  if (test === 'failed') return 'Tests failed';
+  if (action.processIssue === 'start-error') return 'Could not start';
+  if (action.processIssue === 'timeout') return 'Timed out';
+  if (action.processIssue === 'signal') return 'Terminated by a signal';
+  if (action.status === 'unknown') return 'Outcome uncertain';
+  if (action.status === 'denied') return 'Not run';
+  if (action.status === 'error') return 'Error';
+  return action.status === 'success' ? 'Succeeded' : TASK_STATUS.cancelled;
+}
+
+function TaskSummary({ user, isLast, running }: { user: UserMessageView; isLast: boolean; running: boolean }) {
+  const task = user.task;
+  if (!task || task.status === 'running') return null;
+  const commands = task.actions.filter((action) => action.kind === 'terminal');
+  const external = task.actions.filter((action) => action.kind !== 'edit' && action.kind !== 'terminal');
+  const tests = commands.map(testOutcome);
+  const lastTest = tests.filter(Boolean).at(-1);
+  const testStatus = lastTest === 'passed' ? 'Tests passed' : lastTest === 'failed'
+    ? 'Tests failed' : lastTest === 'inconclusive' ? 'Test outcome unavailable' : 'Tests not run';
+  return (
+    <div className="sv-task-summary">
+      <details className="sv-compaction">
+        <summary>Task summary · {TASK_STATUS[task.status]} · {testStatus}</summary>
+        <div className="sv-compaction__body">
+          {task.changes.map((file, i) => (
+            <details key={`${file.path}:${i}`}>
+              <summary>{file.path} · +{file.added} −{file.removed}</summary>
+              {file.diff ? <DiffView diff={file.diff} label={`Task changes to ${file.path}`} /> : <p>Diff hidden for a protected file.</p>}
+            </details>
+          ))}
+          {[...commands, ...external].map((action) => (
+            <div key={action.id} className="sv-task-effect">
+              <code>{action.command ?? action.label}</code>
+              {action.verification ? ' · Verification' : ''}
+              {' · '}{actionOutcome(action)}{typeof action.exitCode === 'number' ? ` (exit ${action.exitCode})` : ''}
+              {action.cwd ? <span> · {action.cwd}</span> : null}
+              {action.error ? <pre>{action.error}</pre> : null}
+            </div>
+          ))}
+          {commands.length || external.length ? <p>Undo changes covers checkpointed editor edits. Terminal, Git and MCP effects require separate review.</p> : null}
+        </div>
+      </details>
+      {isLast && !running && canResume(task) ? (
+        <Button variant="ghost" icon="refresh" onClick={() => post({ type: 'resumeTask', messageId: user.id })}>
+          Resume
+        </Button>
+      ) : null}
+    </div>
+  );
+}
+
 function TurnFooter({
   user,
   messages,
@@ -566,9 +658,11 @@ function TurnFooter({
     .filter(Boolean)
     .join('\n\n');
   const actions = !streaming && (canRetry || !!text);
-  if (!cp && !actions) return null;
+  if (!cp && !actions && !user?.task) return null;
   const n = cp?.files.length ?? 0;
   return (
+    <>
+    {user ? <TaskSummary user={user} isLast={isLast} running={running} /> : null}
     <div className="sv-turn__footer">
       {cp && user ? (
         cp.restoredAt ? (
@@ -602,6 +696,7 @@ function TurnFooter({
         </div>
       ) : null}
     </div>
+    </>
   );
 }
 
@@ -695,6 +790,10 @@ export function Transcript({ messages, run }: { messages: SessionMessage[]; run:
                   />
                 ) : null}
                 <UserBlock message={b.message} canEdit={!running} />
+                {b.message.task?.context ? <SentContext sources={b.message.task.context} /> : null}
+                {blocks[i + 1]?.kind !== 'turn' ? (
+                  <TaskSummary user={b.message} isLast={i === blocks.length - 1} running={running} />
+                ) : null}
               </div>
             );
           }

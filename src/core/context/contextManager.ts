@@ -4,12 +4,14 @@ import type { ResolvedToolMode, WireContentPart, WireMessage } from '../provider
 import type {
   ContextAttachment,
   ContextBreakdown,
+  ContextSource,
   ImageAttachment,
   SessionMessage,
   ToolMessage,
 } from '../sessions/model';
 import { truncateMiddle } from '../tools/edits';
 import { FORMAT_LABELS } from '../documents/types';
+import { redactKnown } from '../security/redact';
 
 /** Tells the model what a converted document's Markdown is (the value of the `note` attribute). */
 export const DOCUMENT_NOTE = 'Text extracted from the file by Sovran. Images, charts and page layout are not included.';
@@ -105,6 +107,8 @@ export interface BuildContextOptions {
   images?: ReadonlyMap<string, string>;
   /** Whether the model receives images. When false, each image is sent as its label only. */
   vision?: boolean;
+  targeted?: { messageId: string; attachments: readonly ContextAttachment[] };
+  secrets?: readonly (string | undefined)[];
 }
 
 export interface BuildContextResult {
@@ -114,43 +118,115 @@ export interface BuildContextResult {
   breakdown: ContextBreakdown;
   droppedTurns: number;
   elidedResults: number;
+  sources: ContextSource[];
 }
 
 const ELIDED = '[Earlier tool output removed to fit the context window. Re-run the tool if you need it again.]';
+
+function fitAttachments(o: BuildContextOptions, fixed: number): Map<string, ContextAttachment[]> {
+  const output = new Map<string, ContextAttachment[]>();
+  const recentUser = o.messages.findLastIndex((message) => message.role === 'user');
+  const recentReads = o.messages.slice(recentUser + 1).flatMap((message) =>
+    message.role === 'tool' && message.content.length <= Math.min(2000, o.maxToolResultChars)
+      ? message.contextSources ?? [] : [],
+  );
+  const targeted = o.targeted?.attachments.filter((candidate) => !recentReads.some((source) =>
+    source.origin === 'read-file' && source.path === candidate.path &&
+    source.startLine !== undefined && candidate.startLine !== undefined &&
+    source.endLine !== undefined && candidate.endLine !== undefined &&
+    source.startLine <= candidate.startLine && source.endLine >= candidate.endLine,
+  ));
+  let remaining = Math.max(0, Math.floor((o.budgetTokens - fixed) * 0.35));
+  for (const message of [...o.messages].reverse()) {
+    if (message.role !== 'user' || remaining <= 0) continue;
+    const attachments = message.attachments ?? [];
+    const selected: ContextAttachment[] = [];
+    const candidates = [
+      ...attachments.filter((a) => a.origin !== 'editor'),
+      ...(o.targeted?.messageId === message.id ? targeted ?? [] : []),
+      ...attachments.filter((a) => a.origin === 'editor'),
+    ];
+    for (const candidate of candidates) {
+      const startLine = candidate.format ? undefined : candidate.startLine ?? 1;
+      const content = redactKnown(candidate.content, o.secrets);
+      const endLine = startLine === undefined ? undefined : startLine + content.split(/\r?\n/).length - 1;
+      if (selected.some((a) => a.path === candidate.path && (
+        a.startLine === undefined || startLine === undefined ||
+        (a.startLine <= endLine! && a.endLine! >= startLine)
+      ))) continue;
+      const attachment = { ...candidate, content, startLine, endLine, origin: candidate.origin ?? 'attachment' as const };
+      const overhead = estimateTokens(renderAttachments([{ ...attachment, content: '' }])) + 8;
+      const room = Math.floor((remaining - overhead) * CHARS_PER_TOKEN);
+      if (room <= 0) continue;
+      if (content.length > room) {
+        attachment.content = content.slice(0, room);
+        attachment.endLine = startLine === undefined ? undefined : startLine + attachment.content.split(/\r?\n/).length - 1;
+        attachment.truncated = true;
+      }
+      while (estimateTokens(renderAttachments([attachment])) > remaining && attachment.content.length > 0) {
+        attachment.content = attachment.content.slice(0, Math.floor(attachment.content.length * 0.8));
+        attachment.endLine = startLine === undefined ? undefined : startLine + attachment.content.split(/\r?\n/).length - 1;
+        attachment.truncated = true;
+      }
+      if (!attachment.content && content) continue;
+      selected.push(attachment);
+      remaining -= estimateTokens(renderAttachments([attachment]));
+    }
+    output.set(message.id, selected);
+  }
+  return output;
+}
 
 /** Converts canonical session messages to the wire format for a tool mode, keeping the protocol valid. */
 function toWire(
   messages: readonly SessionMessage[],
   toolMode: ResolvedToolMode,
   maxToolResultChars: number,
-  media: Pick<BuildContextOptions, 'images' | 'vision'> = {},
+  media: Pick<BuildContextOptions, 'images' | 'vision'>,
+  attachments: ReadonlyMap<string, ContextAttachment[]>,
+  sources: Map<WireMessage, ContextSource[]>,
+  toolWires: Set<WireMessage>,
 ): WireMessage[][] {
   const turns: WireMessage[][] = [];
   let turn: WireMessage[] = [];
   const results = new Map(messages.filter((m): m is ToolMessage => m.role === 'tool').map((m) => [m.toolCallId, m]));
 
-  const pushUserText = (text: string) => {
+  const pushUserText = (text: string, entries: readonly ContextSource[]) => {
     const last = turn[turn.length - 1];
     // Prompted mode: merge consecutive user-role messages; many chat templates require strict alternation.
     if (last && last.role === 'user') {
       if (typeof last.content === 'string') last.content += `\n\n${text}`;
       else last.content.push({ type: 'text', text: `\n\n${text}` });
-    } else turn.push({ role: 'user', content: text });
+      if (entries.length) sources.set(last, [...(sources.get(last) ?? []), ...entries]);
+    } else {
+      const wire: WireMessage = { role: 'user', content: text };
+      toolWires.add(wire);
+      if (entries.length) sources.set(wire, [...entries]);
+      turn.push(wire);
+    }
   };
 
   for (const m of messages) {
     if (m.role === 'user') {
       if (turn.length) turns.push(turn);
-      turn = [{ role: 'user', content: userContent(renderAttachments(m.attachments) + m.content, m.images, media) }];
+      const selected = attachments.get(m.id) ?? [];
+      const wire: WireMessage = { role: 'user', content: userContent(renderAttachments(selected) + m.content, m.images, media) };
+      sources.set(wire, selected.map(({ path, startLine, endLine, origin, detail, truncated, external }) => ({
+        path, startLine, endLine, origin, detail, truncated, external,
+      })));
+      turn = [wire];
       continue;
     }
     if (m.role === 'assistant') {
       const calls = m.toolCalls ?? [];
       if (!m.content.trim() && calls.length === 0) continue;
       if (toolMode === 'native') {
+        const previous = turn.at(-1);
+        const content = previous?.role === 'assistant' && !previous.tool_calls?.length
+          ? [turn.pop()?.content, m.content].filter(Boolean).join('\n\n') : m.content;
         turn.push({
           role: 'assistant',
-          content: m.content || null,
+          content: content || null,
           ...(calls.length
             ? { tool_calls: calls.map((c) => ({ id: c.id, type: 'function' as const, function: { name: c.name, arguments: c.arguments || '{}' } })) }
             : {}),
@@ -158,19 +234,25 @@ function toWire(
         // Every native tool call must be answered, even if the result was lost (e.g. interrupted run).
         for (const c of calls) {
           const r = results.get(c.id);
-          turn.push({
+          const wire: WireMessage = {
             role: 'tool',
             tool_call_id: c.id,
             content: truncateMiddle(r?.content ?? 'No result: the action did not run.', maxToolResultChars),
-          });
+          };
+          if (r?.contextSources && r.content.length <= maxToolResultChars) sources.set(wire, r.contextSources);
+          toolWires.add(wire);
+          turn.push(wire);
         }
       } else {
         const text = [m.content, ...calls.map((c) => serializeToolCall(c.name, c.arguments))].filter(Boolean).join('\n\n');
-        turn.push({ role: 'assistant', content: text });
+        const previous = turn.at(-1);
+        if (previous?.role === 'assistant') previous.content = [previous.content, text].filter(Boolean).join('\n\n');
+        else turn.push({ role: 'assistant', content: text });
         for (const c of calls) {
           const r = results.get(c.id);
           pushUserText(
             formatToolResult(c.name, c.id, truncateMiddle(r?.content ?? 'No result: the action did not run.', maxToolResultChars), r?.status ?? 'cancelled'),
+            r && r.content.length <= maxToolResultChars ? r.contextSources ?? [] : [],
           );
         }
       }
@@ -189,25 +271,28 @@ const sum = (msgs: WireMessage[]) => msgs.reduce((n, m) => n + wireTokens(m), 0)
  * 3) shrink the largest remaining tool results. The latest turn is always kept.
  */
 export function buildContext(o: BuildContextOptions): BuildContextResult {
-  const turns = toWire(o.messages, o.toolMode, o.maxToolResultChars, o);
   const system: WireMessage = {
     role: 'system',
     content: o.summary ? `${o.systemPrompt}\n\n# Summary of the earlier conversation\n${o.summary}` : o.systemPrompt,
   };
   const fixed = wireTokens(system) + o.toolSchemaTokens;
+  const sourceByMessage = new Map<WireMessage, ContextSource[]>();
+  const toolWires = new Set<WireMessage>();
+  const turns = toWire(o.messages, o.toolMode, o.maxToolResultChars, o, fitAttachments(o, fixed), sourceByMessage, toolWires);
   const total = () => fixed + turns.reduce((n, t) => n + sum(t), 0);
   let elidedResults = 0;
   let droppedTurns = 0;
 
   // Tool results are always plain strings (only the user's own messages carry images).
   const isToolResult = (m: WireMessage): m is Extract<WireMessage, { role: 'tool' | 'user' }> & { content: string } =>
-    typeof m.content === 'string' && (m.role === 'tool' || (m.role === 'user' && m.content.includes('<tool_result')));
+    typeof m.content === 'string' && toolWires.has(m);
 
   if (total() > o.budgetTokens) {
     for (let i = 0; i < turns.length - 2; i++) {
       for (const m of turns[i] ?? []) {
         if (isToolResult(m) && (m.content?.length ?? 0) > ELIDED.length) {
           m.content = ELIDED;
+          sourceByMessage.delete(m);
           elidedResults++;
         }
       }
@@ -222,7 +307,9 @@ export function buildContext(o: BuildContextOptions): BuildContextResult {
     const candidates = last.filter(isToolResult).sort((a, b) => (b.content?.length ?? 0) - (a.content?.length ?? 0));
     for (const m of candidates) {
       if (total() <= o.budgetTokens) break;
-      m.content = truncateMiddle(m.content ?? '', 2000);
+      const shortened = truncateMiddle(m.content ?? '', 2000);
+      if (shortened !== m.content) sourceByMessage.delete(m);
+      m.content = shortened;
     }
   }
 
@@ -232,5 +319,6 @@ export function buildContext(o: BuildContextOptions): BuildContextResult {
   const messages = [system, ...turns.flat()];
   const estimatedTokens = total();
   const breakdown = { system: fixed - o.toolSchemaTokens, tools: o.toolSchemaTokens, messages: estimatedTokens - fixed };
-  return { messages, estimatedTokens, breakdown, droppedTurns, elidedResults };
+  const sources = messages.flatMap((m) => sourceByMessage.get(m) ?? []);
+  return { messages, estimatedTokens, breakdown, droppedTurns, elidedResults, sources };
 }

@@ -1,4 +1,4 @@
-import type { CompactionState, ContextBreakdown, ErrorInfo, SessionMessage } from '../sessions/model';
+import type { CompactionState, ContextBreakdown, ContextSource, ErrorInfo, SessionMessage } from '../sessions/model';
 
 export type ToolPhase = 'awaiting_approval' | 'running';
 
@@ -25,6 +25,7 @@ export type AgentEvent =
       budgetTokens: number;
       contextWindow: number;
       breakdown?: ContextBreakdown;
+      sources?: ContextSource[];
     }
   | { type: 'usage'; promptTokens?: number; completionTokens?: number }
   /** `detail` explains individual units, e.g. `git.changes: "committa"`. */

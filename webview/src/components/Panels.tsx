@@ -29,6 +29,7 @@ interface ModelDraft {
   contextWindow?: number;
   maxOutputTokens?: number;
   toolMode?: ToolMode;
+  fim?: 'llama.cpp-infill';
 }
 
 const digits = (v: string) => {
@@ -88,7 +89,7 @@ export function ProviderForm({ initial, onDone }: { initial: Partial<ProviderInp
         authType,
         headerName: authType === 'header' ? headerName.trim() : undefined,
         timeoutSeconds: timeout ? Math.min(1800, Math.max(5, Number(timeout))) : undefined,
-        models: models.map((m) => ({ id: m.id, contextWindow: m.contextWindow, maxOutputTokens: m.maxOutputTokens, toolMode: m.toolMode })),
+        models,
       },
     });
     onDone();
@@ -160,6 +161,14 @@ export function ProviderForm({ initial, onDone }: { initial: Partial<ProviderInp
                   <option value="native">native</option>
                   <option value="prompted">prompted</option>
                   <option value="none">none</option>
+                </select>
+              </label>
+              <label className="sv-model-row__field">
+                <span>Autocomplete transport</span>
+                <select aria-label={`Autocomplete transport for ${m.id}`} value={m.fim ?? ''}
+                  onChange={(e) => update({ fim: e.target.value === 'llama.cpp-infill' ? 'llama.cpp-infill' : undefined })}>
+                  <option value="">None</option>
+                  <option value="llama.cpp-infill">llama.cpp /infill</option>
                 </select>
               </label>
             </div>
@@ -324,7 +333,7 @@ export function ProvidersView() {
                   authType: current.authType,
                   headerName: current.headerName,
                   timeoutSeconds: current.timeoutSeconds,
-                  models: current.models.map((m) => ({ id: m.id, contextWindow: m.contextWindow, maxOutputTokens: m.maxOutputTokens, toolMode: m.toolMode })),
+                  models: current.models.map(({ id, contextWindow, maxOutputTokens, toolMode, fim }) => ({ id, contextWindow, maxOutputTokens, toolMode, fim })),
                 }
               : { authType: 'bearer', models: [] }
           }

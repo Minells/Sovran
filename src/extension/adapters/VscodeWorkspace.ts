@@ -5,8 +5,7 @@ import * as path from 'node:path';
 import type { DirEntry, EditorContext, EditorDiagnostic, FileDiagnostics, FileStat, TextSearchOptions, TextSearchResult, WorkspacePort, WorkspaceRoot } from '../../core/ports';
 import type { RipgrepSearch } from './RipgrepSearch';
 import { querySemantic } from './VscodeSemanticNavigation';
-
-const DEFAULT_EXCLUDES = ['**/node_modules/**', '**/.git/**', '**/.hg/**', '**/.svn/**', '**/__pycache__/**', '**/.venv/**', '**/venv/**'];
+import { DEFAULT_EXCLUDES } from '../workspaceFilePolicy';
 const SEVERITY: Record<vscode.DiagnosticSeverity, EditorDiagnostic['severity']> = {
   [vscode.DiagnosticSeverity.Error]: 'error',
   [vscode.DiagnosticSeverity.Warning]: 'warning',

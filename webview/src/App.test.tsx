@@ -412,6 +412,27 @@ describe('v0.2 recovery & productivity', () => {
     expect(screen.queryByRole('button', { name: 'Undo changes' })).not.toBeInTheDocument();
   });
 
+  it('lists the sent excerpt and observed verification and offers Resume for an interrupted task', async () => {
+    mount(doneTurn({
+      task: {
+        status: 'interrupted',
+        changes: [],
+        context: [{ path: 'src/a.ts', startLine: 10, endLine: 20, origin: 'stack' }],
+        actions: [{
+          id: 'test', tool: 'execute_terminal', kind: 'terminal', command: 'npm test',
+          label: 'npm test', paths: [], status: 'error', exitCode: 1, verification: true,
+          error: 'Assertion failed',
+        }],
+      },
+    } as never));
+    await userEvent.click(screen.getByText(/Context sent in the last request/));
+    expect(screen.getByText(/Stack trace.*lines 10–20/)).toBeInTheDocument();
+    await userEvent.click(screen.getByText(/Task summary.*Tests failed/));
+    expect(screen.getByText('Assertion failed')).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: /^Resume$/ }));
+    expect(sent).toContainEqual({ type: 'resumeTask', messageId: 'u1' });
+  });
+
   it('edits and resends a previous message', async () => {
     mount(doneTurn());
     await userEvent.click(screen.getByRole('button', { name: 'Edit and resend' }));
@@ -1377,6 +1398,38 @@ describe('settings view', () => {
     await userEvent.selectOptions(act, within(act).getByRole('option', { name: 'big' }));
     expect(sent).toContainEqual({ type: 'setModel', role: 'act', providerId: 'corp', modelId: 'big' });
     expect(screen.getByText(/key sent over http/)).toBeInTheDocument();
+  });
+
+  it('defaults autocomplete to the Act model in Model options and allows a dedicated FIM model', async () => {
+    const baseline = settingsState();
+    const providers = baseline.providers.map((p) => p.id === 'local'
+      ? { ...p, models: [...p.models, { id: 'infill', toolMode: 'none' as const, fim: 'llama.cpp-infill' as const }] }
+      : p);
+    mount(settingsState({ providers }));
+    await clickButton(/^Model options/);
+    const model = screen.getByLabelText('Autocomplete model');
+    const enabled = screen.getByLabelText('Enable inline autocomplete');
+    expect(enabled).not.toBeChecked();
+    expect(model).toHaveValue('');
+    expect(within(model).getByRole('option', { name: 'Same as Act model', selected: true })).toBeInTheDocument();
+    expect(model).toHaveAccessibleDescription(/Choose a FIM model or configure a FIM transport for the Act model/);
+    expect(within(model).queryByRole('option', { name: 'coder' })).not.toBeInTheDocument();
+    await userEvent.selectOptions(model, within(model).getByRole('option', { name: 'infill' }));
+    expect(sent).toContainEqual({ type: 'setModel', role: 'autocomplete', providerId: 'local', modelId: 'infill' });
+    host({ type: 'patch', patch: { autocompleteModel: 'local/infill' } });
+    await userEvent.selectOptions(model, within(model).getByRole('option', { name: 'Same as Act model' }));
+    expect(sent).toContainEqual({ type: 'setModel', role: 'autocomplete' });
+    await userEvent.click(enabled);
+    expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'autocomplete.enabled', value: true } });
+  });
+
+  it('shows when a saved autocomplete override is unavailable', async () => {
+    mount(settingsState({ autocompleteModel: 'removed/coder' }));
+    await clickButton(/^Model options/);
+    const model = screen.getByLabelText('Autocomplete model');
+    expect(within(model).getByRole('option', { name: 'Saved model unavailable', selected: true })).toBeInTheDocument();
+    await userEvent.selectOptions(model, within(model).getByRole('option', { name: 'Same as Act model' }));
+    expect(sent).toContainEqual({ type: 'setModel', role: 'autocomplete' });
   });
 
   it('turns model-generated chat titles on and picks the model that writes them', async () => {

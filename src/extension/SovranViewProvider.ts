@@ -10,7 +10,7 @@ export class SovranViewProvider implements vscode.WebviewViewProvider {
 
   constructor(
     private readonly extensionUri: vscode.Uri,
-    private readonly controller: SovranController,
+    private readonly getController: () => Promise<SovranController>,
     private readonly logger: HostLogger,
   ) {}
 
@@ -18,20 +18,27 @@ export class SovranViewProvider implements vscode.WebviewViewProvider {
     return !!this.view?.visible;
   }
 
-  resolveWebviewView(view: vscode.WebviewView): void {
+  async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
     this.view = view;
+    const state: { disposed: boolean; detach?: () => void } = { disposed: false };
+    view.onDidDispose(() => {
+      state.disposed = true;
+      if (this.view === view) {
+        state.detach?.();
+        this.view = undefined;
+      }
+    });
+    const controller = await this.getController();
+    if (state.disposed || this.view !== view) return;
     view.webview.options = webviewOptions(this.extensionUri);
     view.webview.html = webviewHtml(view.webview, this.extensionUri, 'sidebar');
 
     view.webview.onDidReceiveMessage((raw: unknown) => {
       const msg = parseWebviewMessage(raw, this.logger);
-      if (msg) void this.controller.handle(msg);
+      if (msg) void controller.handle(msg);
     });
-    this.controller.attach((m) => void view.webview.postMessage(m));
-    view.onDidDispose(() => {
-      this.controller.detach();
-      this.view = undefined;
-    });
+    controller.attach((m) => void view.webview.postMessage(m));
+    state.detach = () => controller.detach();
   }
 
   async reveal() {

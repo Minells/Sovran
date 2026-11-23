@@ -213,6 +213,25 @@ stay in the view; the mode, approval mode and models are shared by all chats in 
 </p>
 
 **Mistakes are cheap to undo.** Every response that changed files ends with a footer: *2 files changed · Undo changes*. Undo puts every file back the way it was before that response and deletes files the agent created. If you edited a file afterwards, Sovran asks before overwriting it.
+
+**See what the model received.** Open **Context sent in the last request** under your prompt to see the paths,
+line ranges and sources that fit the model's input budget. Attachments you add take priority. In trusted
+workspaces, Sovran uses stack frames and failing-test locations for fixes, and definitions and references for
+refactors. It can also use cached editor diagnostics, text search and Git diff locations. Automatic context
+skips protected and excluded paths and respects per-chat tool selection and **Always ask**.
+
+**Check the result and resume.** Open **Task summary** below the response for the combined diff of Sovran's editor
+changes and the observed terminal commands, exit codes and errors. The test status reflects recognized test
+commands. A timeout or interrupted test may leave the outcome unknown. A command follows the existing approval
+mode. **Undo changes** restores checkpointed editor edits, while terminal, Git and MCP effects require separate
+review. If the run stops, choose **Resume** to continue using the existing transcript, recorded actions and current
+workspace. New actions with side effects ask again in every approval mode. Session and checkpoint data added while
+`sovran.sessions.persist` is off stay in the current window.
+
+To try the flow, ask in Act mode to fix a failing test using a file and line from its stack trace. Approve the
+edit and test command, then open the context and task summary. Stop a later run after it runs a command and
+choose **Resume**. To check the undo conflict, edit the same file yourself before choosing **Undo changes**.
+
 - **Retry** generates a response again. It sits next to **Copy** under the last response and appears when you hover it or reach it with the keyboard.
 - **Edit** (pencil on any message) rewrites a message and continues from there, and can undo the file changes of the discarded responses too.
 
@@ -338,6 +357,38 @@ the context the model was trained with, not the one it runs with (Ollama's `num_
 the real window. A server's maximum output is used as a ceiling, not as the reserve: reserving 32K tokens for every reply
 would take them from the conversation. For models that always reason (GLM, DeepSeek-R1), set `maxOutputTokens`
 generously, since the reasoning shares that budget.
+
+### Inline autocomplete
+
+Inline autocomplete starts off. Its **Autocomplete model** follows the **Act model** by default when that model
+has a supported fill-in-the-middle (FIM) transport. You can also select a dedicated FIM model.
+Autocomplete sends a short prefix and suffix from the active editor to the effective model endpoint, local or
+remote. Completion requests leave no entry in your chats.
+Sovran skips protected and excluded files and disables inline autocomplete in Restricted Mode. In SSH, WSL
+and containers, `localhost` refers to the extension host.
+
+The first supported combination is **llama.cpp with Qwen2.5-Coder-1.5B base Q8_0 GGUF**, exposed through
+`POST /infill`. Start a dedicated local server with the
+[Q8_0 GGUF model](https://huggingface.co/ggml-org/Qwen2.5-Coder-1.5B-Q8_0-GGUF):
+
+```bash
+llama-server --model /path/to/qwen2.5-coder-1.5b-q8_0.gguf \
+  --alias qwen-fim --host 127.0.0.1 --port 8012 --ctx-size 4096
+```
+
+1. Under **Manage providers**, add or edit the provider. Use `http://127.0.0.1:8012/v1` as its base URL and
+   **No key** for this server. Add model ID `qwen-fim` and select **llama.cpp /infill** as its autocomplete transport.
+   In `config.yaml`, the equivalent model entry is `{ id: qwen-fim, fim: llama.cpp-infill }`.
+2. Under **Settings → Models → Model options**, enable inline autocomplete. Keep **Same as Act model** if your
+   Act model has a supported FIM transport, or select `qwen-fim` as the dedicated model. Keep
+   `editor.inlineSuggest.enabled` on in VS Code.
+3. Open a source file in a trusted folder, place the cursor in a gap in the code and run
+   **Sovran: Trigger Inline Completion**. Accept the ghost text with VS Code's inline suggestion keybinding
+   (normally Tab). Try the same command in a protected file and confirm the server sees no request.
+
+For a private gateway, expose `/infill` alongside `/v1` on the same origin and path prefix. For example,
+a base URL ending in `/llama/v1` uses `/llama/infill`. The chat compatibility of a server does not establish
+its FIM compatibility.
 
 ## Configuration file (`config.yaml`)
 
@@ -667,6 +718,8 @@ request it again with the current tools. Plan mode remains read-only.
 | `sovran.providers` | `[]` | Model endpoints. User scope only |
 | `sovran.defaultModel` | `""` | `providerId/modelId` for new chats (the Act model) |
 | `sovran.planModel` | `""` | Model for Plan mode. Empty means the same as Act |
+| `sovran.autocomplete.enabled` | `false` | Enable ghost-text suggestions with a compatible model. Sends a bounded active-file prefix and suffix to its endpoint |
+| `sovran.autocomplete.model` | `""` | Follow the Act model when empty, or set a dedicated `providerId/modelId` with a supported FIM transport |
 | `sovran.configFile.enabled` | `true` | Use `~/.sovran/config.yaml` when it exists, kept in sync with `sovran.providers`. User scope only |
 | `sovran.agent.maxIterations` | `25` | Maximum model round-trips per request |
 | `sovran.tools.loading` | `auto` | `auto` sends the core tools and loads the others when a chat needs them ([details](#tools-loaded-when-needed)); `all` sends every tool with every request. User scope only |

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { AgentRunner, type AgentSettings } from '../../src/core/agent/agentRunner';
 import type { AgentEvent } from '../../src/core/agent/events';
-import { CheckpointRecorder, planRestore, restoreFiles } from '../../src/core/checkpoints/checkpoints';
+import { CheckpointRecorder, mergeSnapshots, planRestore, restoreFiles } from '../../src/core/checkpoints/checkpoints';
 import { BUILTIN_COMMANDS, expandCommand, mergeCommands, parseCustomCommand, parseSlash } from '../../src/core/commands/slashCommands';
 import { planCompaction, renderForSummary } from '../../src/core/context/compaction';
 import { nullLogger } from '../../src/core/ports';
@@ -22,6 +22,31 @@ const settings: AgentSettings = {
 };
 
 describe('checkpoints', () => {
+  it('starts a new undo baseline if the user changed a file between attempts', async () => {
+    const workspace = new MemoryWorkspace({ 'a.ts': 'original' });
+    const file = workspace.abs('a.ts');
+    const first = new CheckpointRecorder(workspace);
+    await first.writeFile(file, 'agent attempt 1');
+    workspace.set('a.ts', 'user edit');
+    const resumed = new CheckpointRecorder(workspace);
+    await resumed.writeFile(file, 'agent attempt 2');
+    const merged = mergeSnapshots(first.changedFiles(), resumed.changedFiles(), true);
+    await restoreFiles(await planRestore(merged, workspace), workspace, false);
+    expect(workspace.get('a.ts')).toBe('user edit');
+  });
+
+  it('keeps changes saved while the restore prompt was open', async () => {
+    const workspace = new MemoryWorkspace({ 'src/a.ts': 'original' });
+    const recorder = new CheckpointRecorder(workspace);
+    const file = workspace.abs('src/a.ts');
+    await recorder.writeFile(file, 'agent change');
+    const planned = await planRestore(recorder.changedFiles(), workspace);
+    workspace.set('src/a.ts', 'user change during confirmation');
+    const restored = await restoreFiles(planned, workspace, true);
+    expect(restored).toEqual({ restored: [], skipped: [file] });
+    expect(workspace.get('src/a.ts')).toBe('user change during confirmation');
+  });
+
   it('snapshots each file before its first write, and restores clean files', async () => {
     const ws = new MemoryWorkspace({ 'a.ts': 'original' });
     const rec = new CheckpointRecorder(ws);
