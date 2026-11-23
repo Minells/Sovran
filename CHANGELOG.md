@@ -5,6 +5,8 @@ pre-releases and even minor versions are stable releases.
 
 ## [Unreleased]
 
+## [0.1.1] — 2026-11-23
+
 ### Added
 
 - Targeted agent context from stack traces, symbol definitions and references, text search, editor diagnostics and
@@ -240,5 +242,6 @@ The internal preview that this release builds on.
 - Protected paths, a command allow-list that rejects shell metacharacters, and a warning for invisible or bidi characters in commands.
 - Strict CSP, markdown rendered with `html:false` plus DOMPurify, and zod-validated webview messages.
 
-[Unreleased]: https://github.com/Minells/sovran/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Minells/sovran/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/Minells/sovran/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Minells/sovran/releases/tag/v0.1.0
