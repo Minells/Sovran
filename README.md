@@ -2,118 +2,231 @@
   <img src="media/brand/sovran-banner-dark.png" alt="SOVRAN — Own your intelligence." width="850">
 </p>
 
-<p align="center">An open-source AI coding agent for VS Code, built for the models you control.<br>Local, self-hosted, or behind your company's gateway.</p>
+<h3 align="center">The open-source AI coding agent for VS Code that runs on <em>your</em> models.</h3>
 
 <p align="center">
-  <a href="https://github.com/Minells/sovran/actions/workflows/ci.yml"><img src="https://github.com/Minells/sovran/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-FF5A36" alt="License: MIT"></a>
-  <a href="package.json"><img src="https://img.shields.io/badge/VS_Code-1.95%2B-8A8F98" alt="VS Code 1.95 or later"></a>
+  Local, self-hosted, or behind your company's gateway.<br>
+  No Sovran backend. No account. No telemetry.
 </p>
 
 <p align="center">
-  <a href="https://minells.github.io/Sovran-Website/"><strong>Official website</strong></a> ·
-  <a href="https://minells.github.io/Sovran-Website/documentation/">Documentation</a> ·
-  <a href="https://marketplace.visualstudio.com/items?itemName=minells.sovran">VS Code Marketplace</a> ·
+  <a href="https://github.com/Minells/sovran/releases"><img src="https://img.shields.io/github/v/release/Minells/sovran?include_prereleases&sort=semver&label=release&color=FF5A36" alt="Latest release"></a>
+  <a href="https://github.com/Minells/sovran/releases"><img src="https://img.shields.io/github/downloads/Minells/sovran/total?label=downloads&color=8A8F98" alt="Downloads"></a>
+  <a href="https://github.com/Minells/sovran/actions/workflows/ci.yml"><img src="https://github.com/Minells/sovran/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8A8F98" alt="License: MIT"></a>
+  <a href="package.json"><img src="https://img.shields.io/badge/VS_Code-1.95%2B-8A8F98" alt="VS Code 1.95 or later"></a>
+  <a href="SECURITY.md"><img src="https://img.shields.io/badge/telemetry-none-8A8F98" alt="No telemetry"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/Minells/sovran/releases"><strong>Download</strong></a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="docs/USER_GUIDE.md">User guide</a> ·
+  <a href="https://minells.github.io/Sovran-Website/">Website</a> ·
+  <a href="CHANGELOG.md">Changelog</a> ·
   <a href="https://github.com/Minells/sovran/issues">Issues</a>
 </p>
 
-> **Preview (0.1).** Real-server compatibility testing is ongoing. The manifest identifies the extension as
-> `minells.sovran`; Marketplace publication is still marked pending in the project documentation. If the listing is
-> unavailable, use the source/VSIX instructions below. The website URL becomes live after Pages is enabled in the
-> separate [website repository](https://github.com/Minells/Sovran-Website).
-
-## Why SOVRAN
-
-Connect an OpenAI-compatible Chat Completions endpoint to your workspace. Sovran reads and searches code, proposes
-edits, runs approved commands, and uses the results to continue a task. It connects directly to your chosen provider:
-there is no SOVRAN backend, account, or telemetry. Code and context you attach are sent to that provider.
-
-## Features
-
-- **Your model infrastructure:** presets for Ollama, LM Studio, vLLM, and LiteLLM, plus custom endpoints and company
-  gateways. Native tool calls can fall back to a prompted protocol; quality depends on the model and server.
-- **Plan and Act:** read-only exploration in Plan; file edits and command execution in Act. You can choose a different
-  model for each mode.
-- **Reviewable changes:** native VS Code diffs, undoable file edits, configurable Ask / Auto-edit / Auto approvals,
-  and protected-path and risky-command guardrails.
-- **Recovery:** per-response checkpoints, retry, and message editing with optional rewind. Checkpoints cover the
-  agent's file tools, not terminal side effects.
-- **Visible context:** `@` file mentions, a context meter, automatic compaction, and `/explain`, `/fix`, `/test`,
-  `/review`, `/doc`, `/compact`, and `/new`. Add custom Markdown prompts under `.sovran/commands/`.
-- **Attachments:** extract text locally from PDF, modern Office, and OpenDocument files; list ZIP contents. Paste or
-  attach images for vision-capable models.
-- **Native Git:** inspect status, diffs, history and branches in trusted Plan/Act workspaces. In Act, review and
-  approve staging, commits, fetch, push, fast-forward pull and rebase.
-- **Workspace diagnostics:** read cached editor Problems for active or unopened files, filtered by file/folder, severity and result count. Protected and external paths are omitted; the tool does not run checks or start language servers.
-- **Semantic navigation:** list file symbols, locate definitions and find references using the active VS Code language providers in trusted workspaces.
-- **Public Web reads:** `web_fetch` reads one approved public URL as structured text with source links. Available in trusted Plan/Act, with approval for each URL even in Auto. No account, search service, browser or crawler installation.
-- **Tools loaded when needed:** requests carry the file, editing and terminal tools; Git, diagnostics, symbols, Web and
-  MCP tools join a chat when your message or the model needs them, so small context windows do not fill with tool
-  definitions. Permissions do not change.
-- **Tools:** built-in permissions and per-chat group selection with definition cost estimates. Optional Playwright,
-  Chrome DevTools, GitHub, GitLab and Context7 integrations, remote Grafana, Terraform and OpenSearch MCP
-  connection, plus custom MCP stdio/HTTP servers with Off / Ask / Allow controls.
-  Grafana, Terraform and OpenSearch also offer optional write profiles with approval for every mutation.
-- **Native workspace experience:** theme-aware chat, editor-tab chats, terminal output, and searchable per-workspace
-  history that can persist across restarts.
-
 <p align="center">
-  <img src="media/screenshots/editor-tab-dark.png" width="850" alt="Sovran editor chat with a proposed file change, inline diff, and Reject and Apply controls">
+  <img src="media/screenshots/editor-tab-dark.png" width="850" alt="A Sovran chat in an editor tab: the agent proposes a change to src/auth/session.ts, shown as an inline diff with Reject and Apply above the chat input">
 </p>
-<p align="center"><em>Example session from the repository's screenshot gallery.</em></p>
 
-<details>
-<summary>Setup and approval screenshots</summary>
-<p align="center">
-  <img src="media/screenshots/onboarding-dark.png" width="320" alt="Guided setup with local, self-hosted, and custom provider options">
-  <img src="media/screenshots/approval-modes-dark.png" width="320" alt="Approval mode picker with Ask, Auto-edit, and Auto">
-</p>
-</details>
+> **0.1.0 is the first public pre-release.** Download the VSIX from
+> [GitHub Releases](https://github.com/Minells/sovran/releases). The VS Code Marketplace listing is not published yet,
+> and compatibility testing on real model servers is still in progress. Reports from your setup are very welcome.
 
-## Installation
+## Why Sovran
 
-Requires **VS Code 1.95+** and an OpenAI-compatible model endpoint. Local inference also needs a running model server
-and hardware suitable for the chosen model.
+Most AI coding assistants assume a cloud model and a vendor account. Sovran assumes the opposite: **you already run a
+model**, on a laptop with Ollama, a GPU server with vLLM, or an internal gateway, and you want an agent that works with
+it, inside the editor you already use.
 
-Check [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=minells.sovran) for publication. To
-build and install the current preview from source, use Node.js 22 (the current extension CI version):
+<table>
+  <tr>
+    <td width="33%" valign="top">
+      <strong>Private by architecture</strong><br><br>
+      Sovran talks to one endpoint: the one you configure. There is no relay server and no analytics. Keys live in VS
+      Code Secret Storage, and protected files such as <code>.env</code> or SSH keys always ask before they are read.
+    </td>
+    <td width="33%" valign="top">
+      <strong>You stay in charge</strong><br><br>
+      Explore read-only in <strong>Plan</strong>, change things in <strong>Act</strong>. Every edit is a native VS Code
+      diff, every command is shown before it runs, and the agent's file edits can be undone with one click.
+    </td>
+    <td width="33%" valign="top">
+      <strong>Built for real-world models</strong><br><br>
+      Tools load only when a chat needs them, older turns are compacted, and a context meter shows what is left. Models
+      without native tool calling fall back to a prompted protocol automatically.
+    </td>
+  </tr>
+</table>
+
+## How it works
+
+```text
+┌────────────── your machine ──────────────┐            ┌──────── you choose ────────┐
+│                                          │            │                            │
+│  VS Code ─▶ Sovran ─▶ files, terminal,   │   HTTPS    │  Ollama · LM Studio · vLLM │
+│             agent      Git, diagnostics  ├───────────▶│  LiteLLM · company gateway │
+│             loop                         │            │                            │
+│                                          │            │  + MCP servers you enable  │
+│  keys in Secret Storage · chats on disk  │            │                            │
+│                                          │            │                            │
+└──────────────────────────────────────────┘            └────────────────────────────┘
+          no Sovran server · no account · no telemetry
+```
+
+The agent reads and searches your code, proposes edits, runs approved commands and uses the results to continue the
+task. The code and context you attach are sent **only to the provider you choose**.
+
+## Quick start
+
+**1. Install.** Download `sovran-<version>.vsix` from the [latest release](https://github.com/Minells/sovran/releases)
+and install it:
 
 ```bash
-git clone https://github.com/Minells/sovran.git
-cd sovran
-npm ci --ignore-scripts
-npm run package
 code --install-extension sovran-0.1.0.vsix
 ```
 
-`npm run package` builds the extension before creating the VSIX. If the version changes, use the generated filename.
-Alternatively, choose **Extensions → … → Install from VSIX…**.
+Or use **Extensions → … → Install from VSIX…**. Each release lists the file's SHA-256 so you can check the download.
 
-## Getting started
+**2. Start a model server.** For example, with [Ollama](https://ollama.com):
 
-1. Open a workspace and select **Sovran** in the Activity Bar.
-2. Choose a provider in guided setup, then confirm its base URL and authentication.
-3. Select a model reported by your server or enter its ID. Keys stay in VS Code Secret Storage.
-4. Ask a question in **Plan**. Switch to **Act** when you want changes, and review proposals above the composer.
+```bash
+ollama pull qwen2.5-coder:14b
+```
 
-Try `/explain` with a selected function, `/review @src/example.ts` with an actual workspace file, or “Find the failing
-validation path, propose a fix, and add a regression test.” The agent's result depends on your model and context.
+**3. Connect.** Click **Sovran** in the Activity Bar. The guided setup asks where your model runs, tests the
+connection and lists the models your server reports.
 
-<kbd>Alt+M</kbd> switches modes, <kbd>Alt+A</kbd> cycles approvals, and <kbd>Esc</kbd> stops a run. While an approval is
-pending, <kbd>Enter</kbd> approves from the empty input and <kbd>Esc</kbd> rejects. See the
-[complete user guide](docs/USER_GUIDE.md) for shortcuts, attachments, recovery, and MCP configuration.
+**4. Ask.** Start in **Plan** to explore, then press <kbd>Alt+M</kbd> to switch to **Act** when you want changes.
 
-Open **Settings → Tools → MCP integrations → Browse Catalog** for managed integrations, or **Custom MCP Server**
-for your own command or endpoint. New entries are saved disconnected. Context7 queries use the hosted documentation
-service and can use an optional API key stored in VS Code Secret Storage. [MCP setup guide](docs/USER_GUIDE.md#mcp-servers)
+```text
+/explain                                   with a function selected
+/review @src/auth/session.ts               review a file you mention
+Find the failing validation path, propose a fix and add a regression test.
+```
+
+Results depend on your model and its context window. The examples in this README use `qwen2.5-coder:14b` with a 32k
+context window.
+
+## Works with your model server
+
+| Server | Default endpoint | Notes |
+|---|---|---|
+| **Ollama** | `http://localhost:11434/v1` | No key needed |
+| **LM Studio** | `http://localhost:1234/v1` | No key needed |
+| **vLLM** | `http://localhost:8000/v1` | Enable tool parsing for native tool calls |
+| **LiteLLM** | `http://localhost:4000/v1` | Virtual keys supported |
+| **Any OpenAI-compatible endpoint** | Your URL | Bearer key or a custom header (for example `api-key`) for company gateways |
+
+Sovran reads context window and output limits from the server when it reports them. When a server is busy (HTTP 429,
+502, 503 or 504), Sovran retries with backoff before it reports an error. See the
+[provider examples](docs/USER_GUIDE.md#provider-setup-examples).
+
+## What it can do
+
+<p align="center">
+  <img src="media/screenshots/start-dark.png" width="260" alt="Start page with starters built from the active file and recent chats">
+  &nbsp;
+  <img src="media/screenshots/conversation-dark.png" width="260" alt="Conversation with an inline diff, the approval bar and the context meter">
+  &nbsp;
+  <img src="media/screenshots/onboarding-dark.png" width="260" alt="Guided setup with local, self-hosted and custom providers">
+</p>
+
+### An agent you can trust with your repository
+
+- **Plan and Act modes.** Plan is read-only by construction. Act edits files and runs commands. Each mode can use its
+  own model, for example a fast one for exploring and a strong one for editing.
+- **Three approval levels.** **Ask** reviews everything, **Auto-edit** applies file edits automatically, and **Auto**
+  also runs commands. Guardrails still ask in every mode: recursive deletes, `sudo`, `curl | sh`, pushes, publishing,
+  credential files and paths outside the workspace.
+- **Reviewable changes.** Native VS Code diffs and an approval bar above the chat input. <kbd>Enter</kbd> approves and
+  <kbd>Esc</kbd> rejects, or you can reject with feedback.
+- **Undo anything the agent wrote.** Each response that edits files saves a checkpoint, and **Undo changes** restores
+  it. You can also retry a response, or edit an earlier message and rewind.
+
+### Tools that understand your project
+
+| Tool | What it does |
+|---|---|
+| **Files and search** | Read, list and search files (ripgrep, `.gitignore`-aware), and edit them with exact search and replace |
+| **Terminal** | Runs approved commands, mirrored in a Sovran terminal, with a timeout |
+| **Native Git** | Status, diff, log, show and branches. In Act, approved staging, commits, fetch, push, fast-forward pull and rebase |
+| **Diagnostics** | Reads the editor's Problems for a file or folder, filtered by severity |
+| **Semantic navigation** | File symbols, go to definition and find references, using your language extensions |
+| **`web_fetch`** | Reads one public URL as text with its source links, after you approve that URL |
+| **Documents and images** | Reads PDF, Word, Excel, PowerPoint and OpenDocument files as text on your machine. Images go to vision models |
+
+**Tools load when needed.** Each request carries the file, editing and terminal tools. Git, diagnostics, symbols, Web
+and MCP tools join a chat only when it needs them. On a 32k context window, the first request carries about
+**1,400 tokens** of tool definitions instead of 4,800.
+
+### Integrations through MCP
+
+Open **Settings → Tools → MCP integrations → Browse Catalog** for reviewed, ready-made connections. You can also add
+your own stdio or Streamable HTTP server and import its JSON snippet from Claude Desktop, Cursor, Cline or VS Code.
+
+| Integration | Use it to |
+|---|---|
+| **Playwright** · **Chrome DevTools** | Drive and inspect web apps in a separate browser session |
+| **GitHub** · **GitLab** | Work with issues, pull requests, merge requests and pipelines |
+| **Context7** | Look up current library documentation and examples |
+| **Grafana** · **Terraform** · **OpenSearch** | Query metrics, logs, workspaces and indexes on remote, operator-managed endpoints. Optional write profiles ask before every change |
+
+Every MCP tool has an **Off / Ask / Allow** switch and asks before it runs until you allow it. Tokens are kept in
+Secret Storage. See the [MCP guide](docs/USER_GUIDE.md#mcp-servers).
+
+### A workspace that feels native
+
+- **Chats in editor tabs** that run in parallel, next to your code, and come back after a restart.
+- **Searchable history** for each workspace, with chat titles written by the model.
+- **Context you can see**: `@` file mentions, a context meter, automatic compaction and `/compact`.
+- **Slash commands**: `/explain`, `/fix`, `/test`, `/review`, `/doc`, `/compact` and `/new`, plus your own Markdown
+  prompts in `.sovran/commands/`.
+- **Theme-aware** in dark, light and high contrast, and fully usable from the keyboard.
+
+<details>
+<summary><strong>More screenshots</strong></summary>
+<br>
+<p align="center">
+  <img src="media/screenshots/approval-modes-dark.png" width="260" alt="Approval mode picker with Ask, Auto-edit and Auto">
+  &nbsp;
+  <img src="media/screenshots/attach-dark.png" width="260" alt="Attach menu with workspace search and file upload">
+  &nbsp;
+  <img src="media/screenshots/slash-commands-dark.png" width="260" alt="Slash command suggestions">
+</p>
+<p align="center">
+  <img src="media/screenshots/settings-dark.png" width="260" alt="Sovran Settings in the panel">
+  &nbsp;
+  <img src="media/screenshots/providers-dark.png" width="260" alt="Model providers">
+  &nbsp;
+  <img src="media/screenshots/conversation-light.png" width="260" alt="Conversation in the light theme">
+</p>
+</details>
+
+## Keyboard shortcuts
+
+| Keys | Action |
+|---|---|
+| <kbd>Enter</kbd> / <kbd>Shift+Enter</kbd> | Send / new line |
+| <kbd>Alt+M</kbd> | Switch between Plan and Act |
+| <kbd>Alt+A</kbd> | Cycle approval modes: Ask, Auto-edit, Auto |
+| <kbd>Enter</kbd> / <kbd>Esc</kbd> while an approval is pending | Approve / reject |
+| <kbd>Esc</kbd> | Stop the run |
+| <kbd>Ctrl+Enter</kbd> (<kbd>Cmd+Enter</kbd>) in the proposal's diff editor | Apply the change |
 
 ## Configuration
 
-Use the gear in the Sovran view title for **Models**, **Approvals**, **Agent**, **Tools**, **Context**, and **Data**.
-Provider and security-sensitive settings are read from user scope; a repository cannot override them.
+Use the gear in the Sovran view for **Models**, **Approvals**, **Agent**, **Tools**, **Context** and **Data**.
+Provider and security settings are read from **user** scope only, so a cloned repository cannot change them.
 
-For YAML configuration, run **Sovran: Open Model Config File (config.yaml)** to create `~/.sovran/config.yaml`.
-The file and provider settings stay in sync. This example assumes the listed model is available in Ollama:
+<details>
+<summary><strong>Prefer a file? <code>~/.sovran/config.yaml</code></strong></summary>
+<br>
+
+Run **Sovran: Open Model Config File (config.yaml)**. The file and Settings stay in sync both ways, and problems are
+underlined in the editor with fix hints.
 
 ```yaml
 providers:
@@ -128,74 +241,91 @@ providers:
 defaultModel: ollama/qwen2.5-coder:14b
 ```
 
-Never put API keys in YAML or settings. Use **Sovran: Set Provider API Key…**.
+Never put API keys in YAML or settings. Use **Sovran: Set Provider API Key…** instead.
+</details>
+
+<details>
+<summary><strong>Key settings</strong></summary>
+<br>
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `sovran.providers` | `[]` | OpenAI-compatible endpoints |
-| `sovran.defaultModel` / `sovran.planModel` | `""` | Act / Plan model; blank Plan inherits Act |
-| `sovran.approvals.mode` | `ask` | `ask`, `edits` (Auto-edit), or `auto` |
+| `sovran.defaultModel` / `sovran.planModel` | `""` | Act / Plan model. A blank Plan model uses the Act model |
+| `sovran.approvals.mode` | `ask` | `ask`, `edits` (Auto-edit) or `auto` |
 | `sovran.tools.loading` | `auto` | Load tools when needed, or send `all` with every request |
-| `sovran.tools.disabled` / `sovran.tools.forceAsk` | `[]` | Disable native tools or always review their calls |
+| `sovran.tools.disabled` / `sovran.tools.forceAsk` | `[]` | Disable native tools, or always review their calls |
 | `sovran.agent.maxIterations` | `25` | Model round-trips per request |
 | `sovran.terminal.timeoutSeconds` | `120` | Command timeout |
-| `sovran.context.autoCompact` | `true` | Summarize older turns when needed |
+| `sovran.terminal.hideSecretVariables` | `false` | Hide credential-like environment variables from agent commands |
+| `sovran.context.autoCompact` | `true` | Summarize older turns when the context is full |
 | `sovran.sessions.persist` | `true` | Save chats across restarts |
-| `sovran.mcp.servers` | `[]` | User-configured MCP servers |
+| `sovran.mcp.servers` | `[]` | Your MCP servers |
 
-See the [full settings reference](docs/USER_GUIDE.md#settings),
-[provider examples](docs/USER_GUIDE.md#provider-setup-examples), and
-[configuration sync behavior](docs/USER_GUIDE.md#configuration-file-configyaml).
+The [full settings reference](docs/USER_GUIDE.md#settings) covers the rest.
+</details>
 
-## Safety and current limits
+## Security and limits
 
-Ask mode reviews file changes and commands, except explicitly allowed command prefixes. Auto-edit and Auto are
-optional; protected files and risky commands still ask. Plan mode cannot edit or execute, and Restricted Mode stays
-in Plan. MCP tools ask until you explicitly allow each one.
+Sovran is designed so that a mistake is visible before it happens and cheap to undo afterwards:
 
-Choose endpoints and MCP servers you trust. Chat files and images are **not encrypted at rest**. Terminal side effects
-are not checkpointed. Documents supply text, not layout or embedded images; scanned PDFs need OCR elsewhere. MCP
-currently supports tools, without OAuth sign-in, resources, prompts, or older SSE-only servers. Compatibility with
-all real servers has not been verified.
+- **Restricted Mode** (untrusted workspaces) keeps the agent in Plan: it can read and explain, but not edit or run anything.
+- **Protected paths** (`.env`, keys, cloud credentials, `.git/hooks` and more) are checked where symbolic links really
+  lead, and always ask before they are read or written.
+- **Guardrails** are heuristics on the command text, not a sandbox. Choose endpoints and MCP servers you trust.
 
-Read [known limitations](docs/USER_GUIDE.md#known-limitations) and the [security model](SECURITY.md). Report
-vulnerabilities through the private reporting route described there, without posting sensitive details publicly.
+Current limits: chats and images are stored **unencrypted** in the workspace storage. Terminal side effects are not
+checkpointed. Documents provide text, not layout or embedded images. MCP supports tools only (no OAuth sign-in,
+resources, prompts or SSE-only servers). Read the [known limitations](docs/USER_GUIDE.md#known-limitations) and the
+[security model](SECURITY.md), and report vulnerabilities privately as described there.
 
-## Architecture and development
+## Build from source
 
-The portable TypeScript core owns the agent loop, tools, providers, permissions, and context. The VS Code host owns
-I/O, sessions, secrets, and approval decisions. A sandboxed React webview renders state and sends validated intents.
-The official Astro website lives in an independent repository; it adds no dependencies here.
+```bash
+git clone https://github.com/Minells/sovran.git
+cd sovran
+npm ci --ignore-scripts
+npm run package               # builds and creates sovran-<version>.vsix
+```
+
+Use Node.js 22, the CI version. Press <kbd>F5</kbd> in VS Code to open an Extension Development Host.
+
+<details>
+<summary><strong>Architecture and development commands</strong></summary>
+<br>
+
+A portable TypeScript core owns the agent loop, tools, providers, permissions and context. The VS Code host owns I/O,
+sessions, secrets and approval decisions. A sandboxed React webview renders state and sends validated intents.
 
 ```text
 src/core/          portable agent engine, tools, providers, policy, documents, MCP
 src/extension/     VS Code host, controller, adapters, sessions, Secret Storage
 src/shared/        validated host/webview protocol
 webview/           theme-aware React interface
-tests/            unit, integration, component, and VS Code smoke tests
+tests/             unit, integration, component and VS Code smoke tests
 ```
 
 ```bash
-npm ci --ignore-scripts
 npm run build
 npm run check             # strict TypeScript, ESLint, unit/integration/component tests
-npm run test:extension    # smoke tests in real VS Code; downloads VS Code
-npm run package           # rebuild and create a VSIX
+npm run test:extension    # smoke tests in a real VS Code (downloads VS Code)
 ```
 
-Press <kbd>F5</kbd> in VS Code to open an Extension Development Host. See [development](docs/DEVELOPMENT.md),
-[architecture](docs/ARCHITECTURE.md), and [release instructions](docs/RELEASING.md).
+See [development](docs/DEVELOPMENT.md), [architecture](docs/ARCHITECTURE.md) and
+[releasing](docs/RELEASING.md).
+</details>
 
-## Contributing
+## Roadmap and contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md). Useful contributions include
-focused fixes, documentation, tests, and reports from real endpoint configurations. Open an
-[issue](https://github.com/Minells/sovran/issues) before a larger change. GitHub Discussions is not enabled.
+What is next: Marketplace and Open VSX publication, compatibility reports from real servers, and a stable `0.2`. The
+[roadmap](docs/ROADMAP.md) and [implementation status](docs/IMPLEMENTATION_STATUS.md) track progress. Roadmap items
+are plans, not promises.
 
-The [roadmap](docs/ROADMAP.md), [implementation status](docs/IMPLEMENTATION_STATUS.md), and [changelog](CHANGELOG.md)
-record plans and progress. Roadmap items are not a promise of availability.
+Contributions are welcome: focused fixes, tests, documentation and, above all, **reports from real endpoint
+configurations**. Read [CONTRIBUTING.md](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md), and open an
+[issue](https://github.com/Minells/sovran/issues) before a larger change.
 
 ## License
 
-[MIT](LICENSE), © 2026 Minells and SOVRAN contributors. Dependency licenses are listed in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE) © 2026 Minells and SOVRAN contributors. Dependency licenses are listed in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [MCP_THIRD_PARTY_NOTICES.md](MCP_THIRD_PARTY_NOTICES.md).
