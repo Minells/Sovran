@@ -244,13 +244,14 @@ models that always reason (such as GLM or DeepSeek-R1) get room to think before 
 
 ## Installation
 
-From the VS Code Marketplace (once published): search for **Sovran** in the Extensions view.
-
-From a VSIX file:
+Download `sovran-<version>.vsix` from the latest [GitHub Release](https://github.com/Minells/sovran/releases), then:
 
 ```bash
 code --install-extension sovran-0.1.0.vsix
 ```
+
+or choose **Extensions → … → Install from VSIX…**. Each release lists the file's SHA-256 so you can check the download.
+Once the Marketplace listing is published, you can also search for **Sovran** in the Extensions view.
 
 Requires VS Code 1.95 or later.
 

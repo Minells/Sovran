@@ -22,8 +22,9 @@
 | 3. Compatibility matrix: Ollama, LM Studio, vLLM or LiteLLM | Owner | `DEVELOPMENT.md` |
 | 4. Trademark and Marketplace name check (D1) | Owner | — |
 | 5. Publisher, Trusted Publishing, `marketplace` environment (D2) | Owner | `RELEASING.md` |
-| 6. Pre-release `v0.1.x` on the Marketplace and Open VSX | Tag | `release.yml` |
-| 7. Stable `v0.2.0` after feedback | Tag | — |
+| 6. Pre-release `v0.1.0` on GitHub Releases (VSIX and SHA-256) | Tag | `release.yml` |
+| 7. Pre-release `v0.1.x` on the Marketplace (after D1/D2) and Open VSX | Tag + `MARKETPLACE_PUBLISH` | `release.yml` |
+| 8. Stable `v0.2.0` after feedback | Tag | — |
 
 ## Feature roadmap
 
