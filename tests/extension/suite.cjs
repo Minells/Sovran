@@ -148,7 +148,9 @@ exports.run = async function run() {
         await sleep(600);
         await vscode.commands.executeCommand('editor.action.inlineSuggest.commit');
       }
-      assert.strictEqual(document.getText(), expected, `Native inline acceptance failed (${requests.length} mock requests).`);
+      const actual = document.getText();
+      assert.strictEqual(actual, expected,
+        `Native inline acceptance failed (${requests.length} mock requests), got ${JSON.stringify(actual)}.`);
     };
     try {
       await new Promise((resolve, reject) => server.once('error', reject).listen(0, '127.0.0.1', resolve));
@@ -164,11 +166,12 @@ exports.run = async function run() {
         { id: 'chat-only' },
       ]);
       await config.update('defaultModel', 'inline-fixture/test-coder', global);
-      const source = await select('sample.py');
+      await select('disabled.py');
       await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
       assert.strictEqual(requests.length, 0, 'Autocomplete made a request while disabled.');
       await config.update('autocomplete.enabled', true, global);
-      await accept(source);
+      // VS Code 1.95 caches explicit requests, including empty results, by document version and cursor.
+      await accept(await select('sample.py'));
       assert.ok(requests.length > 0);
       assert.ok(requests.every(({ url, body }) => url === '/infill' &&
         body.model === 'test-coder' && body.input_prefix === prefix && body.input_suffix === suffix &&
