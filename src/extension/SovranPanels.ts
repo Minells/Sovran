@@ -15,18 +15,15 @@ export function restoredSessionId(state: unknown): string | undefined {
  * Chats in editor tabs ("Open Chat in Editor"). Each tab is one more surface of the controller, with the same bundle,
  * CSP and message validation as the Activity Bar view. Tabs come back after a window reload with the chat they showed.
  */
-export class SovranPanels implements vscode.WebviewPanelSerializer, vscode.Disposable {
+export class SovranPanels implements vscode.WebviewPanelSerializer {
   static readonly viewType = 'sovran.chatPanel';
   private readonly panels = new Map<string, vscode.WebviewPanel>();
-  private readonly registration: vscode.Disposable;
 
   constructor(
     private readonly extensionUri: vscode.Uri,
     private readonly controller: SovranController,
     private readonly logger: HostLogger,
-  ) {
-    this.registration = vscode.window.registerWebviewPanelSerializer(SovranPanels.viewType, this);
-  }
+  ) {}
 
   /** Opens a chat (a new one when `sessionId` is undefined) in a new editor tab titled `title`, and focuses it. */
   async open(sessionId: string | undefined, title: string) {
@@ -84,11 +81,4 @@ export class SovranPanels implements vscode.WebviewPanelSerializer, vscode.Dispo
     panel.webview.html = webviewHtml(panel.webview, this.extensionUri, 'panel');
   }
 
-  /**
-   * Only the serializer is released. Tabs are left to VS Code: disposing them while the window closes would close
-   * them for good instead of restoring them on the next start.
-   */
-  dispose() {
-    this.registration.dispose();
-  }
 }

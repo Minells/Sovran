@@ -102,6 +102,7 @@ export function runProcess(
         timedOut,
         cancelled,
         durationMs: Date.now() - started,
+        ...(error ? { startError: error } : {}),
       });
     };
     const signalTree = (signal: NodeJS.Signals) => {

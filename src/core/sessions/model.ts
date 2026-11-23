@@ -1,6 +1,7 @@
 import type { AgentMode } from '../permissions/policy';
 import type { DocumentFormat } from '../documents/types';
 import type { ImageMime } from '../images/images';
+import type { TaskState } from './task';
 
 export interface ToolCall {
   id: string;
@@ -17,6 +18,7 @@ export interface ContextAttachment {
   external?: boolean;
   startLine?: number;
   endLine?: number;
+  origin?: ContextOrigin;
   /** Markdown converted from a document of this format (PDF, Word…) rather than the file's own text. */
   format?: DocumentFormat;
   /** Facts about the document for the model, such as "12 pages". */
@@ -24,6 +26,9 @@ export interface ContextAttachment {
   content: string;
   truncated?: boolean;
 }
+
+export type ContextOrigin = 'attachment' | 'editor' | 'stack' | 'definition' | 'reference' | 'diagnostics' | 'search' | 'git' | 'path' | 'read-file' | 'instructions';
+export type ContextSource = Pick<ContextAttachment, 'path' | 'startLine' | 'endLine' | 'origin' | 'detail' | 'truncated' | 'external'>;
 
 export type ToolDisplay =
   | { kind: 'diff'; path: string; diff: string; added: number; removed: number; isNew: boolean }
@@ -34,6 +39,10 @@ export type ToolDisplay =
       output: string;
       exitCode: number | null;
       timedOut: boolean;
+      cancelled?: boolean;
+      signal?: string | null;
+      startError?: string;
+      verification?: boolean;
     }
   | { kind: 'list'; items: string[]; total: number }
   | { kind: 'text'; text: string };
@@ -62,6 +71,7 @@ export interface UserMessage {
   /** Images for a vision model. Their bytes live in the image store, never in the session file. */
   images?: ImageAttachment[];
   checkpoint?: CheckpointRef;
+  task?: TaskState;
   createdAt: number;
 }
 
@@ -102,6 +112,7 @@ export interface ToolMessage {
   status: ToolStatus;
   summary?: string;
   display?: ToolDisplay;
+  contextSources?: ContextSource[];
   durationMs?: number;
   /** Set when a file change or command ran without asking the user, with the policy's reason (Auto mode, allow-list…). */
   autoApproved?: string;
@@ -214,6 +225,16 @@ export function repairInterruptedSession(session: Session, now: number): Session
   const messages: SessionMessage[] = [];
   for (const m of session.messages) {
     if (m.role === 'assistant' && m.streaming) messages.push({ ...m, streaming: undefined });
+    else if (m.role === 'user' && m.task?.status === 'running') {
+      messages.push({
+        ...m,
+        task: {
+          ...m.task,
+          status: 'interrupted',
+          actions: m.task.actions.map((a) => a.status === 'running' ? { ...a, status: 'unknown' } : a),
+        },
+      });
+    }
     else messages.push(m);
     if (m.role === 'assistant' && m.toolCalls) {
       for (const call of m.toolCalls) {

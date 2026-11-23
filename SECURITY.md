@@ -96,6 +96,16 @@ These are read safeguards for trusted repositories, not an OS sandbox or content
 may name protected files; moving/copying secrets into an unprotected path does not make that path protected by history.
 A linked worktree's ordinary `.git` file can reference its administrative Git directory outside that worktree.
 
+## Inline autocomplete and task recovery
+
+Inline autocomplete uses the explicitly selected user-scoped provider. It sends a bounded prefix and suffix from one
+active text document. The host checks workspace trust, real paths, protected paths and excluded files before sending.
+The request does not enter the chat, use tools or follow redirects. Autocomplete starts disabled.
+
+Task summaries save redacted action outcomes and bounded diff previews with the chat. File checkpoints keep the
+original text needed for undo. Task state and checkpoints created while chat persistence is disabled stay in memory.
+Resuming a task requires fresh approval for side effects, including effects whose prior outcome is uncertain.
+
 ## Optional managed MCP integrations
 
 Catalog selection has no installation or launch side effect. Explicit installation runs locked npm dependencies with

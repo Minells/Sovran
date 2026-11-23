@@ -45,6 +45,7 @@
   },
   "main": "./dist/extension.js",
   "activationEvents": [
+    "onStartupFinished",
     "onWebviewPanel:sovran.chatPanel"
   ],
   "extensionKind": [
@@ -93,6 +94,12 @@
       ]
     },
     "commands": [
+      {
+        "command": "sovran.triggerInlineCompletion",
+        "title": "Trigger Inline Completion",
+        "category": "Sovran",
+        "enablement": "editorTextFocus"
+      },
       {
         "command": "sovran.newSession",
         "title": "New Chat",
@@ -410,6 +417,11 @@
                       "vision": {
                         "type": "boolean",
                         "markdownDescription": "Whether the model accepts images. `true` always sends attached images, `false` sends only their names. Leave it unset and Sovran sends them, and stops if the server refuses."
+                      },
+                      "fim": {
+                        "type": "string",
+                        "enum": ["llama.cpp-infill"],
+                        "description": "Native fill-in-the-middle transport for this model."
                       }
                     }
                   }
@@ -438,6 +450,20 @@
             "default": "",
             "description": "Model used in Plan mode, as providerId/modelId. Empty means the same model as Act mode.",
             "order": 3
+          },
+          "sovran.autocomplete.enabled": {
+            "type": "boolean",
+            "scope": "application",
+            "default": false,
+            "markdownDescription": "Enable inline autocomplete. A limited prefix and suffix from the active document are sent to the selected model endpoint, which can be local or remote. A compatible model must be selected explicitly.",
+            "order": 5
+          },
+          "sovran.autocomplete.model": {
+            "type": "string",
+            "scope": "application",
+            "default": "",
+            "description": "Explicit model for inline autocomplete, as providerId/modelId. The model must have a supported FIM transport.",
+            "order": 6
           }
         }
       },

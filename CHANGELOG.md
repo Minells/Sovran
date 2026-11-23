@@ -5,7 +5,19 @@ pre-releases and even minor versions are stable releases.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- Targeted agent context from stack traces, symbol definitions and references, text search, editor diagnostics and
+  Git diffs. The transcript shows the file and line excerpts included in the last model request.
+- Task summaries with checkpointed diffs and observed verification outcomes. Resume keeps the transcript and asks
+  again before executing actions with side effects after an interruption.
+- Optional inline autocomplete through VS Code with a separate model role. The first FIM transport supports
+  llama.cpp `/infill` with Qwen2.5-Coder-1.5B base GGUF.
+
+### Fixed
+
+- Terminal startup failures and signalled exits now report errors. Checkpoint restore skips files that change after
+  the restore preview, and new checkpoints stay in memory while chat persistence is disabled.
 
 ## [0.1.0] — 2026-11-23
 

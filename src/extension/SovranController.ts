@@ -5,15 +5,20 @@ import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { workspaceGlob } from '../core/security/globs';
 import { AgentRunner } from '../core/agent/agentRunner';
+import { neutralizeClosingTags } from '../core/agent/promptedTools';
 import {
   CheckpointRecorder,
+  mergeSnapshots,
   planRestore,
   restoreFiles,
   type Checkpoint,
+  type CheckpointRepository,
   type FileSnapshot,
 } from '../core/checkpoints/checkpoints';
+import { TaskChanges } from '../core/checkpoints/taskChanges';
 import { expandCommand, mergeCommands, parseSlash, type SlashCommand } from '../core/commands/slashCommands';
 import { planCompaction } from '../core/context/compaction';
+import { automaticFile } from '../core/context/targetedContext';
 import {
   configFileTemplate,
   mergeProviders,
@@ -45,6 +50,7 @@ import type {
 import { capabilityKey, resolveVision, type CapabilityStore } from '../core/providers/capabilities';
 import { ProviderError, errorFromException } from '../core/providers/errors';
 import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
+import { infillEndpoint } from '../core/providers/infill';
 import { normalizeApiKey, probeConnection } from '../core/providers/connection';
 import type { ModelInfo, ServerLimits } from '../core/providers/limits';
 import type { ModelConfig, ProviderConfig } from '../core/providers/types';
@@ -80,6 +86,8 @@ import {
   type UserMessage,
 } from '../core/sessions/model';
 import { generateTitle } from '../core/sessions/titles';
+import { canResume, taskFacts, type TaskAction } from '../core/sessions/task';
+import { redact } from '../core/security/redact';
 import { createBuiltinRegistry } from '../core/tools/builtin';
 import type { WebFetchPort } from '../core/web/types';
 import type {
@@ -105,13 +113,14 @@ import type {
 } from '../shared/protocol';
 import { endpointLocation } from '../shared/endpoints';
 import { DiffPresenter } from './adapters/DiffPresenter';
-import { mergeSnapshots, type FsCheckpointRepository } from './adapters/FsCheckpointRepository';
 import type { CommandLoader, FileIndex } from './workspaceServices';
 import type { NodeProcessRunner } from './adapters/NodeProcessRunner';
 import type { VscodeWorkspace } from './adapters/VscodeWorkspace';
+import { excludesWorkspaceFile } from './workspaceFilePolicy';
 import {
   addAllowedCommand,
   readDefaultModel,
+  readAutocompleteModel,
   readPlanModel,
   readConfigFileEnabled,
   readProviders,
@@ -119,6 +128,7 @@ import {
   readSettingsView,
   readTitleModel,
   writeConfigFileEnabled,
+  writeAutocompleteModel,
   writeDefaultModel,
   writeNativeToolOverride,
   writePlanModel,
@@ -173,7 +183,7 @@ export interface ControllerDeps {
   capabilities: CapabilityStore;
   statusBar: SovranStatusBar;
   repo: SessionRepository;
-  checkpoints: FsCheckpointRepository;
+  checkpoints: CheckpointRepository;
   fileIndex: FileIndex;
   commandLoader: CommandLoader;
   configFile: ConfigFileHost;
@@ -424,6 +434,7 @@ export class SovranController implements vscode.Disposable {
           selected: this.selected,
           planModel: this.planModel,
           titleModel: this.titleModel,
+          autocompleteModel: this.autocompleteSelection(),
           settings: readSettingsView(this.settings),
         });
         this.patchContexts();
@@ -713,6 +724,8 @@ export class SovranController implements vscode.Disposable {
           return await this.restoreCheckpoint(surface, msg.messageId);
         case 'retry':
           return await this.retry(surface);
+        case 'resumeTask':
+          return await this.resumeTask(surface, msg.messageId);
         case 'editMessage':
           return await this.editMessage(surface, msg.messageId, msg.text);
         case 'compact':
@@ -761,6 +774,7 @@ export class SovranController implements vscode.Disposable {
       grants: { edits: this.grantsFor(session.id).edits },
       planModel: this.planModel,
       titleModel: this.titleModel,
+      autocompleteModel: this.autocompleteSelection(),
       usage: this.usageView(session),
       compaction: this.compactionView(session),
       commands: this.commandViews(),
@@ -960,6 +974,7 @@ export class SovranController implements vscode.Disposable {
         maxOutputTokens: m.maxOutputTokens,
         serverLimits: this.serverLimits(p.id, m.id),
         toolMode: m.toolMode ?? 'auto',
+        fim: m.fim,
         learnedToolMode: this.deps.capabilities.get(capabilityKey(p.id, m.id))?.toolMode,
       })),
     }));
@@ -1084,16 +1099,14 @@ export class SovranController implements vscode.Disposable {
       // The lexical check drives the chip; the send-time check also follows symbolic links.
       const allowed =
         !this.editorBlock(ed.document.uri, rel) &&
-        (await resolveAndVerify(ed.document.uri.fsPath, this.deps.workspace).then(
-          () => true,
-          () => false,
-        ));
+        (await automaticFile(ed.document.uri.fsPath, this.deps.workspace, this.settings.agent.policy.protectedPaths, excludesWorkspaceFile));
       if (allowed) {
         const sel = ed.selection;
         if (!sel.isEmpty) {
           const text = ed.document.getText(sel);
           out.push({
             kind: 'selection',
+            origin: 'editor',
             path: rel,
             startLine: sel.start.line + 1,
             endLine: sel.end.line + 1,
@@ -1104,6 +1117,7 @@ export class SovranController implements vscode.Disposable {
           const text = ed.document.getText();
           out.push({
             kind: 'file',
+            origin: 'editor',
             path: rel,
             content: text.slice(0, MAX_EDITOR_FILE_CHARS),
             truncated: text.length > MAX_EDITOR_FILE_CHARS || undefined,
@@ -1114,7 +1128,7 @@ export class SovranController implements vscode.Disposable {
     for (const a of surface.attachments) {
       // Images travel apart from the text context (see collectImages).
       if (a.image) continue;
-      if (out.some((o) => o.path === a.path && o.kind === 'file')) continue;
+      if (out.some((o) => o.path === a.path && o.origin !== 'editor')) continue;
       try {
         let content: FileContent = { encoding: 'utf-8' };
         if (a.external || a.format || a.encoding) {
@@ -1753,7 +1767,12 @@ export class SovranController implements vscode.Disposable {
   }
 
   /** Sets the Act, Plan or title model explicitly (Settings view). A null Plan or title model means "the chat's model". */
-  private async setModel(role: 'act' | 'plan' | 'title', sel: SelectedModel | null) {
+  private async setModel(role: 'act' | 'plan' | 'title' | 'autocomplete', sel: SelectedModel | null) {
+    if (role === 'autocomplete') {
+      if (sel && !this.autocompleteCompatible(sel)) return;
+      await writeAutocompleteModel(sel ? `${sel.providerId}/${sel.modelId}` : '');
+      return this.patch({ autocompleteModel: sel });
+    }
     if (role === 'title') {
       if (sel && !this.exists(sel)) return;
       this.titleModel = sel;
@@ -1808,7 +1827,7 @@ export class SovranController implements vscode.Disposable {
       !!s && !!this.providers.find((p) => p.id === s.providerId)?.models?.some((m) => m.id === s.modelId);
     if (has(sel)) return sel;
     for (const p of this.providers) {
-      const m = p.models?.[0];
+      const m = p.models?.find((model) => !model.fim);
       if (m) return { providerId: p.id, modelId: m.id };
     }
     return null;
@@ -1825,6 +1844,18 @@ export class SovranController implements vscode.Disposable {
     const [providerId, ...rest] = ref.split('/');
     const sel = providerId && rest.length ? { providerId, modelId: rest.join('/') } : null;
     return this.exists(sel) ? sel : null;
+  }
+
+  private autocompleteCompatible(sel: SelectedModel): boolean {
+    const provider = this.providers.find((p) => p.id === sel.providerId);
+    return !!provider && !!infillEndpoint(provider.baseUrl) && provider.models?.some(
+      (model) => model.id === sel.modelId && model.fim === 'llama.cpp-infill',
+    ) === true;
+  }
+
+  private autocompleteSelection(): SelectedModel | null {
+    const selected = this.parseModelRef(readAutocompleteModel());
+    return selected && this.autocompleteCompatible(selected) ? selected : null;
   }
 
   /** The model used for the next request: the Plan model in Plan mode when one is set, else the Act model. */
@@ -2359,6 +2390,7 @@ export class SovranController implements vscode.Disposable {
           contextWindow: _c,
           maxOutputTokens: _o,
           toolMode: _t,
+          fim: _f,
           ...kept
         } = existing?.models?.find((x) => x.id === m.id) ?? { id: m.id };
         return {
@@ -2367,6 +2399,7 @@ export class SovranController implements vscode.Disposable {
           ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
           ...(m.maxOutputTokens ? { maxOutputTokens: m.maxOutputTokens } : {}),
           ...(m.toolMode && m.toolMode !== 'auto' ? { toolMode: m.toolMode } : {}),
+          ...(m.fim ? { fim: m.fim } : {}),
         };
       }),
     };
@@ -2622,12 +2655,16 @@ export class SovranController implements vscode.Disposable {
   }
 
   /** Appends `user` (if needed) and runs the agent for it. `mergeInto` keeps an earlier checkpoint when retrying. */
-  private async startRun(session: Session, user: UserMessage, mergeInto?: Checkpoint) {
+  private async startRun(session: Session, user: UserMessage, mergeInto?: Checkpoint, resume = false) {
     // Checked again here, with nothing awaited before beginRun: two quick sends must not start two runs in one chat.
     if (this.runs.has(session.id)) return;
     const resolved = this.resolveModel(session);
     if (!resolved) return;
     const { provider, model } = resolved;
+    const previous = resume ? user.task : undefined;
+    const resumeAnchor = previous && session.messages.at(-1)?.id;
+    user.task = { status: 'running', actions: previous?.actions.slice() ?? [], changes: previous?.changes.slice() ?? [] };
+    const task = user.task;
     if (provider.auth?.type !== 'none' && !this.keyStatus.get(provider.id)) {
       this.notice(
         'warning',
@@ -2652,21 +2689,49 @@ export class SovranController implements vscode.Disposable {
 
     const mode: AgentMode = vscode.workspace.isTrusted ? this.mode : 'plan';
     const run = this.beginRun(session, { phase: 'thinking', label: 'Thinking' });
-    const secret = await this.deps.secrets.get(provider.id);
-    this.deps.logger.addSecret(secret);
+    let secrets: readonly (string | undefined)[] = [];
     // Every write in this run goes through the recorder, so the run can be undone as a unit.
     // The checkpoint is saved as files change, not only when the run ends: after a crash or a window closed
     // mid-run the changes are still on disk, and "Undo changes" must still be there. Saves run one at a time.
     const checkpointId = mergeInto?.id ?? randomUUID();
     let checkpointSaves: Promise<void> = Promise.resolve();
     const saveCheckpoint = () =>
-      this.saveCheckpoint(session, user, recorder.changedFiles(), checkpointId, mergeInto);
-    const recorder: CheckpointRecorder = new CheckpointRecorder(this.deps.workspace, () => {
-      checkpointSaves = checkpointSaves.then(saveCheckpoint).then(() => this.schedulePersist(session));
+      this.saveCheckpoint(session, user, recorder.changedFiles(), checkpointId, mergeInto, resume);
+    const changes = new TaskChanges(previous?.changes ?? [], mergeInto?.files ?? [], resume);
+    const recorder: CheckpointRecorder = new CheckpointRecorder(this.deps.workspace, (file, after) => {
+      const snapshot = { ...file };
+      checkpointSaves = checkpointSaves.then(async () => {
+        const resolved = await resolveAndVerify(snapshot.absolutePath, this.deps.workspace).catch(() => undefined);
+        const names = resolved ? await policyPaths(resolved, this.deps.workspace) : [];
+        const protectedFile = !resolved || names.some((name) => isProtectedPath(name, this.settings.agent.policy.protectedPaths));
+        task.changes = changes.record(snapshot, after, this.rel(snapshot.absolutePath), protectedFile, secrets);
+        await saveCheckpoint();
+        this.schedulePersist(session);
+      });
     });
     const runner = this.createRunner(provider, recorder, session.id);
     this.deps.logger.info(`Run started · ${provider.id}/${model.id} · ${mode} mode`);
     try {
+      const secret = await this.deps.secrets.get(provider.id);
+      this.deps.logger.addSecret(secret);
+      secrets = [secret, ...(this.deps.mcp?.secrets() ?? [])];
+      const instructions = await this.projectInstructions();
+      const observeAction = async (action: TaskAction) => {
+        const index = task.actions.findIndex((entry) => entry.id === action.id);
+        if (index < 0) task.actions.push(action);
+        else task.actions[index] = action;
+        await checkpointSaves;
+        if (this.deleted.has(session.id)) return;
+        try {
+          await this.deps.repo.save(session);
+        } catch {
+          if (action.status === 'running') {
+            task.actions.pop();
+            throw new Error('Could not persist the action before dispatch.');
+          }
+          this.deps.logger.warn('Could not save the observed action result.');
+        }
+      };
       const outcome = await runner.run({
         session,
         providerId: provider.id,
@@ -2676,31 +2741,53 @@ export class SovranController implements vscode.Disposable {
         grants: this.grantsFor(session.id),
         signal: run.abort.signal,
         emit: (e) => this.onAgentEvent(session, e),
-        projectInstructions: await this.projectInstructions(),
+        projectInstructions: instructions?.content,
+        projectInstructionsSource: instructions?.content.trim() ? {
+          path: instructions.path, origin: 'instructions', startLine: 1,
+          endLine: instructions.content.split(/\r?\n/).length, truncated: instructions.truncated,
+        } : undefined,
         // MCP tokens too: a server could echo its own token in a result, which would reach the model and the chat file.
-        secrets: [secret, ...(this.deps.mcp?.secrets() ?? [])],
+        secrets,
+        observeAction,
+        ...(previous && resumeAnchor ? { resume: {
+          afterMessageId: resumeAnchor,
+          facts: [
+            'Resume the task below. Inspect the workspace as it is now before making changes.',
+            'Treat the recorded actions as prior effects. Do not repeat them without a fresh user decision.',
+            '',
+            `Original goal: ${redact(user.content, secrets)}`,
+            '',
+            '<task_state>',
+            neutralizeClosingTags(taskFacts(previous), ['task_state']),
+            '</task_state>',
+          ].join('\n'),
+        } } : {}),
         autoCompact: this.settings.autoCompact,
         // Read live: switching the approval mode or allowing a command mid-run applies to the next action.
         policy: () => ({ ...this.settings.agent.policy, approvalMode: this.approvalMode }),
         images: await this.imageUrls(session, model, provider.id),
         routing: this.routingHints(user),
+        targetedContext: { excluded: excludesWorkspaceFile },
       });
+      task.status = outcome.reason;
       this.deps.logger.info(
         `Run finished · ${outcome.reason}${outcome.error ? ` · ${outcome.error.kind}` : ''}`,
       );
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
+      task.status = run.abort.signal.aborted ? 'cancelled' : 'error';
+      const message = redact(e instanceof Error ? e.message : String(e), secrets);
       this.deps.logger.error(`Run crashed: ${message}`);
       this.notice('error', `The run stopped unexpectedly: ${message}`, this.surfaceFor(session.id));
     } finally {
       this.flush();
       this.dropApprovals(session.id);
-      this.endRun(session);
       await checkpointSaves;
       await saveCheckpoint();
+      this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: user });
       session.updatedAt = Date.now();
       this.cancelPersist(session.id);
       await this.persist(session);
+      this.endRun(session);
       this.patchSession(session.id, {
         run: null,
         approvals: [],
@@ -2748,8 +2835,9 @@ export class SovranController implements vscode.Disposable {
     files: FileSnapshot[],
     id: string,
     mergeInto?: Checkpoint,
+    preserveExternalEdits = false,
   ) {
-    const merged = mergeInto ? mergeSnapshots(mergeInto.files, files) : files;
+    const merged = mergeInto ? mergeSnapshots(mergeInto.files, files, preserveExternalEdits) : files;
     if (merged.length === 0) {
       // Every file is back as it was (an edit the same run reverted): nothing is left to undo.
       if (user.checkpoint?.id === id) {
@@ -2882,6 +2970,17 @@ export class SovranController implements vscode.Disposable {
     await this.startRun(session, user, mergeInto);
   }
 
+  private async resumeTask(surface: Surface, messageId: string) {
+    const session = surface.session;
+    const user = session.messages.findLast((message): message is UserMessage => message.role === 'user');
+    if (this.runs.has(session.id) || user?.id !== messageId || !canResume(user.task)) return;
+    const checkpoint = user.checkpoint && !user.checkpoint.restoredAt
+      ? await this.deps.checkpoints.load(session.id, user.checkpoint.id)
+      : undefined;
+    if (surface.session !== session || user !== session.messages.findLast((m) => m.role === 'user')) return;
+    await this.startRun(session, user, checkpoint, true);
+  }
+
   private async editMessage(surface: Surface, messageId: string, text: string) {
     const session = surface.session;
     if (this.runs.has(session.id))
@@ -2996,7 +3095,7 @@ export class SovranController implements vscode.Disposable {
     };
   }
 
-  private async projectInstructions(): Promise<string | undefined> {
+  private async projectInstructions() {
     if (!this.settings.projectInstructions || !vscode.workspace.isTrusted) return undefined;
     const root = this.deps.workspace.roots()[0];
     if (!root) return undefined;
@@ -3005,7 +3104,8 @@ export class SovranController implements vscode.Disposable {
       const file = await resolveAndVerify(path.join(root.path, 'AGENTS.md'), this.deps.workspace);
       const paths = await policyPaths(file, this.deps.workspace);
       if (paths.some((p) => isProtectedPath(p, this.settings.agent.policy.protectedPaths))) return undefined;
-      return (await this.deps.workspace.readFile(file.absolute)).slice(0, 8000);
+      const text = await this.deps.workspace.readFile(file.absolute);
+      return { path: file.relative, content: text.slice(0, 8000), truncated: text.length > 8000 };
     } catch {
       return undefined;
     }
@@ -3086,6 +3186,13 @@ export class SovranController implements vscode.Disposable {
         if (!visible) return this.deps.logger.info(`Notice in a chat that is not shown: ${e.message}`);
         return this.notice(e.level, e.message, this.surfaceFor(session.id));
       case 'context':
+        {
+          const user = session.messages.findLast((m): m is UserMessage => m.role === 'user');
+          if (user?.task && e.sources) {
+            user.task.context = e.sources;
+            this.sendToSession(session.id, { type: 'messageUpsert', sessionId: session.id, message: user });
+          }
+        }
         session.usage = {
           tokens: e.estimatedTokens,
           contextWindow: e.contextWindow,

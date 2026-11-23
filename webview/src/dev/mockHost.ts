@@ -1043,6 +1043,7 @@ onPost((m) => {
           'sessions.persist': 'persistSessions',
           'sessions.generateTitles': 'generateTitles',
           'tools.loading': 'toolLoading',
+          'autocomplete.enabled': 'autocompleteEnabled',
         } as const
       )[key];
       state = { ...state, settings: { ...state.settings, [field]: m.setting.value } };
@@ -1050,6 +1051,10 @@ onPost((m) => {
     }
     case 'setModel': {
       const sel = m.providerId && m.modelId ? { providerId: m.providerId, modelId: m.modelId } : null;
+      if (m.role === 'autocomplete') {
+        state = { ...state, autocompleteModel: sel };
+        return send({ type: 'patch', patch: { autocompleteModel: sel } });
+      }
       state =
         m.role === 'plan'
           ? { ...state, planModel: sel }

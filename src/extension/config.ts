@@ -31,6 +31,7 @@ const modelSchema = z.object({
   temperature: z.number().min(0).max(2).optional(),
   toolMode: z.enum(['auto', 'native', 'prompted', 'none']).optional(),
   vision: z.boolean().optional(),
+  fim: z.literal('llama.cpp-infill').optional(),
 });
 
 const providerSchema = z.object({
@@ -87,6 +88,21 @@ export async function writeDefaultModel(value: string): Promise<void> {
 
 export function readPlanModel(): string {
   return userSetting('planModel', '');
+}
+
+export function readAutocompleteModel(): string {
+  const value = userSetting<unknown>('autocomplete.model', '');
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+export async function writeAutocompleteModel(value: string): Promise<void> {
+  await vscode.workspace.getConfiguration(SECTION).update(
+    'autocomplete.model', value || undefined, vscode.ConfigurationTarget.Global,
+  );
+}
+
+export function readAutocompleteEnabled(): boolean {
+  return userSetting<unknown>('autocomplete.enabled', false) === true;
 }
 
 export async function writePlanModel(value: string): Promise<void> {
@@ -207,6 +223,7 @@ export function readSettingsView(s: HostSettings = readSettings()): SettingsView
     return i?.workspaceValue !== undefined || i?.workspaceFolderValue !== undefined;
   });
   return {
+    autocompleteEnabled: readAutocompleteEnabled(),
     defaultApprovalMode: s.agent.policy.approvalMode,
     allowedCommands: [...s.agent.policy.allowedCommands],
     disabledTools: [...(s.agent.policy.disabledTools ?? [])],

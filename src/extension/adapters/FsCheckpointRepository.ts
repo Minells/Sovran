@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import type { Checkpoint, FileSnapshot } from '../../core/checkpoints/checkpoints';
+import type { Checkpoint, CheckpointRepository } from '../../core/checkpoints/checkpoints';
 
 const ID_RE = /^[A-Za-z0-9_-]{1,100}$/;
 
 /** Stores file snapshots for rollback, one JSON file per checkpoint, deleted together with the session. */
-export class FsCheckpointRepository {
+export class FsCheckpointRepository implements CheckpointRepository {
   constructor(private readonly dir: string) {}
 
   private file(sessionId: string, id: string) {
@@ -39,15 +39,30 @@ export class FsCheckpointRepository {
   }
 }
 
-/**
- * Merges a later run's changes into an earlier checkpoint for the same message (retry while keeping files):
- * the earliest "before" wins, the latest "after" wins, so Undo still returns to the original state.
- */
-export function mergeSnapshots(earlier: readonly FileSnapshot[], later: readonly FileSnapshot[]): FileSnapshot[] {
-  const byPath = new Map(earlier.map((f) => [f.absolutePath, { ...f }]));
-  for (const f of later) {
-    const prev = byPath.get(f.absolutePath);
-    byPath.set(f.absolutePath, prev ? { ...prev, afterHash: f.afterHash } : { ...f });
+export class SwitchingCheckpointRepository implements CheckpointRepository {
+  private readonly memory = new Map<string, Map<string, Checkpoint>>();
+
+  constructor(private readonly disk: CheckpointRepository, private readonly persist: () => boolean) {}
+
+  async save(checkpoint: Checkpoint): Promise<void> {
+    const entries = this.memory.get(checkpoint.sessionId);
+    if (this.persist()) {
+      await this.disk.save(checkpoint);
+      entries?.delete(checkpoint.id);
+      return;
+    }
+    const next = entries ?? new Map();
+    next.set(checkpoint.id, structuredClone(checkpoint));
+    this.memory.set(checkpoint.sessionId, next);
   }
-  return [...byPath.values()];
+
+  async load(sessionId: string, id: string): Promise<Checkpoint | undefined> {
+    const saved = this.memory.get(sessionId)?.get(id);
+    return saved ? structuredClone(saved) : this.disk.load(sessionId, id);
+  }
+
+  async deleteForSession(sessionId: string): Promise<void> {
+    this.memory.delete(sessionId);
+    await this.disk.deleteForSession(sessionId);
+  }
 }

@@ -14,6 +14,8 @@ export interface ModelConfig {
   toolMode?: ToolMode;
   /** Whether the model receives images. Unset: Sovran sends them and stops if the server refuses (see capabilities). */
   vision?: boolean;
+  /** Explicit support for a native fill-in-the-middle transport. */
+  fim?: 'llama.cpp-infill';
   /** What the server reports for this model. Attached at run time only, never written to settings or the file. */
   serverLimits?: ServerLimits;
 }

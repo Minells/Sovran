@@ -133,13 +133,21 @@ const MODEL_ROLE = {
     label: 'Title model',
     help: 'A small, fast model is enough: the title is generated while the answer streams.',
   },
+  autocomplete: {
+    label: 'Autocomplete model',
+    help: 'Select a model configured with a fill-in-the-middle transport. The endpoint receives a limited prefix and suffix from the active editor. It can be local or remote.',
+  },
 } as const;
 
-function ModelSelect({ role }: { role: 'act' | 'plan' | 'title' }) {
+function ModelSelect({ role }: { role: keyof typeof MODEL_ROLE }) {
   const { app } = useStore();
   const id = useId();
-  const value = role === 'act' ? app.selected : role === 'plan' ? app.planModel : app.titleModel;
-  const choices = app.providers.flatMap((p) => p.models.map((m) => ({ provider: p, model: m })));
+  const selected = { act: app.selected, plan: app.planModel, title: app.titleModel, autocomplete: app.autocompleteModel };
+  const value = selected[role] ?? null;
+  const choices = app.providers.map((p) => ({
+    ...p,
+    models: role === 'autocomplete' ? p.models.filter((m) => m.fim) : p.models,
+  })).filter((p) => p.models.length);
   const onChange = (raw: string) => {
     const [providerId, modelId] = raw.split('\u0000');
     post(
@@ -151,6 +159,7 @@ function ModelSelect({ role }: { role: 'act' | 'plan' | 'title' }) {
       <label htmlFor={id}>{MODEL_ROLE[role].label}</label>
       <select
         id={id}
+        aria-describedby={`${id}-help`}
         value={ref(value)}
         onChange={(e) => onChange(e.target.value)}
         disabled={!choices.length}
@@ -158,8 +167,8 @@ function ModelSelect({ role }: { role: 'act' | 'plan' | 'title' }) {
         {role === 'plan' ? <option value="">Same as Act model</option> : null}
         {role === 'title' ? <option value="">Same as the chat's model</option> : null}
         {role === 'act' && !value ? <option value="">Choose a model</option> : null}
-        {app.providers
-          .filter((p) => p.models.length)
+        {role === 'autocomplete' ? <option value="">Choose a FIM model</option> : null}
+        {choices
           .map((p) => (
             <optgroup key={p.id} label={p.name}>
               {p.models.map((m) => (
@@ -170,7 +179,7 @@ function ModelSelect({ role }: { role: 'act' | 'plan' | 'title' }) {
             </optgroup>
           ))}
       </select>
-      <span className="sv-field__help">{MODEL_ROLE[role].help}</span>
+      <span className="sv-field__help" id={`${id}-help`}>{MODEL_ROLE[role].help}</span>
       {role === 'plan' && value ? <ModelLimits selection={value} /> : null}
     </div>
   );
@@ -642,6 +651,17 @@ export function SettingsView() {
               ) : null}
               <ModelSelect role="plan" />
               <ChatTitles />
+            </SettingsDisclosure>
+            <SettingsDisclosure title="Inline autocomplete" status={s.autocompleteEnabled ? 'On' : undefined}>
+              <CheckRow
+                checked={s.autocompleteEnabled ?? false}
+                onChange={toggle('autocomplete.enabled')}
+                label="Enable inline autocomplete"
+              />
+              <ModelSelect role="autocomplete" />
+              <Button variant="ghost" onClick={() => post({ type: 'setView', view: 'providers' })}>
+                Add or configure a FIM model
+              </Button>
             </SettingsDisclosure>
             <SettingsDisclosure
               title="Configuration file"

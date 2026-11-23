@@ -22,6 +22,7 @@ const COMMANDS = [
   'sovran.openInEditor',
   'sovran.acceptProposal',
   'sovran.rejectProposal',
+  'sovran.triggerInlineCompletion',
 ];
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -79,6 +80,8 @@ exports.run = async function run() {
     assert.deepStrictEqual(cfg.get('mcp.servers'), []);
     assert.deepStrictEqual(cfg.get('tools.disabled'), []);
     assert.deepStrictEqual(cfg.get('tools.forceAsk'), []);
+    assert.strictEqual(cfg.get('autocomplete.enabled'), false);
+    assert.strictEqual(cfg.get('autocomplete.model'), '');
     // Tools load on demand by default; `all` sends every tool with every request.
     assert.strictEqual(cfg.get('tools.loading'), 'auto');
     // Security-relevant settings ignore workspace values. A repository must never be able to start an MCP server.
@@ -98,11 +101,97 @@ exports.run = async function run() {
       'sovran.tools.disabled',
       'sovran.tools.forceAsk',
       'sovran.tools.loading',
+      'sovran.autocomplete.enabled',
+      'sovran.autocomplete.model',
     ]) {
       assert.strictEqual(scope(key), 'application', `${key} must be application-scoped`);
     }
   });
+  await test('inline autocomplete uses native ghost text acceptance and keeps its requests scoped', async () => {
+    const fs = require('node:fs/promises');
+    const http = require('node:http');
+    const path = require('node:path');
+    assert.ok(vscode.workspace.isTrusted, 'Run the inline smoke test in a trusted fixture workspace.');
+    const dir = await fs.mkdtemp(path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'sovran-fim-smoke-'));
+    const config = vscode.workspace.getConfiguration('sovran');
+    const global = vscode.ConfigurationTarget.Global;
+    const inlineSettings = vscode.workspace.getConfiguration('editor.inlineSuggest');
+    const previousInline = inlineSettings.inspect('enabled').globalValue;
+    const snapshot = Object.fromEntries(['providers', 'autocomplete.enabled', 'autocomplete.model']
+      .map((key) => [key, config.inspect(key).globalValue]));
+    const requests = [];
+    const server = http.createServer(async (req, res) => {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      requests.push({ url: req.url, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ content: 'a + b\n' }));
+    });
+    const prefix = 'def add(a, b):\n    return ';
+    const suffix = '\n\nassert add(2, 3) == 5\n';
+    const select = async (name, start = prefix) => {
+      const uri = vscode.Uri.file(path.join(dir, name));
+      await fs.writeFile(uri.fsPath, start + suffix);
+      const document = await vscode.workspace.openTextDocument(uri);
+      const editor = await vscode.window.showTextDocument(document);
+      const cursor = document.positionAt(start.length);
+      editor.selection = new vscode.Selection(cursor, cursor);
+      await vscode.commands.executeCommand('workbench.action.focusActiveEditorGroup');
+      await vscode.commands.executeCommand('revealLine', { lineNumber: cursor.line, at: 'center' });
+      return document;
+    };
+    const accept = async (document) => {
+      const expected = prefix + 'a + b' + suffix;
+      // The renderer can cancel a request when it is still settling a tab or settings change.
+      for (const end = Date.now() + STATE_TIMEOUT_MS; document.getText() !== expected && Date.now() < end;) {
+        await vscode.commands.executeCommand('sovran.triggerInlineCompletion');
+        await sleep(600);
+        await vscode.commands.executeCommand('editor.action.inlineSuggest.commit');
+      }
+      assert.strictEqual(document.getText(), expected, `Native inline acceptance failed (${requests.length} mock requests).`);
+    };
+    try {
+      await new Promise((resolve, reject) => server.once('error', reject).listen(0, '127.0.0.1', resolve));
+      await inlineSettings.update('enabled', true, global);
+      const mockBase = `http://127.0.0.1:${server.address().port}/v1`;
+      const configure = async (baseUrl, model) => config.update('providers', [{
+        id: 'inline-fixture', name: 'Inline fixture', baseUrl, auth: { type: 'none' },
+        models: [{ id: model, fim: 'llama.cpp-infill' }],
+      }], global);
+      await configure(mockBase, 'test-coder');
+      await config.update('autocomplete.model', 'inline-fixture/test-coder', global);
+      const source = await select('sample.py');
+      await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
+      assert.strictEqual(requests.length, 0, 'Autocomplete made a request while disabled.');
+      await config.update('autocomplete.enabled', true, global);
+      await accept(source);
+      assert.ok(requests.length > 0);
+      assert.ok(requests.every(({ url, body }) => url === '/infill' &&
+        body.model === 'test-coder' && body.input_prefix === prefix && body.input_suffix === suffix &&
+        !body.messages && !body.tools));
+      await select('.env', '# PROTECTED\n' + prefix);
+      const beforeProtected = requests.length;
+      await vscode.commands.executeCommand('sovran.triggerInlineCompletion');
+      await sleep(300);
+      assert.strictEqual(requests.length, beforeProtected, 'A protected document reached the FIM endpoint.');
+
+      if (process.env.SOVRAN_TEST_FIM_BASE) {
+        await configure(process.env.SOVRAN_TEST_FIM_BASE, 'sovran-fim-qa');
+        await config.update('autocomplete.model', 'inline-fixture/sovran-fim-qa', global);
+        await accept(await select('local-model.py'));
+        console.log('    ✓ accepted llama.cpp / Qwen2.5-Coder-1.5B Q8_0 inline suggestion');
+      }
+    } finally {
+      for (const [key, value] of Object.entries(snapshot)) await config.update(key, value, global);
+      await inlineSettings.update('enabled', previousInline, global);
+      await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+      server.closeAllConnections();
+      await new Promise((resolve) => server.close(resolve));
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
   await test('config.yaml problems show in the editor and clear once the file is fixed', async () => {
+    await vscode.commands.executeCommand('sovran.focus');
     const fs = require('node:fs');
     // scripts/test-extension.mjs points the config file at a temporary folder (honoured only in test mode).
     const file = process.env.SOVRAN_TEST_CONFIG_FILE ?? '';

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'node:path';
 import { DiffPresenter } from './adapters/DiffPresenter';
-import { FsCheckpointRepository } from './adapters/FsCheckpointRepository';
+import { FsCheckpointRepository, SwitchingCheckpointRepository } from './adapters/FsCheckpointRepository';
 import {
   FsSessionRepository,
   MemorySessionRepository,
@@ -19,6 +19,7 @@ import { readSettings } from './config';
 import { ConfigFileHost } from './configFileHost';
 import { McpHost } from './mcpHost';
 import { SovranController } from './SovranController';
+import { SovranInlineCompletionProvider } from './InlineCompletionProvider';
 import { SovranPanels } from './SovranPanels';
 import { SovranViewProvider } from './SovranViewProvider';
 import {
@@ -32,9 +33,74 @@ import {
 /** Stopped on deactivation, which VS Code awaits, so local MCP servers never outlive the window. */
 let mcp: McpHost | undefined;
 
-/** Composition root: wires VS Code adapters into the portable core. */
-export async function activate(context: vscode.ExtensionContext) {
+/** Register editor functionality immediately. Start the chat host when a chat surface or command needs it. */
+export function activate(context: vscode.ExtensionContext) {
   const logger = createLogger();
+  const secrets = new ProviderSecrets(context.secrets);
+  const inline = new SovranInlineCompletionProvider(new VscodeWorkspace(), secrets, logger);
+  let chat: ReturnType<typeof activateChat> | undefined;
+  const getChat = (): ReturnType<typeof activateChat> =>
+    (chat ??= activateChat(context, logger, secrets, () => view.reveal()));
+  const view = new SovranViewProvider(context.extensionUri, async () => (await getChat()).controller, logger);
+  const command = (id: string, fn: (...args: unknown[]) => unknown) => vscode.commands.registerCommand(id, fn);
+  const chatCommand = (id: string, fn: (controller: SovranController, ...args: unknown[]) => unknown) =>
+    command(id, async (...args) => fn((await getChat()).controller, ...args));
+
+  context.subscriptions.push(
+    logger,
+    inline,
+    vscode.window.registerWebviewViewProvider(SovranViewProvider.viewId, view),
+    vscode.window.registerWebviewPanelSerializer(SovranPanels.viewType, {
+      async deserializeWebviewPanel(panel, state) {
+        await (await getChat()).panels.deserializeWebviewPanel(panel, state);
+      },
+    }),
+    chatCommand('sovran.focus', (controller) => controller.focus()),
+    chatCommand('sovran.newSession', async (controller) => {
+      await view.reveal();
+      controller.newSession();
+    }),
+    chatCommand('sovran.newChatInEditor', (controller) => controller.openInEditor()),
+    chatCommand('sovran.openInEditor', (controller) => controller.moveSidebarToEditor()),
+    // Editor title buttons pass the diff's URI; the command palette and the keybinding pass nothing.
+    chatCommand('sovran.acceptProposal', (controller, uri) => controller.decideProposal(true, uri)),
+    chatCommand('sovran.rejectProposal', (controller, uri) => controller.decideProposal(false, uri)),
+    chatCommand('sovran.showHistory', async (controller) => {
+      controller.showView('history');
+      await view.reveal();
+    }),
+    chatCommand('sovran.manageProviders', async (controller) => {
+      controller.showView('providers');
+      await view.reveal();
+    }),
+    chatCommand('sovran.openSettings', async (controller) => {
+      controller.showView('settings');
+      await view.reveal();
+    }),
+    chatCommand('sovran.openConfigFile', (controller) => controller.handle({ type: 'openConfigFile' })),
+    chatCommand('sovran.setApprovalMode', (controller) => controller.pickApprovalMode()),
+    chatCommand('sovran.selectModel', (controller) => controller.pickModel()),
+    chatCommand('sovran.setApiKey', (controller) => controller.promptApiKey()),
+    chatCommand('sovran.toggleMode', (controller) => controller.toggleMode()),
+    chatCommand('sovran.attachFiles', async (controller) => {
+      await controller.focus();
+      await controller.attachFiles();
+    }),
+    chatCommand('sovran.askAboutSelection', (controller) => controller.askAboutSelection()),
+    chatCommand('sovran.cancelRun', (controller) => controller.cancel()),
+    chatCommand('sovran.compact', (controller) => controller.compactNow()),
+    command('sovran.showLogs', () => logger.show()),
+    command('sovran.triggerInlineCompletion', () => inline.trigger()),
+  );
+  logger.info(`Sovran activated (VS Code ${vscode.version}).`);
+}
+
+async function activateChat(
+  context: vscode.ExtensionContext,
+  logger: ReturnType<typeof createLogger>,
+  secrets: ProviderSecrets,
+  reveal: () => Promise<void>,
+) {
   const diff = new DiffPresenter();
   const mirror = new TerminalMirror();
   const statusBar = new SovranStatusBar();
@@ -57,8 +123,7 @@ export async function activate(context: vscode.ExtensionContext) {
     context.extensionMode === vscode.ExtensionMode.Test ? process.env.SOVRAN_TEST_CONFIG_FILE : undefined;
   const configFile = new ConfigFileHost(context.globalState, testConfigFile || undefined);
 
-  // The view provider and the editor tabs need the controller, and the controller needs to reveal and open them.
-  const ref: { view?: SovranViewProvider; panels?: SovranPanels; controller?: SovranController } = {};
+  const ref: { panels?: SovranPanels; controller?: SovranController } = {};
   // MCP servers start in the background: activation never waits for them.
   mcp = new McpHost({
     managed: {
@@ -75,11 +140,9 @@ export async function activate(context: vscode.ExtensionContext) {
     notify: (level, message) => ref.controller?.showNotice(level, message),
   });
   await mcp.init();
-  const reveal = async () => ref.view?.reveal();
-
   const controller = new SovranController({
     logger,
-    secrets: new ProviderSecrets(context.secrets),
+    secrets,
     diff,
     workspace: new VscodeWorkspace(ripgrep),
     process: new NodeProcessRunner(
@@ -90,7 +153,10 @@ export async function activate(context: vscode.ExtensionContext) {
     capabilities: new MementoCapabilityStore(context.globalState),
     statusBar,
     repo,
-    checkpoints: new FsCheckpointRepository(path.join(storage, 'checkpoints')),
+    checkpoints: new SwitchingCheckpointRepository(
+      new FsCheckpointRepository(path.join(storage, 'checkpoints')),
+      persistSessions,
+    ),
     fileIndex,
     commandLoader,
     configFile,
@@ -104,62 +170,10 @@ export async function activate(context: vscode.ExtensionContext) {
   });
   ref.controller = controller;
   await controller.init();
-  const viewProvider = new SovranViewProvider(context.extensionUri, controller, logger);
-  ref.view = viewProvider;
-  // Registers the serializer, so chat tabs from the last session are restored with their chat.
   const panels = new SovranPanels(context.extensionUri, controller, logger);
   ref.panels = panels;
-
-  const command = (id: string, fn: (...args: unknown[]) => unknown) =>
-    vscode.commands.registerCommand(id, fn);
-  context.subscriptions.push(
-    logger,
-    diff,
-    mirror,
-    fileIndex,
-    commandLoader,
-    configFile,
-    statusBar,
-    controller,
-    panels,
-    vscode.window.registerWebviewViewProvider(SovranViewProvider.viewId, viewProvider),
-    command('sovran.focus', () => controller.focus()),
-    command('sovran.newSession', async () => {
-      await reveal();
-      controller.newSession();
-    }),
-    command('sovran.newChatInEditor', () => controller.openInEditor()),
-    command('sovran.openInEditor', () => controller.moveSidebarToEditor()),
-    // Editor title buttons pass the diff's URI; the command palette and the keybinding pass nothing.
-    command('sovran.acceptProposal', (uri) => controller.decideProposal(true, uri)),
-    command('sovran.rejectProposal', (uri) => controller.decideProposal(false, uri)),
-    command('sovran.showHistory', async () => {
-      controller.showView('history');
-      await reveal();
-    }),
-    command('sovran.manageProviders', async () => {
-      controller.showView('providers');
-      await reveal();
-    }),
-    command('sovran.openSettings', async () => {
-      controller.showView('settings');
-      await reveal();
-    }),
-    command('sovran.openConfigFile', () => controller.handle({ type: 'openConfigFile' })),
-    command('sovran.setApprovalMode', () => controller.pickApprovalMode()),
-    command('sovran.selectModel', () => controller.pickModel()),
-    command('sovran.setApiKey', () => controller.promptApiKey()),
-    command('sovran.toggleMode', () => controller.toggleMode()),
-    command('sovran.attachFiles', async () => {
-      await controller.focus();
-      await controller.attachFiles();
-    }),
-    command('sovran.askAboutSelection', () => controller.askAboutSelection()),
-    command('sovran.cancelRun', () => controller.cancel()),
-    command('sovran.compact', () => controller.compactNow()),
-    command('sovran.showLogs', () => logger.show()),
-  );
-  logger.info(`Sovran activated (VS Code ${vscode.version}).`);
+  context.subscriptions.push(diff, mirror, fileIndex, commandLoader, configFile, statusBar, controller);
+  return { controller, panels };
 }
 
 export async function deactivate() {

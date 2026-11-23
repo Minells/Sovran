@@ -1605,7 +1605,8 @@ kbd {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 0.8fr) 24px;
   grid-template-areas:
     'id id id remove'
-    'context output tools tools';
+    'context output tools tools'
+    'fim fim fim fim';
   gap: 2px var(--sv-s1);
   /* Labels may wrap at narrow widths; the inputs stay on one line. */
   align-items: end;
@@ -1638,6 +1639,10 @@ kbd {
 
 .sv-model-row__field:nth-of-type(3) {
   grid-area: tools;
+}
+
+.sv-model-row__field:nth-of-type(4) {
+  grid-area: fim;
 }
 
 .sv-field .sv-model-row__field > span {
@@ -1851,6 +1856,19 @@ body.vscode-high-contrast .sv-code {
   margin-top: var(--sv-s2);
   font-size: var(--sv-text-sm);
   color: var(--sv-fg);
+}
+
+.sv-task-summary {
+  margin-top: var(--sv-s2);
+}
+
+.sv-task-summary summary,
+.sv-task-effect pre {
+  overflow-wrap: anywhere;
+}
+
+.sv-task-effect pre {
+  white-space: pre-wrap;
 }
 
 .sv-meter {

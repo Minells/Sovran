@@ -2,7 +2,7 @@ import type { z } from 'zod';
 import type { DocumentReader } from '../documents/reader';
 import type { ApprovalDetail, ProcessPort, WorkspacePort } from '../ports';
 import type { ToolRisk } from '../permissions/policy';
-import type { ToolDisplay } from '../sessions/model';
+import type { ContextSource, ToolDisplay } from '../sessions/model';
 import type { WebFetchPort } from '../web/types';
 
 export interface ToolSettings {
@@ -44,6 +44,7 @@ export interface ToolResult {
   isError?: boolean;
   summary?: string;
   display?: ToolDisplay;
+  contextSources?: ContextSource[];
 }
 
 export interface ToolDefinition<A = unknown> {
