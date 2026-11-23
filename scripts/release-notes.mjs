@@ -20,10 +20,14 @@ const root = new URL('../', import.meta.url);
 const repository = 'https://github.com/Minells/sovran';
 const curated = new URL(`docs/releases/v${version}.md`, root);
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function changelogSection() {
   const lines = readFileSync(new URL('CHANGELOG.md', root), 'utf8').split(/\r?\n/);
   const start = lines.findIndex((line) =>
-    new RegExp(`^## \\[?${version.replaceAll('.', '\\.')}\\]?(?:\\s|$)`).test(line),
+    new RegExp(`^## \\[?${escapeRegExp(version)}\\]?(?:\\s|$)`).test(line),
   );
   if (start < 0) return undefined;
   const end = lines.findIndex((line, index) => index > start && /^## /.test(line));
