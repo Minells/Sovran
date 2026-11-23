@@ -2,7 +2,7 @@
   "name": "sovran",
   "displayName": "Sovran",
   "description": "Own your intelligence. An agentic AI coding assistant for the models you run: local, self-hosted or behind your company gateway. No backend, no telemetry.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "minells",
   "license": "MIT",
   "private": true,

@@ -31,7 +31,7 @@
   <img src="media/screenshots/editor-tab-dark.png" width="850" alt="A Sovran chat in an editor tab: the agent proposes a change to src/auth/session.ts, shown as an inline diff with Reject and Apply above the chat input">
 </p>
 
-> **0.1.0 is the first public pre-release.** Download the VSIX from
+> **Sovran is available as a public pre-release.** Download the VSIX from
 > [GitHub Releases](https://github.com/Minells/sovran/releases). The VS Code Marketplace listing is not published yet,
 > and compatibility testing on real model servers is still in progress. Reports from your setup are very welcome.
 
@@ -85,7 +85,7 @@ task. The code and context you attach are sent **only to the provider you choose
 and install it:
 
 ```bash
-code --install-extension sovran-0.1.0.vsix
+code --install-extension sovran-0.1.1.vsix
 ```
 
 Or use **Extensions → … → Install from VSIX…**. Each release lists the file's SHA-256 so you can check the download.
