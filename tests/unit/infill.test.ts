@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { cleanInfill, InfillRequests, infillEndpoint, requestInfill } from '../../src/core/providers/infill';
+import { cleanInfill, InfillRequests, requestInfill } from '../../src/core/providers/infill';
+import { resolveInfillModel } from '../../src/core/providers/modelSelection';
+import type { ProviderConfig } from '../../src/core/providers/types';
+import { infillEndpoint } from '../../src/shared/endpoints';
 
 const fresh = () => new AbortController().signal;
 const current = () => true;
@@ -12,6 +15,31 @@ function deferred() {
 }
 
 describe('inline infill', () => {
+  it('follows the configured Act model by default and preserves a compatible dedicated override', () => {
+    const providers: ProviderConfig[] = [
+      {
+        id: 'local',
+        name: 'Local',
+        baseUrl: 'http://localhost:8080/v1',
+        models: [
+          { id: 'chat' },
+          { id: 'org/coder', fim: 'llama.cpp-infill' },
+          { id: 'other', fim: 'llama.cpp-infill' },
+        ],
+      },
+    ];
+    expect(resolveInfillModel(providers, '', 'local/org/coder')?.model.id).toBe('org/coder');
+    expect(resolveInfillModel(providers, '', 'local/other')?.model.id).toBe('other');
+    expect(resolveInfillModel(providers, 'local/org/coder', 'local/other')?.model.id).toBe('org/coder');
+    expect(resolveInfillModel(providers, '', 'local/chat')).toBeUndefined();
+    expect(resolveInfillModel(providers, '', '')).toBeUndefined();
+    expect(resolveInfillModel(providers, 'local/removed', 'local/org/coder')).toBeUndefined();
+    expect(resolveInfillModel(providers, 'malformed', 'local/org/coder')).toBeUndefined();
+    expect(
+      resolveInfillModel([{ ...providers[0]!, baseUrl: 'http://localhost:8080/api' }], '', 'local/org/coder'),
+    ).toBeUndefined();
+  });
+
   it('uses the same-origin native route, bounded raw FIM and configured authentication', async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()

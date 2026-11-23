@@ -1,4 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises';
+import { infillEndpoint } from '../../shared/endpoints';
 import { providerHeaders, type OpenAICompatibleOptions } from './openaiCompatible';
 
 export const INFILL_LIMITS = {
@@ -10,21 +11,6 @@ export const INFILL_LIMITS = {
 } as const;
 const MAX_RESPONSE_BYTES = 64 * 1024;
 const FIM_MARKER = /<\|(?:fim_(?:prefix|suffix|middle|pad)|endoftext|im_end|repo_name|file_sep)\|>/g;
-
-/** llama.cpp's native infill is a sibling of its OpenAI-compatible /v1 base. */
-export function infillEndpoint(baseUrl: string): URL | undefined {
-  try {
-    const url = new URL(baseUrl);
-    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash)
-      return;
-    const base = url.pathname.replace(/\/+$/, '');
-    if (!base.endsWith('/v1')) return;
-    url.pathname = `${base.slice(0, -3)}/infill`;
-    return url;
-  } catch {
-    return undefined;
-  }
-}
 
 async function boundedJson(response: Response): Promise<unknown> {
   const reader = response.body?.getReader();

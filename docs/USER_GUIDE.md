@@ -360,8 +360,10 @@ generously, since the reasoning shares that budget.
 
 ### Inline autocomplete
 
-Inline autocomplete starts off. It sends a short prefix and suffix from the active editor to the selected
-endpoint, which can be local or remote. Requests use their own model and leave no entry in your chats.
+Inline autocomplete starts off. Its **Autocomplete model** follows the **Act model** by default when that model
+has a supported fill-in-the-middle (FIM) transport. You can also select a dedicated FIM model.
+Autocomplete sends a short prefix and suffix from the active editor to the effective model endpoint, local or
+remote. Completion requests leave no entry in your chats.
 Sovran skips protected and excluded files and disables inline autocomplete in Restricted Mode. In SSH, WSL
 and containers, `localhost` refers to the extension host.
 
@@ -377,8 +379,9 @@ llama-server --model /path/to/qwen2.5-coder-1.5b-q8_0.gguf \
 1. Under **Manage providers**, add or edit the provider. Use `http://127.0.0.1:8012/v1` as its base URL and
    **No key** for this server. Add model ID `qwen-fim` and select **llama.cpp /infill** as its autocomplete transport.
    In `config.yaml`, the equivalent model entry is `{ id: qwen-fim, fim: llama.cpp-infill }`.
-2. Under **Settings → Models → Inline autocomplete**, select `qwen-fim` as the **Autocomplete model** and
-   enable inline autocomplete. Keep `editor.inlineSuggest.enabled` on in VS Code.
+2. Under **Settings → Models → Model options**, enable inline autocomplete. Keep **Same as Act model** if your
+   Act model has a supported FIM transport, or select `qwen-fim` as the dedicated model. Keep
+   `editor.inlineSuggest.enabled` on in VS Code.
 3. Open a source file in a trusted folder, place the cursor in a gap in the code and run
    **Sovran: Trigger Inline Completion**. Accept the ghost text with VS Code's inline suggestion keybinding
    (normally Tab). Try the same command in a protected file and confirm the server sees no request.
@@ -715,8 +718,8 @@ request it again with the current tools. Plan mode remains read-only.
 | `sovran.providers` | `[]` | Model endpoints. User scope only |
 | `sovran.defaultModel` | `""` | `providerId/modelId` for new chats (the Act model) |
 | `sovran.planModel` | `""` | Model for Plan mode. Empty means the same as Act |
-| `sovran.autocomplete.enabled` | `false` | Enable ghost-text suggestions after an explicit model selection. Sends a bounded active-file prefix and suffix to the configured endpoint |
-| `sovran.autocomplete.model` | `""` | Dedicated `providerId/modelId` with a supported autocomplete transport |
+| `sovran.autocomplete.enabled` | `false` | Enable ghost-text suggestions with a compatible model. Sends a bounded active-file prefix and suffix to its endpoint |
+| `sovran.autocomplete.model` | `""` | Follow the Act model when empty, or set a dedicated `providerId/modelId` with a supported FIM transport |
 | `sovran.configFile.enabled` | `true` | Use `~/.sovran/config.yaml` when it exists, kept in sync with `sovran.providers`. User scope only |
 | `sovran.agent.maxIterations` | `25` | Maximum model round-trips per request |
 | `sovran.tools.loading` | `auto` | `auto` sends the core tools and loads the others when a chat needs them ([details](#tools-loaded-when-needed)); `all` sends every tool with every request. User scope only |

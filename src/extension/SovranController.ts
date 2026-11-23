@@ -50,7 +50,7 @@ import type {
 import { capabilityKey, resolveVision, type CapabilityStore } from '../core/providers/capabilities';
 import { ProviderError, errorFromException } from '../core/providers/errors';
 import { OpenAICompatibleProvider } from '../core/providers/openaiCompatible';
-import { infillEndpoint } from '../core/providers/infill';
+import { parseModelReference, resolveInfillModel, selectActModel } from '../core/providers/modelSelection';
 import { normalizeApiKey, probeConnection } from '../core/providers/connection';
 import type { ModelInfo, ServerLimits } from '../core/providers/limits';
 import type { ModelConfig, ProviderConfig } from '../core/providers/types';
@@ -377,11 +377,7 @@ export class SovranController implements vscode.Disposable {
     this.configFileView.path = this.deps.configFile.displayPath;
     await this.reloadProviders();
     await this.reloadConfigFile('startup');
-    const def = readDefaultModel();
-    const [pid, ...rest] = def.split('/');
-    this.selected = this.validSelection(
-      pid && rest.length ? { providerId: pid, modelId: rest.join('/') } : null,
-    );
+    this.selected = this.validSelection(parseModelReference(readDefaultModel()));
     this.planModel = this.parseModelRef(readPlanModel());
     this.titleModel = this.parseModelRef(readTitleModel());
     this.commands = await this.deps.commandLoader.load().catch(() => mergeCommands([]));
@@ -421,7 +417,9 @@ export class SovranController implements vscode.Disposable {
           void this.reloadConfigFile(readConfigFileEnabled() ? 'enable' : 'startup');
         // Providers or model choices changed in Settings (the panel, the composer or settings.json): mirror them.
         else if (this.syncing) void this.queueConfig(() => this.pushSettingsToFile());
-        this.selected = this.validSelection(this.selected);
+        this.selected = this.validSelection(
+          e.affectsConfiguration('sovran.defaultModel') ? parseModelReference(readDefaultModel()) : this.selected,
+        );
         this.planModel = this.parseModelRef(readPlanModel());
         this.titleModel = this.parseModelRef(readTitleModel());
         this.updateStatusBar();
@@ -434,7 +432,7 @@ export class SovranController implements vscode.Disposable {
           selected: this.selected,
           planModel: this.planModel,
           titleModel: this.titleModel,
-          autocompleteModel: this.autocompleteSelection(),
+          autocompleteModel: readAutocompleteModel(),
           settings: readSettingsView(this.settings),
         });
         this.patchContexts();
@@ -774,7 +772,7 @@ export class SovranController implements vscode.Disposable {
       grants: { edits: this.grantsFor(session.id).edits },
       planModel: this.planModel,
       titleModel: this.titleModel,
-      autocompleteModel: this.autocompleteSelection(),
+      autocompleteModel: readAutocompleteModel(),
       usage: this.usageView(session),
       compaction: this.compactionView(session),
       commands: this.commandViews(),
@@ -1766,12 +1764,13 @@ export class SovranController implements vscode.Disposable {
     if (pick) await this.setApprovalMode(pick.value);
   }
 
-  /** Sets the Act, Plan or title model explicitly (Settings view). A null Plan or title model means "the chat's model". */
+  /** Sets a model role from Settings. A null optional role uses the corresponding chat model. */
   private async setModel(role: 'act' | 'plan' | 'title' | 'autocomplete', sel: SelectedModel | null) {
     if (role === 'autocomplete') {
-      if (sel && !this.autocompleteCompatible(sel)) return;
-      await writeAutocompleteModel(sel ? `${sel.providerId}/${sel.modelId}` : '');
-      return this.patch({ autocompleteModel: sel });
+      const ref = sel ? `${sel.providerId}/${sel.modelId}` : '';
+      if (sel && !resolveInfillModel(this.providers, ref, '')) return;
+      await writeAutocompleteModel(ref);
+      return this.patch({ autocompleteModel: ref });
     }
     if (role === 'title') {
       if (sel && !this.exists(sel)) return;
@@ -1823,14 +1822,7 @@ export class SovranController implements vscode.Disposable {
   }
 
   private validSelection(sel: SelectedModel | null): SelectedModel | null {
-    const has = (s: SelectedModel | null) =>
-      !!s && !!this.providers.find((p) => p.id === s.providerId)?.models?.some((m) => m.id === s.modelId);
-    if (has(sel)) return sel;
-    for (const p of this.providers) {
-      const m = p.models?.find((model) => !model.fim);
-      if (m) return { providerId: p.id, modelId: m.id };
-    }
-    return null;
+    return selectActModel(this.providers, sel);
   }
 
   private exists(sel: SelectedModel | null): sel is SelectedModel {
@@ -1841,21 +1833,8 @@ export class SovranController implements vscode.Disposable {
   }
 
   private parseModelRef(ref: string): SelectedModel | null {
-    const [providerId, ...rest] = ref.split('/');
-    const sel = providerId && rest.length ? { providerId, modelId: rest.join('/') } : null;
+    const sel = parseModelReference(ref);
     return this.exists(sel) ? sel : null;
-  }
-
-  private autocompleteCompatible(sel: SelectedModel): boolean {
-    const provider = this.providers.find((p) => p.id === sel.providerId);
-    return !!provider && !!infillEndpoint(provider.baseUrl) && provider.models?.some(
-      (model) => model.id === sel.modelId && model.fim === 'llama.cpp-infill',
-    ) === true;
-  }
-
-  private autocompleteSelection(): SelectedModel | null {
-    const selected = this.parseModelRef(readAutocompleteModel());
-    return selected && this.autocompleteCompatible(selected) ? selected : null;
   }
 
   /** The model used for the next request: the Plan model in Plan mode when one is set, else the Act model. */

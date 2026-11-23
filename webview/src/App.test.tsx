@@ -1400,22 +1400,36 @@ describe('settings view', () => {
     expect(screen.getByText(/key sent over http/)).toBeInTheDocument();
   });
 
-  it('enables inline autocomplete separately and limits its role to configured FIM models', async () => {
+  it('defaults autocomplete to the Act model in Model options and allows a dedicated FIM model', async () => {
     const baseline = settingsState();
     const providers = baseline.providers.map((p) => p.id === 'local'
       ? { ...p, models: [...p.models, { id: 'infill', toolMode: 'none' as const, fim: 'llama.cpp-infill' as const }] }
       : p);
     mount(settingsState({ providers }));
-    await userEvent.click(screen.getByText(/^Inline autocomplete$/));
+    await clickButton(/^Model options/);
     const model = screen.getByLabelText('Autocomplete model');
     const enabled = screen.getByLabelText('Enable inline autocomplete');
     expect(enabled).not.toBeChecked();
     expect(model).toHaveValue('');
+    expect(within(model).getByRole('option', { name: 'Same as Act model', selected: true })).toBeInTheDocument();
+    expect(model).toHaveAccessibleDescription(/Choose a FIM model or configure a FIM transport for the Act model/);
     expect(within(model).queryByRole('option', { name: 'coder' })).not.toBeInTheDocument();
     await userEvent.selectOptions(model, within(model).getByRole('option', { name: 'infill' }));
     expect(sent).toContainEqual({ type: 'setModel', role: 'autocomplete', providerId: 'local', modelId: 'infill' });
+    host({ type: 'patch', patch: { autocompleteModel: 'local/infill' } });
+    await userEvent.selectOptions(model, within(model).getByRole('option', { name: 'Same as Act model' }));
+    expect(sent).toContainEqual({ type: 'setModel', role: 'autocomplete' });
     await userEvent.click(enabled);
     expect(sent).toContainEqual({ type: 'updateSetting', setting: { key: 'autocomplete.enabled', value: true } });
+  });
+
+  it('shows when a saved autocomplete override is unavailable', async () => {
+    mount(settingsState({ autocompleteModel: 'removed/coder' }));
+    await clickButton(/^Model options/);
+    const model = screen.getByLabelText('Autocomplete model');
+    expect(within(model).getByRole('option', { name: 'Saved model unavailable', selected: true })).toBeInTheDocument();
+    await userEvent.selectOptions(model, within(model).getByRole('option', { name: 'Same as Act model' }));
+    expect(sent).toContainEqual({ type: 'setModel', role: 'autocomplete' });
   });
 
   it('turns model-generated chat titles on and picks the model that writes them', async () => {

@@ -455,14 +455,14 @@
             "type": "boolean",
             "scope": "application",
             "default": false,
-            "markdownDescription": "Enable inline autocomplete. A limited prefix and suffix from the active document are sent to the selected model endpoint, which can be local or remote. A compatible model must be selected explicitly.",
+            "markdownDescription": "Enable inline autocomplete. The autocomplete model follows Act by default and requires a supported FIM transport. A short prefix and suffix from the active document are sent to the effective model endpoint, which can be local or remote.",
             "order": 5
           },
           "sovran.autocomplete.model": {
             "type": "string",
             "scope": "application",
             "default": "",
-            "description": "Explicit model for inline autocomplete, as providerId/modelId. The model must have a supported FIM transport.",
+            "description": "Model for inline autocomplete, as providerId/modelId. Leave empty to follow the Act model. The effective model must have a supported FIM transport.",
             "order": 6
           }
         }

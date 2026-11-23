@@ -79,7 +79,8 @@ export async function writeMcpServers(servers: readonly McpServerConfig[]): Prom
 }
 
 export function readDefaultModel(): string {
-  return userSetting('defaultModel', '');
+  const value = userSetting<unknown>('defaultModel', '');
+  return typeof value === 'string' ? value : '';
 }
 
 export async function writeDefaultModel(value: string): Promise<void> {

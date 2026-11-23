@@ -1,19 +1,25 @@
 import * as vscode from 'vscode';
 import { automaticFile } from '../core/context/targetedContext';
-import { INFILL_LIMITS, InfillRequests, infillEndpoint, requestInfill } from '../core/providers/infill';
+import { INFILL_LIMITS, InfillRequests, requestInfill } from '../core/providers/infill';
 import { normalizeApiKey } from '../core/providers/connection';
-import { readAutocompleteEnabled, readAutocompleteModel, readProviders, readSettings } from './config';
+import { resolveInfillModel } from '../core/providers/modelSelection';
+import {
+  readAutocompleteEnabled,
+  readAutocompleteModel,
+  readDefaultModel,
+  readProviders,
+  readSettings,
+} from './config';
 import type { VscodeWorkspace } from './adapters/VscodeWorkspace';
 import { excludesWorkspaceFile } from './workspaceFilePolicy';
 import type { HostLogger, ProviderSecrets } from './services';
 
 function selectedProvider() {
-  const [id, ...parts] = readAutocompleteModel().split('/');
-  const model = parts.join('/');
-  if (!id || !model) return undefined;
-  const config = readProviders().find((p) => p.id === id);
-  if (!config || !config.models?.some((m) => m.id === model && m.fim === 'llama.cpp-infill')) return;
-  if (infillEndpoint(config.baseUrl)) return { config, model };
+  return resolveInfillModel(readProviders(), readAutocompleteModel(), readDefaultModel());
+}
+
+function activeModelReference(): string {
+  return readAutocompleteModel() || readDefaultModel();
 }
 
 export class SovranInlineCompletionProvider
@@ -26,6 +32,7 @@ export class SovranInlineCompletionProvider
     | {
         uri: string;
         version: number;
+        modelRef: string;
         position: vscode.Position;
         item: vscode.InlineCompletionItem;
       }
@@ -50,7 +57,11 @@ export class SovranInlineCompletionProvider
         if (e.document === vscode.window.activeTextEditor?.document && e.contentChanges.length) invalidate();
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
-        if (e.affectsConfiguration('sovran.autocomplete') || e.affectsConfiguration('sovran.providers')) {
+        if (
+          e.affectsConfiguration('sovran.autocomplete') ||
+          e.affectsConfiguration('sovran.providers') ||
+          (e.affectsConfiguration('sovran.defaultModel') && !readAutocompleteModel())
+        ) {
           cancel();
           this.registration?.dispose();
           this.registration = undefined;
@@ -73,9 +84,15 @@ export class SovranInlineCompletionProvider
   }
 
   async trigger(): Promise<void> {
-    if (!readAutocompleteEnabled() || !selectedProvider()) {
+    if (!readAutocompleteEnabled()) {
       void vscode.window.showInformationMessage(
-        'Enable inline autocomplete and choose an Autocomplete model in Sovran Settings.',
+        'Enable inline autocomplete in Sovran Settings → Models → Model options.',
+      );
+      return;
+    }
+    if (!selectedProvider()) {
+      void vscode.window.showInformationMessage(
+        'Configure a model with a supported FIM transport in Sovran Settings → Models.',
       );
       return;
     }
@@ -84,6 +101,7 @@ export class SovranInlineCompletionProvider
     this.registerIfEnabled();
     const { document } = editor;
     const version = document.version;
+    const modelRef = activeModelReference();
     const position = editor.selection.active;
     const source = new vscode.CancellationTokenSource();
     try {
@@ -97,10 +115,10 @@ export class SovranInlineCompletionProvider
         },
         source.token,
       );
-      if (!items?.[0]) return;
+      if (!items?.[0] || activeModelReference() !== modelRef) return;
       // The native command can ask several times while setting up its suggestion UI. Reuse this
       // single explicit request while VS Code chooses and renders the item.
-      const manual = { uri: document.uri.toString(), version, position, item: items[0] };
+      const manual = { uri: document.uri.toString(), version, modelRef, position, item: items[0] };
       this.manual = manual;
       try {
         await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
@@ -128,14 +146,14 @@ export class SovranInlineCompletionProvider
       return;
     const version = document.version;
     const uri = document.uri.toString();
-    const modelRef = readAutocompleteModel();
+    const modelRef = activeModelReference();
     const current = () => {
       const editor = vscode.window.activeTextEditor;
       return (
         !token.isCancellationRequested &&
         vscode.workspace.isTrusted &&
         readAutocompleteEnabled() &&
-        readAutocompleteModel() === modelRef &&
+        activeModelReference() === modelRef &&
         editor?.document.uri.toString() === uri &&
         editor.document.version === version &&
         document.version === version &&
@@ -146,7 +164,12 @@ export class SovranInlineCompletionProvider
     };
     if (!current()) return;
     const cached = this.manual;
-    if (cached?.uri === uri && cached.version === version && cached.position.isEqual(position))
+    if (
+      cached?.uri === uri &&
+      cached.version === version &&
+      cached.modelRef === modelRef &&
+      cached.position.isEqual(position)
+    )
       return [cached.item];
     const selected = selectedProvider();
     if (!selected) return;
@@ -179,11 +202,11 @@ export class SovranInlineCompletionProvider
           if (!prefix.trim() && !suffix.trim()) return;
           return requestInfill(
             {
-              config: selected.config,
+              config: selected.provider,
               getApiKey: async () =>
-                normalizeApiKey((await this.secrets.get(selected.config.id)) ?? '').key || undefined,
+                normalizeApiKey((await this.secrets.get(selected.provider.id)) ?? '').key || undefined,
             },
-            { model: selected.model, prefix, suffix },
+            { model: selected.model.id, prefix, suffix },
             signal,
             current,
           );

@@ -107,7 +107,7 @@ exports.run = async function run() {
       assert.strictEqual(scope(key), 'application', `${key} must be application-scoped`);
     }
   });
-  await test('inline autocomplete uses native ghost text acceptance and keeps its requests scoped', async () => {
+  await test('inline autocomplete follows Act by default and uses native ghost text acceptance', async () => {
     const fs = require('node:fs/promises');
     const http = require('node:http');
     const path = require('node:path');
@@ -117,7 +117,7 @@ exports.run = async function run() {
     const global = vscode.ConfigurationTarget.Global;
     const inlineSettings = vscode.workspace.getConfiguration('editor.inlineSuggest');
     const previousInline = inlineSettings.inspect('enabled').globalValue;
-    const snapshot = Object.fromEntries(['providers', 'autocomplete.enabled', 'autocomplete.model']
+    const snapshot = Object.fromEntries(['providers', 'defaultModel', 'autocomplete.enabled', 'autocomplete.model']
       .map((key) => [key, config.inspect(key).globalValue]));
     const requests = [];
     const server = http.createServer(async (req, res) => {
@@ -154,12 +154,16 @@ exports.run = async function run() {
       await new Promise((resolve, reject) => server.once('error', reject).listen(0, '127.0.0.1', resolve));
       await inlineSettings.update('enabled', true, global);
       const mockBase = `http://127.0.0.1:${server.address().port}/v1`;
-      const configure = async (baseUrl, model) => config.update('providers', [{
+      const configure = async (baseUrl, models) => config.update('providers', [{
         id: 'inline-fixture', name: 'Inline fixture', baseUrl, auth: { type: 'none' },
-        models: [{ id: model, fim: 'llama.cpp-infill' }],
+        models,
       }], global);
-      await configure(mockBase, 'test-coder');
-      await config.update('autocomplete.model', 'inline-fixture/test-coder', global);
+      await configure(mockBase, [
+        { id: 'test-coder', fim: 'llama.cpp-infill' },
+        { id: 'other-coder', fim: 'llama.cpp-infill' },
+        { id: 'chat-only' },
+      ]);
+      await config.update('defaultModel', 'inline-fixture/test-coder', global);
       const source = await select('sample.py');
       await vscode.commands.executeCommand('editor.action.inlineSuggest.trigger');
       assert.strictEqual(requests.length, 0, 'Autocomplete made a request while disabled.');
@@ -169,6 +173,20 @@ exports.run = async function run() {
       assert.ok(requests.every(({ url, body }) => url === '/infill' &&
         body.model === 'test-coder' && body.input_prefix === prefix && body.input_suffix === suffix &&
         !body.messages && !body.tools));
+      await config.update('defaultModel', 'inline-fixture/other-coder', global);
+      const beforeSwitch = requests.length;
+      await accept(await select('other-act.py'));
+      assert.ok(requests.slice(beforeSwitch).some(({ body }) => body.model === 'other-coder' && body.input_prefix === prefix));
+
+      await config.update('defaultModel', 'inline-fixture/chat-only', global);
+      await select('chat-only.py');
+      const beforeChatOnly = requests.length;
+      await vscode.commands.executeCommand('sovran.triggerInlineCompletion');
+      assert.strictEqual(requests.length, beforeChatOnly, 'A chat-only Act model received a FIM request.');
+      await config.update('autocomplete.model', 'inline-fixture/test-coder', global);
+      await accept(await select('dedicated.py'));
+      assert.ok(requests.slice(beforeChatOnly).some(({ body }) => body.model === 'test-coder' && body.input_prefix === prefix));
+
       await select('.env', '# PROTECTED\n' + prefix);
       const beforeProtected = requests.length;
       await vscode.commands.executeCommand('sovran.triggerInlineCompletion');
@@ -176,7 +194,7 @@ exports.run = async function run() {
       assert.strictEqual(requests.length, beforeProtected, 'A protected document reached the FIM endpoint.');
 
       if (process.env.SOVRAN_TEST_FIM_BASE) {
-        await configure(process.env.SOVRAN_TEST_FIM_BASE, 'sovran-fim-qa');
+        await configure(process.env.SOVRAN_TEST_FIM_BASE, [{ id: 'sovran-fim-qa', fim: 'llama.cpp-infill' }]);
         await config.update('autocomplete.model', 'inline-fixture/sovran-fim-qa', global);
         await accept(await select('local-model.py'));
         console.log('    ✓ accepted llama.cpp / Qwen2.5-Coder-1.5B Q8_0 inline suggestion');

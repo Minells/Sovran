@@ -7,8 +7,9 @@ import type {
   SettingUpdate,
 } from '../../../src/shared/protocol';
 import { hasShellMetacharacters } from '../../../src/core/permissions/shell';
-import { sendsKeyInsecurely } from '../../../src/shared/endpoints';
+import { sendsKeyInsecurely, supportsInfill } from '../../../src/shared/endpoints';
 import { effectiveLimits, type LimitSource } from '../../../src/core/providers/limits';
+import { parseModelReference } from '../../../src/core/providers/modelSelection';
 import { APPROVAL_OPTIONS } from '../lib/approvals';
 import { useStore } from '../state/store';
 import { getUiState, post, setUiState } from '../vscode';
@@ -135,19 +136,28 @@ const MODEL_ROLE = {
   },
   autocomplete: {
     label: 'Autocomplete model',
-    help: 'Select a model configured with a fill-in-the-middle transport. The endpoint receives a limited prefix and suffix from the active editor. It can be local or remote.',
+    help: 'The local or remote model endpoint receives a short prefix and suffix from the active editor.',
   },
 } as const;
 
 function ModelSelect({ role }: { role: keyof typeof MODEL_ROLE }) {
   const { app } = useStore();
   const id = useId();
-  const selected = { act: app.selected, plan: app.planModel, title: app.titleModel, autocomplete: app.autocompleteModel };
-  const value = selected[role] ?? null;
+  const autocompleteRef = app.autocompleteModel ?? '';
+  const selected = {
+    act: app.selected, plan: app.planModel, title: app.titleModel,
+    autocomplete: parseModelReference(autocompleteRef),
+  };
+  const value = selected[role];
   const choices = app.providers.map((p) => ({
     ...p,
-    models: role === 'autocomplete' ? p.models.filter((m) => m.fim) : p.models,
+    models: role === 'autocomplete' ? p.models.filter((m) => supportsInfill(p.baseUrl, m)) : p.models,
   })).filter((p) => p.models.length);
+  const hasChoice = (selection: SelectedModel | null) => choices.some((p) =>
+    p.id === selection?.providerId && p.models.some((m) => m.id === selection.modelId),
+  );
+  const unavailable = role === 'autocomplete' && !!autocompleteRef && !hasChoice(value);
+  const needsFim = role === 'autocomplete' && !autocompleteRef && !hasChoice(app.selected);
   const onChange = (raw: string) => {
     const [providerId, modelId] = raw.split('\u0000');
     post(
@@ -160,14 +170,14 @@ function ModelSelect({ role }: { role: keyof typeof MODEL_ROLE }) {
       <select
         id={id}
         aria-describedby={`${id}-help`}
-        value={ref(value)}
+        value={unavailable ? 'unavailable' : ref(value)}
         onChange={(e) => onChange(e.target.value)}
-        disabled={!choices.length}
+        disabled={!choices.length && !unavailable}
       >
-        {role === 'plan' ? <option value="">Same as Act model</option> : null}
+        {role === 'plan' || role === 'autocomplete' ? <option value="">Same as Act model</option> : null}
         {role === 'title' ? <option value="">Same as the chat's model</option> : null}
         {role === 'act' && !value ? <option value="">Choose a model</option> : null}
-        {role === 'autocomplete' ? <option value="">Choose a FIM model</option> : null}
+        {unavailable ? <option value="unavailable" disabled>Saved model unavailable</option> : null}
         {choices
           .map((p) => (
             <optgroup key={p.id} label={p.name}>
@@ -179,7 +189,10 @@ function ModelSelect({ role }: { role: keyof typeof MODEL_ROLE }) {
             </optgroup>
           ))}
       </select>
-      <span className="sv-field__help" id={`${id}-help`}>{MODEL_ROLE[role].help}</span>
+      <span className="sv-field__help" id={`${id}-help`}>
+        {MODEL_ROLE[role].help}
+        {needsFim ? ' Choose a FIM model or configure a FIM transport for the Act model under Manage providers.' : null}
+      </span>
       {role === 'plan' && value ? <ModelLimits selection={value} /> : null}
     </div>
   );
@@ -650,18 +663,13 @@ export function SettingsView() {
                 </div>
               ) : null}
               <ModelSelect role="plan" />
-              <ChatTitles />
-            </SettingsDisclosure>
-            <SettingsDisclosure title="Inline autocomplete" status={s.autocompleteEnabled ? 'On' : undefined}>
+              <ModelSelect role="autocomplete" />
               <CheckRow
                 checked={s.autocompleteEnabled ?? false}
                 onChange={toggle('autocomplete.enabled')}
                 label="Enable inline autocomplete"
               />
-              <ModelSelect role="autocomplete" />
-              <Button variant="ghost" onClick={() => post({ type: 'setView', view: 'providers' })}>
-                Add or configure a FIM model
-              </Button>
+              <ChatTitles />
             </SettingsDisclosure>
             <SettingsDisclosure
               title="Configuration file"

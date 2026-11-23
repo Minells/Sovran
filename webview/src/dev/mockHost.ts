@@ -1052,8 +1052,9 @@ onPost((m) => {
     case 'setModel': {
       const sel = m.providerId && m.modelId ? { providerId: m.providerId, modelId: m.modelId } : null;
       if (m.role === 'autocomplete') {
-        state = { ...state, autocompleteModel: sel };
-        return send({ type: 'patch', patch: { autocompleteModel: sel } });
+        const autocompleteModel = sel ? `${sel.providerId}/${sel.modelId}` : '';
+        state = { ...state, autocompleteModel };
+        return send({ type: 'patch', patch: { autocompleteModel } });
       }
       state =
         m.role === 'plan'

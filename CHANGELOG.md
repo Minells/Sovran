@@ -11,7 +11,8 @@ pre-releases and even minor versions are stable releases.
   Git diffs. The transcript shows the file and line excerpts included in the last model request.
 - Task summaries with checkpointed diffs and observed verification outcomes. Resume keeps the transcript and asks
   again before executing actions with side effects after an interruption.
-- Optional inline autocomplete through VS Code with a separate model role. The first FIM transport supports
+- Optional inline autocomplete through VS Code. Its model follows Act by default and can be overridden under
+  **Settings → Models → Model options**. The first FIM transport supports
   llama.cpp `/infill` with Qwen2.5-Coder-1.5B base GGUF.
 
 ### Fixed

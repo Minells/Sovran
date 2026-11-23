@@ -310,7 +310,8 @@ export interface AppState {
   planModel: SelectedModel | null;
   /** Model that names new chats when titles are generated; null means "the chat's model". */
   titleModel: SelectedModel | null;
-  autocompleteModel?: SelectedModel | null;
+  /** Configured providerId/modelId override. An empty string follows the Act model. */
+  autocompleteModel?: string;
   mode: AgentMode;
   /** How much Act mode may do without asking, for this window. */
   approvalMode: ApprovalMode;

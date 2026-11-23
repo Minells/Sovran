@@ -98,7 +98,8 @@ A linked worktree's ordinary `.git` file can reference its administrative Git di
 
 ## Inline autocomplete and task recovery
 
-Inline autocomplete uses the explicitly selected user-scoped provider. It sends a bounded prefix and suffix from one
+Inline autocomplete uses the user-scoped Act model by default or an explicitly selected override. It requires a
+supported fill-in-the-middle transport and sends a bounded prefix and suffix from one
 active text document. The host checks workspace trust, real paths, protected paths and excluded files before sending.
 The request does not enter the chat, use tools or follow redirects. Autocomplete starts disabled.
 
